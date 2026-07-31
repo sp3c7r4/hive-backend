@@ -1,0 +1,6 @@
+{
+	"watch": ["src", "app", "package.json", ".env.development"],
+	"ext": "ts,json",
+	"ignore": ["node_modules", "dist", "**/*.test.ts"],
+	"exec": "node --trace-warnings --import tsx app/server.ts"
+}

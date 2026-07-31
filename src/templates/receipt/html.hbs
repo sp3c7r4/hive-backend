@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Receipt {{receiptNumber}}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    font-size: 12px;
+    padding: 48px 56px;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .header-left h1 {
+    font-size: 30px;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin: 0 0 18px 0;
+  }
+  .business-name {
+    font-weight: 700;
+    font-size: 12px;
+    margin: 0 0 3px 0;
+  }
+  .business-detail {
+    color: #666666;
+    font-size: 11px;
+    margin: 0 0 3px 0;
+  }
+  .header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+  .logo-wrap {
+    width: 110px;
+    height: 64px;
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+    background: #fafafa;
+    border: 1px solid #eeeeee;
+  }
+  .logo-wrap img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .meta-row {
+    font-size: 11px;
+    margin: 0 0 3px 0;
+  }
+  .meta-label {
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  .divider {
+    border-top: 1px solid #e3e3e3;
+    margin: 24px 0;
+  }
+
+  /* ---- Customer ---- */
+  .section-title {
+    font-weight: 700;
+    font-size: 12px;
+    margin: 0 0 10px 0;
+  }
+  .customer-name {
+    font-weight: 700;
+    font-size: 12px;
+    margin: 0 0 3px 0;
+  }
+  .customer-address {
+    color: #666666;
+    font-size: 11px;
+    margin: 0;
+  }
+
+  /* ---- Table ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 28px;
+  }
+  thead tr {
+    background: #f2f2f2;
+  }
+  th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 11px 12px;
+  }
+  th.col-num, td.col-num {
+    text-align: center;
+    width: 36px;
+  }
+  th.col-qty, td.col-qty {
+    text-align: center;
+    width: 90px;
+  }
+  th.col-price, td.col-price,
+  th.col-total, td.col-total {
+    text-align: right;
+    width: 110px;
+  }
+  td {
+    padding: 11px 12px;
+    font-size: 11px;
+    border-bottom: 1px solid #ececec;
+  }
+
+  /* ---- Summary ---- */
+  .summary {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 22px;
+  }
+  .note-block {
+    max-width: 260px;
+  }
+  .note-label {
+    font-weight: 700;
+    font-size: 12px;
+    margin: 0 0 5px 0;
+  }
+  .note-text {
+    color: #666666;
+    font-size: 11px;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+  .totals {
+    width: 230px;
+    flex-shrink: 0;
+  }
+  .totals-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 4px 2px;
+  }
+  .totals-row .label {
+    font-weight: 700;
+  }
+  .grand-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1a1a1a;
+    color: #ffffff;
+    padding: 11px 14px;
+    border-radius: 6px;
+    margin-top: 8px;
+    font-weight: 700;
+    font-size: 13px;
+  }
+
+  .footer {
+    text-align: center;
+    font-weight: 700;
+    font-size: 12px;
+    margin-top: 64px;
+  }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <h1>RECEIPT</h1>
+      <p class="business-name">{{business.name}}</p>
+      {{#if business.email}}<p class="business-detail">{{business.email}}</p>{{/if}}
+      {{#if business.address}}<p class="business-detail">{{business.address}}</p>{{/if}}
+    </div>
+    <div class="header-right">
+      <div class="logo-wrap">
+        <img src="{{logoUrl}}" alt="{{business.name}} logo" />
+      </div>
+      <p class="meta-row"><span class="meta-label">Receipt #:</span>#{{receiptNumber}}</p>
+      <p class="meta-row"><span class="meta-label">Receipt Date:</span>{{receiptDate}}</p>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <p class="section-title">Customer Details</p>
+  <p class="customer-name">{{customer.name}}</p>
+  {{#if customer.address}}<p class="customer-address">{{customer.address}}</p>{{/if}}
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-num">No.</th>
+        <th>Description</th>
+        <th class="col-qty">Quantity</th>
+        <th class="col-price">Unit Price</th>
+        <th class="col-total">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each products}}
+      <tr>
+        <td class="col-num">{{index}}</td>
+        <td>{{description}}</td>
+        <td class="col-qty">{{quantity}}</td>
+        <td class="col-price">{{../currencySymbol}}{{unitPrice}}</td>
+        <td class="col-total">{{../currencySymbol}}{{total}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <div class="summary">
+    {{#if note}}
+    <div class="note-block">
+      <p class="note-label">Note:</p>
+      <p class="note-text">{{note}}</p>
+    </div>
+    {{else}}
+    <div class="note-block"></div>
+    {{/if}}
+
+    <div class="totals">
+      <div class="totals-row">
+        <span class="label">Sub Total</span>
+        <span>{{currencySymbol}}{{subTotal}}</span>
+      </div>
+      <div class="totals-row">
+        <span class="label">Tax</span>
+        <span>{{currencySymbol}}{{tax}}</span>
+      </div>
+      <div class="grand-total">
+        <span>Total</span>
+        <span>{{currencySymbol}}{{total}}</span>
+      </div>
+    </div>
+  </div>
+
+  <p class="footer">Thank you for shopping with us!</p>
+
+</body>
+</html>

@@ -1,0 +1,47 @@
+name: hive
+services:
+  database:
+    container_name: hive-db
+    image: postgres:18-alpine
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=hive
+      - POSTGRES_PASSWORD=spectra
+    volumes:
+      - hive-db:/var/lib/postgresql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  cache:
+    container_name: hive-cache
+    image: redis:8.4-alpine
+    ports:
+      - "6382:6379"
+    volumes:
+      - hive-cache:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # @info - This is for developemnt only to expose our backend to the web
+  edge-endpoint:
+    container_name: hive-edge-endpoint
+    image: cloudflare/cloudflared:1895-8679787525ed
+    command: tunnel --no-autoupdate --url http://host.docker.internal:5000
+    profiles:
+      - dev
+
+volumes:
+  hive-db:
+  hive-cache:
