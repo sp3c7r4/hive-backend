@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import { BaseWorkerService } from "@/bases";
+import { IdempotentWorkerService } from "@/bases";
 import { QueueNames } from "@/enums";
 import { EmailService } from "@/services/mail.service";
 import { logger } from "@/utils";
@@ -16,10 +16,10 @@ interface EmailJobData {
 	template: string;
 	locals: Record<string, any>;
 	identifier?: string;
-	idempotencyKey: string;
+	idempotencyKey?: string;
 }
 
-export class EmailWorkerService extends BaseWorkerService<EmailJobData> {
+export class EmailWorkerService extends IdempotentWorkerService<EmailJobData> {
 	private static instance: EmailWorkerService;
 
 	private readonly emailService: EmailService;
@@ -40,7 +40,7 @@ export class EmailWorkerService extends BaseWorkerService<EmailJobData> {
 		this.emailService = EmailService.getInstance();
 	}
 
-	protected async process(job: Job<EmailJobData>) {
+	protected async idempotentProcess(job: Job<EmailJobData>) {
 		try {
 			logger.info(`Processing email job ${job.id}`, {
 				jobName: job.name,

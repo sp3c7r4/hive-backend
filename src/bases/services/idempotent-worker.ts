@@ -12,7 +12,7 @@ import { CacheService } from "@/services/cache.service";
 import { BaseWorkerService, type BaseWorkerOptions } from "./base.worker.service";
 
 export abstract class IdempotentWorkerService<
-	T extends { idempotencyKey: string },
+	T extends { idempotencyKey?: string } = any,
 > extends BaseWorkerService<T> {
 	private readonly cache: CacheService;
 
@@ -25,7 +25,9 @@ export abstract class IdempotentWorkerService<
 	protected abstract idempotentProcess(job: Job<T>): Promise<void>;
 
 	protected override async process(job: Job<T>): Promise<void> {
-		const lockKey = `job:lock:${job.data.idempotencyKey}`;
+		/** @info - Fall back to job.id if no idempotency key provided */
+		const key = job.data.idempotencyKey ?? job.id ?? `unknown:${Date.now()}`;
+		const lockKey = `job:lock:${key}`;
 
 		const acquired = await this.cache.redis.set(
 			lockKey,
@@ -40,7 +42,7 @@ export abstract class IdempotentWorkerService<
 				JSON.stringify({
 					event: "job_skipped_duplicate",
 					jobId: job.id,
-					idempotencyKey: job.data.idempotencyKey,
+					idempotencyKey: key,
 					timestamp: new Date().toISOString(),
 				}),
 			);

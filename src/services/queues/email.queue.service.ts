@@ -13,7 +13,7 @@ export interface EmailJobData<L> {
   template: EmailTemplates;
   locals: L;
   identifier?: string;
-  idempotencyKey: string;
+  idempotencyKey?: string;
 }
 
 export class EmailQueueService extends BaseQueueService<

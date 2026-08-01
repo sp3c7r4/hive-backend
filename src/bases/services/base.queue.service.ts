@@ -1,4 +1,5 @@
 import { type JobsOptions, Queue, QueueEvents } from "bullmq";
+import { randomUUID } from "node:crypto";
 import { TTL } from "@/constants";
 import { CacheService } from "@/services/cache.service";
 import { logger } from "@/utils";
@@ -9,7 +10,7 @@ interface BaseQueueOptions {
 	args?: JobsOptions;
 }
 
-export class BaseQueueService<T extends { idempotencyKey: string }> {
+export class BaseQueueService<T extends { idempotencyKey?: string }> {
 	/** @info - Services */
 	private readonly cacheService: CacheService;
 
@@ -50,7 +51,10 @@ export class BaseQueueService<T extends { idempotencyKey: string }> {
 	};
 
 	add = async (jobName: string, data: T) => {
-		await this.queue.add(jobName, data, {
+		/** @info - Generate idempotency key if caller didn't provide one */
+		const key = data.idempotencyKey ?? `${jobName}:${randomUUID()}`;
+
+		await this.queue.add(jobName, { ...data, idempotencyKey: key }, {
 			attempts: 3,
 			backoff: {
 				type: "exponential",
@@ -62,8 +66,8 @@ export class BaseQueueService<T extends { idempotencyKey: string }> {
 			},
 			removeOnFail: {
 				age: TTL.IN_24_HOURS,
-      },
-      deduplication: { id: data.idempotencyKey },
+			},
+			deduplication: { id: key },
 			...this.jobOptions,
 		});
 	};

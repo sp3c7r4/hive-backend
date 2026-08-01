@@ -1,10 +1,10 @@
 import type { Job } from "bullmq";
-import { BaseWorkerService } from "@/bases";
+import { IdempotentWorkerService } from "@/bases";
 import { QueueNames, type GenerateReceiptOptions } from "@/enums";
 import { logger } from "@/utils";
 import { ReceiptGenerator } from "../receipt.generator.service";
 
-export class ReceiptWorkerService extends BaseWorkerService<GenerateReceiptOptions> {
+export class ReceiptWorkerService extends IdempotentWorkerService<GenerateReceiptOptions & { idempotencyKey?: string }> {
 	private static instance: ReceiptWorkerService;
 
 	/** @info - Services */
@@ -26,7 +26,7 @@ export class ReceiptWorkerService extends BaseWorkerService<GenerateReceiptOptio
 		this.receiptGeneratorService = ReceiptGenerator.getInstance();
 	}
 
-	protected async process(job: Job<GenerateReceiptOptions>) {
+	protected async idempotentProcess(job: Job<GenerateReceiptOptions>) {
 		try {
 			logger.info(`Processing receipt job ${job.id}-[${job.name}] `, {
 				data: job.data,
