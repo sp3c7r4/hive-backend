@@ -1,0 +1,8 @@
+# Global system prompt file – applies to all providers in this project
+systemPromptFile: system.md # or .pi/system.md, both work
+
+providers:
+  - provider: deepseek
+    model: deepseek-v4-pro
+    # API key is read from the environment variable DEEPSEEK_API_KEY automatically
+    # apiKey: sk-...    # only if you need to hardcode it (not recommended)
