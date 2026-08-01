@@ -1,8 +1,9 @@
-import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { QuizMessages } from "./quiz.message";
 import { QuizQuestionRepository, QuizAttemptRepository } from "./quiz.repository";
+import type { NewQuizQuestion } from "./assessment.model";
 
 interface QuizSubmission {
 	questionId: number;
@@ -26,6 +27,8 @@ export class QuizService {
 		this.questions = QuizQuestionRepository.getInstance();
 		this.attempts = QuizAttemptRepository.getInstance();
 	}
+
+	/* Student: submit quiz */
 
 	submit = async (
 		authData: IAuthData,
@@ -58,7 +61,6 @@ export class QuizService {
 			const isCorrect = sub.selectedAnswer === question.correctAnswer;
 			const points = isCorrect ? question.points : 0;
 
-			/* Upsert: update if exists, create if new */
 			const existing = await this.attempts.findByUserAndQuestion(
 				authData.id,
 				sub.questionId,
@@ -105,7 +107,35 @@ export class QuizService {
 		};
 	};
 
+	/* Student: view attempts */
+
 	getAttempts = async (authData: IAuthData, lessonId: number) => {
 		return this.attempts.findByUserAndLesson(authData.id, lessonId);
+	};
+
+	/* Instructor: Quiz Builder CRUD */
+
+	listQuestions = async (lessonId: number) => {
+		return this.questions.findByLesson(lessonId);
+	};
+
+	createQuestion = async (data: NewQuizQuestion) => {
+		return this.questions.create(data as any);
+	};
+
+	getQuestion = async (id: number) => {
+		const question = await this.questions.findById(id);
+		return question ?? throwNotFoundError(QuizMessages.NOT_FOUND);
+	};
+
+	updateQuestion = async (id: number, data: Partial<NewQuizQuestion>) => {
+		const question = await this.questions.update(id, data as any);
+		return question ?? throwNotFoundError(QuizMessages.NOT_FOUND);
+	};
+
+	deleteQuestion = async (id: number): Promise<void> => {
+		const question = await this.questions.delete(id);
+		if (!question) throwNotFoundError(QuizMessages.NOT_FOUND);
+		this.log.info(`Quiz question ${id} deleted`);
 	};
 }

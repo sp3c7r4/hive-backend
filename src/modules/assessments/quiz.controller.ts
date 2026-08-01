@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { QuizService } from "./quiz.service";
 
@@ -14,6 +15,8 @@ export class QuizController {
 	private constructor() {
 		this.service = QuizService.getInstance();
 	}
+
+	/* Student */
 
 	submit = async (c: Context) => {
 		const authData = c.get("authData");
@@ -35,6 +38,62 @@ export class QuizController {
 		return sendSuccessResponse(c, {
 			message: "Quiz attempts fetched successfully",
 			data,
+		});
+	};
+
+	/* Instructor: Quiz Builder */
+
+	listQuestions = async (c: Context) => {
+		const lessonId = c.req.param("lessonId");
+		const data = await this.service.listQuestions(
+			lessonId as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Quiz questions fetched successfully",
+			data,
+		});
+	};
+
+	createQuestion = async (c: Context) => {
+		const lessonId = c.req.param("lessonId");
+		const data = await this.service.createQuestion({
+			...((await c.req.json()) as any),
+			lessonId: lessonId as unknown as number,
+		});
+		return sendSuccessResponse(c, {
+			message: "Quiz question created successfully",
+			data,
+		}, StatusCodes.CREATED);
+	};
+
+	getQuestion = async (c: Context) => {
+		const questionId = c.req.param("questionId");
+		const data = await this.service.getQuestion(
+			questionId as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Quiz question fetched successfully",
+			data,
+		});
+	};
+
+	updateQuestion = async (c: Context) => {
+		const questionId = c.req.param("questionId");
+		const data = await this.service.updateQuestion(
+			questionId as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Quiz question updated successfully",
+			data,
+		});
+	};
+
+	deleteQuestion = async (c: Context) => {
+		const questionId = c.req.param("questionId");
+		await this.service.deleteQuestion(questionId as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Quiz question deleted successfully",
 		});
 	};
 }

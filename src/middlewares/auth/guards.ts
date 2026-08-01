@@ -18,11 +18,26 @@ export const requireEmailVerified = async (c: Context, next: Next) => {
 };
 
 /**
+ * @info - Require userType = instructor. Apply to instructor-only routes.
+ */
+export const requireInstructor = async (c: Context, next: Next) => {
+	const authData = c.get("authData");
+	if (authData?.userType !== "instructor") {
+		return sendErrorResponse(
+			c,
+			{ message: "Instructor access required." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+	await next();
+};
+
+/**
  * @info - Require is_admin = true on an instructor. Apply to admin-only routes.
  */
 export const requireAdmin = async (c: Context, next: Next) => {
 	const authData = c.get("authData");
-	if (authData?.role !== "instructor" || !authData?.isAdmin) {
+	if (authData?.userType !== "instructor" || !authData?.isAdmin) {
 		return sendErrorResponse(
 			c,
 			{ message: "Admin access required." },

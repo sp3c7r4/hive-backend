@@ -53,13 +53,13 @@ export class EnrollmentService {
 		return this.enrollments.findById(id);
 	};
 
-	markLessonComplete = async (
-		authData: IAuthData,
-		enrollmentId: number,
-		lessonId: number,
-	) => {
-		return this.progress.upsertProgress(enrollmentId, lessonId, authData.id);
-	};
+  markLessonComplete = async (
+    authData: IAuthData,
+    enrollmentId: number,
+    lessonId: number,
+  ) => {
+    return this.progress.upsertProgress(enrollmentId, lessonId, authData.id);
+  };
 
 	getLessonProgress = async (enrollmentId: number) => {
 		return this.progress.findByEnrollment(enrollmentId);
