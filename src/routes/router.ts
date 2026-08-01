@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { healthCheck } from "@/helpers";
+import { quizRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
 import { communityRouter } from "@/modules/communities";
 import { courseRouter, moduleRouter } from "@/modules/courses";
@@ -18,6 +19,7 @@ router.route("/communities", communityRouter);
 router.route("/courses", courseRouter);
 router.route("/enrollments", enrollmentRouter);
 router.route("/modules", moduleRouter);
+router.route("/quiz", quizRouter);
 router.route("/test", testRouter);
 router.route("/payment", paymentRouter);
 router.route("/upload", uploadRouter);
