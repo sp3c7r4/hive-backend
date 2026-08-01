@@ -68,6 +68,15 @@ export class AuthController {
 		});
 	};
 
+	me = async (c: Context) => {
+		const authData = c.get("authData");
+		const data = await this.authService.me(authData);
+		return sendSuccessResponse(c, {
+			message: "Authenticated user fetched successfully.",
+			data,
+		});
+	};
+
 	verifyEmail = async (c: Context) => {
 		const data = c.get("authData");
 		console.log(data);

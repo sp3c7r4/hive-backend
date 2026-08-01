@@ -409,4 +409,16 @@ export class AuthService {
 
 		this.invalidateAllTokens(user.id.toString());
 	};
+
+	me = async (authData: IAuthData) => {
+		const role = authData.userType;
+		const { repository } = this.resolveModel(role);
+
+		const user = await repository.findById(Number(authData.id));
+		if (!user) throwNotFoundError("User not found.");
+
+		const { hash: _, password: __, ...sanitized } = user as any;
+
+		return withPresignedUrl<any>(sanitized);
+	};
 }

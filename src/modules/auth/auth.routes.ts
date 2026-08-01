@@ -55,6 +55,8 @@ authRouter.post(
 
 authRouter.use(jwtService.validateToken);
 
+authRouter.get("/me", authController.me);
+
 authRouter.post(
 	"/verify-email",
 	zodEngine.validate.body(verifyEmailSchema),
