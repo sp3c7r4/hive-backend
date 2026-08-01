@@ -1,5 +1,4 @@
 import type { SQL } from "drizzle-orm";
-import type { PopulateOptions } from "mongoose";
 
 export interface PaginateOptions {
 	page?: number;
@@ -36,15 +35,4 @@ export interface CursorPaginatedResult<T> {
 		hasNextPage: boolean;
 		nextCursor: string | number | Date | null;
 	};
-}
-
-export interface QueryBuilderParams<T> {
-	page: number;
-	limit: number;
-	filter: Partial<T>;
-}
-
-export interface QueryBuilder<T> extends QueryBuilderParams<T> {
-	select: string;
-	populate?: PopulateOptions[];
 }

@@ -1,1 +1,1 @@
-../mail.enums
+export * from "./mail.enums";

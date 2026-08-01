@@ -14,7 +14,7 @@ interface MailOptions {
 	replyTo?: string;
 	subject: string;
 	text?: string;
-	html: string;
+	html?: string;
 	attachments?: Attachment[];
 }
 

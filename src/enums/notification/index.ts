@@ -1,1 +1,1 @@
-export * from "./subscriber.enums";
+export * from "./notification.enum";
