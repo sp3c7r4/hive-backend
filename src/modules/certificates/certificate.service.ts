@@ -1,9 +1,16 @@
+import { eq } from "drizzle-orm";
+import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { serviceLogger } from "@/utils";
+import { CertificateMessages } from "./certificate.message";
 import { CertificateRepository } from "./certificate.repository";
 
 export class CertificateService {
-	private static instance: CertificateService;
+	private static instance: CertificateService | null;
 
+	/** @info - Repositories */
 	private readonly repo: CertificateRepository;
+	/** @info - Utilities */
+	private readonly log = serviceLogger("Certificate");
 
 	static getInstance(): CertificateService {
 		if (!this.instance) this.instance = new CertificateService();
@@ -44,7 +51,7 @@ export class CertificateService {
 		} = params;
 
 		if (!allowCertificate) {
-			throw new Error("This course does not offer certificates");
+			throwBadRequestError(CertificateMessages.NO_CERTIFICATE);
 		}
 
 		/** @info - Check if already issued */
@@ -53,18 +60,18 @@ export class CertificateService {
 
 		/** @info - Validate requirements */
 		if (completionPercent < minCompletion) {
-			throw new Error(
-				`Completion ${completionPercent}% is below required ${minCompletion}%`,
+			throwBadRequestError(
+				CertificateMessages.COMPLETION_BELOW(completionPercent, minCompletion),
 			);
 		}
 		if (quizScorePercent < minQuiz) {
-			throw new Error(
-				`Quiz score ${quizScorePercent}% is below required ${minQuiz}%`,
+			throwBadRequestError(
+				CertificateMessages.QUIZ_BELOW(quizScorePercent, minQuiz),
 			);
 		}
 		if (attendancePercent < minAttendance) {
-			throw new Error(
-				`Attendance ${attendancePercent}% is below required ${minAttendance}%`,
+			throwBadRequestError(
+				CertificateMessages.ATTENDANCE_BELOW(attendancePercent, minAttendance),
 			);
 		}
 

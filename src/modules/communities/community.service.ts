@@ -1,11 +1,21 @@
 import { eq } from "drizzle-orm";
+import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { PaginationService } from "@/services/pagination.service";
+import { serviceLogger } from "@/utils";
+import { CommunityMessages } from "./community.message";
+import { communities } from "./community.model";
 import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
 
 export class CommunityService {
-	private static instance: CommunityService;
+	private static instance: CommunityService | null;
 
+	/** @info - Repositories */
 	private readonly repo: CommunityRepository;
+	/** @info - Services */
+	private readonly paginationService = new PaginationService<typeof communities>(communities);
+	/** @info - Utilities */
+	private readonly log = serviceLogger("Community");
 
 	static getInstance(): CommunityService {
 		if (!this.instance) this.instance = new CommunityService();
@@ -18,7 +28,6 @@ export class CommunityService {
 
 	create = async (data: NewCommunity & { ownerId: number }) => {
 		const slug = this._slugify(data.name, data.ownerId);
-
 		return this.repo.create({ ...data, slug } as any);
 	};
 
@@ -27,19 +36,30 @@ export class CommunityService {
 	};
 
 	getBySlug = async (slug: string) => {
-		return this.repo.findOne(eq(this.repo.getModel().slug as any, slug));
+		const community = await this.repo.findOne(
+			eq(this.repo.getModel().slug as any, slug),
+		);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		return community;
 	};
 
-	list = async (page = 1, limit = 20) => {
-		return this.repo.findPaginated(page, limit);
+	list = async (params?: { page?: number; limit?: number }) => {
+		return this.paginationService.paginate({
+			page: params?.page ?? 1,
+			limit: params?.limit ?? 20,
+		});
 	};
 
 	update = async (id: number, data: Partial<NewCommunity>) => {
-		return this.repo.update(id, data as any);
+		const community = await this.repo.update(id, data as any);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		return community;
 	};
 
-	delete = async (id: number) => {
-		return this.repo.softDelete(id);
+	delete = async (id: number): Promise<void> => {
+		const community = await this.repo.softDelete(id);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		this.log.info(`Community ${id} soft-deleted`);
 	};
 
 	private _slugify = (name: string, ownerId: number): string => {

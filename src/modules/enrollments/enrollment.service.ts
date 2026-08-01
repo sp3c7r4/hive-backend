@@ -1,12 +1,18 @@
 import { eq } from "drizzle-orm";
+import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { serviceLogger } from "@/utils";
+import { EnrollmentMessages } from "./enrollment.message";
 import { EnrollmentRepository, LessonProgressRepository } from "./enrollment.repository";
 import type { NewEnrollment } from "./enrollment.model";
 
 export class EnrollmentService {
-	private static instance: EnrollmentService;
+	private static instance: EnrollmentService | null;
 
+	/** @info - Repositories */
 	private readonly enrollments: EnrollmentRepository;
 	private readonly progress: LessonProgressRepository;
+	/** @info - Utilities */
+	private readonly log = serviceLogger("Enrollment");
 
 	static getInstance(): EnrollmentService {
 		if (!this.instance) this.instance = new EnrollmentService();
@@ -24,15 +30,15 @@ export class EnrollmentService {
 			data.userId,
 			data.courseId,
 		);
-		if (existing) {
-			return existing;
-		}
+		if (existing) return existing;
 
 		return this.enrollments.create(data as any);
 	};
 
 	getEnrollment = async (id: number) => {
-		return this.enrollments.findById(id);
+		const enrollment = await this.enrollments.findById(id);
+		if (!enrollment) throwNotFoundError(EnrollmentMessages.NOT_FOUND);
+		return enrollment;
 	};
 
 	listUserEnrollments = async (userId: number) => {

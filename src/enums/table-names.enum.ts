@@ -28,4 +28,5 @@ export enum TableNames {
 	CONVERSATION_PARTICIPANTS = "conversation_participants",
 	MESSAGES = "messages",
 	NOTIFICATIONS = "notifications",
+	USER_CREDENTIALS = "user_credentials",
 }

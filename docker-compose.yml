@@ -4,7 +4,7 @@ services:
     container_name: hive-db
     image: postgres:18-alpine
     ports:
-      - "5435:5432"
+      - "5436:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=hive

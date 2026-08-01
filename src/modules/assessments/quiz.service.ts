@@ -1,3 +1,6 @@
+import { serviceLogger } from "@/utils";
+import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { QuizMessages } from "./quiz.message";
 import { QuizQuestionRepository, QuizAttemptRepository } from "./quiz.repository";
 
 interface QuizSubmission {
@@ -6,10 +9,13 @@ interface QuizSubmission {
 }
 
 export class QuizService {
-	private static instance: QuizService;
+	private static instance: QuizService | null;
 
+	/** @info - Repositories */
 	private readonly questions: QuizQuestionRepository;
 	private readonly attempts: QuizAttemptRepository;
+	/** @info - Utilities */
+	private readonly log = serviceLogger("Quiz");
 
 	static getInstance(): QuizService {
 		if (!this.instance) this.instance = new QuizService();
@@ -30,7 +36,13 @@ export class QuizService {
 		lessonId: number,
 		submissions: QuizSubmission[],
 	) => {
+		try {
 		const allQuestions = await this.questions.findByLesson(lessonId);
+
+		if (allQuestions.length === 0) {
+			throwBadRequestError(QuizMessages.NO_QUESTIONS);
+		}
+
 		const questionMap = new Map(allQuestions.map((q) => [q.id, q]));
 
 		const results: Array<{
@@ -94,6 +106,18 @@ export class QuizService {
 			score,
 			results,
 		};
+		} catch (e: any) {
+			const cause = e?.cause;
+			const causeInfo = cause
+				? ` | cause: ${cause.message ?? cause}${
+						cause.code ? ` (code: ${cause.code})` : ""
+				}${cause.detail ? ` detail: ${cause.detail}` : ""}`
+				: "";
+			this.log.error(
+				`Error submitting quiz: ${e.message}${causeInfo} for user: ${userId}`,
+			);
+			throw e;
+		}
 	};
 
 	getAttempts = async (userId: number, lessonId: number) => {

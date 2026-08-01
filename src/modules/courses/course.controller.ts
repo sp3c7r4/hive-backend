@@ -1,11 +1,12 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { sendSuccessResponse, sendErrorResponse } from "@/helpers";
+import { sendSuccessResponse } from "@/helpers";
 import { CourseService } from "./course.service";
 
 export class CourseController {
-	private static instance: CourseController;
+	private static instance: CourseController | null;
 
+	/** @info - Services */
 	private readonly service: CourseService;
 
 	static getInstance(): CourseController {
@@ -33,20 +34,13 @@ export class CourseController {
 	get = async (c: Context) => {
 		const { id } = c.req.param();
 		const course = await this.service.getCourse(Number(id));
-		if (!course) {
-			return sendErrorResponse(
-				c,
-				{ message: "Course not found" },
-				StatusCodes.NOT_FOUND,
-			);
-		}
 		return sendSuccessResponse(c, course);
 	};
 
 	list = async (c: Context) => {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const result = await this.service.listCourses(page, limit);
+		const result = await this.service.listCourses({ page, limit });
 		return sendSuccessResponse(c, result);
 	};
 

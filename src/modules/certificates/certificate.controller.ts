@@ -1,11 +1,14 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { sendSuccessResponse, sendErrorResponse } from "@/helpers";
+import { sendSuccessResponse } from "@/helpers";
+import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { CertificateMessages } from "./certificate.message";
 import { CertificateService } from "./certificate.service";
 
 export class CertificateController {
-	private static instance: CertificateController;
+	private static instance: CertificateController | null;
 
+	/** @info - Services */
 	private readonly service: CertificateService;
 
 	static getInstance(): CertificateController {
@@ -22,33 +25,20 @@ export class CertificateController {
 		const authData = c.get("authData");
 		const body = await c.req.json();
 
-		try {
-			const cert = await this.service.issue({
-				userId: Number(authData.id),
-				...body,
-			});
-			return sendSuccessResponse(c, cert, StatusCodes.CREATED);
-		} catch (error: any) {
-			return sendErrorResponse(
-				c,
-				{ message: error.message },
-				StatusCodes.UNPROCESSABLE_ENTITY,
-			);
-		}
+		const cert = await this.service.issue({
+			userId: Number(authData.id),
+			...body,
+		});
+
+		return sendSuccessResponse(c, cert, StatusCodes.CREATED);
 	};
 
 	/** @info - Public verification — no auth required */
 	verify = async (c: Context) => {
-		const { code } = c.req.param();
+		const code = c.req.param("code")!;
 		const cert = await this.service.verify(code);
 
-		if (!cert) {
-			return sendErrorResponse(
-				c,
-				{ message: "Certificate not found" },
-				StatusCodes.NOT_FOUND,
-			);
-		}
+		if (!cert) throwNotFoundError(CertificateMessages.NOT_FOUND);
 
 		return sendSuccessResponse(c, cert);
 	};

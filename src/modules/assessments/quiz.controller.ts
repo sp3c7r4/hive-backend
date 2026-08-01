@@ -1,11 +1,11 @@
 import type { Context } from "hono";
-import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { QuizService } from "./quiz.service";
 
 export class QuizController {
-	private static instance: QuizController;
+	private static instance: QuizController | null;
 
+	/** @info - Services */
 	private readonly service: QuizService;
 
 	static getInstance(): QuizController {

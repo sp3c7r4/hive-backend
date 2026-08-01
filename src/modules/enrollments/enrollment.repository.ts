@@ -3,7 +3,7 @@ import { enrollments, lessonProgress } from "./enrollment.model";
 import { eq, and } from "drizzle-orm";
 
 export class EnrollmentRepository extends RelationalRepository<typeof enrollments> {
-	private static instance: EnrollmentRepository;
+	private static instance: EnrollmentRepository | null;
 
 	static getInstance(): EnrollmentRepository {
 		if (!this.instance) this.instance = new EnrollmentRepository();
@@ -25,7 +25,7 @@ export class EnrollmentRepository extends RelationalRepository<typeof enrollment
 }
 
 export class LessonProgressRepository extends RelationalRepository<typeof lessonProgress> {
-	private static instance: LessonProgressRepository;
+	private static instance: LessonProgressRepository | null;
 
 	static getInstance(): LessonProgressRepository {
 		if (!this.instance) this.instance = new LessonProgressRepository();

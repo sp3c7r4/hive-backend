@@ -1,11 +1,12 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { sendSuccessResponse, sendErrorResponse } from "@/helpers";
+import { sendSuccessResponse } from "@/helpers";
 import { EnrollmentService } from "./enrollment.service";
 
 export class EnrollmentController {
-	private static instance: EnrollmentController;
+	private static instance: EnrollmentController | null;
 
+	/** @info - Services */
 	private readonly service: EnrollmentService;
 
 	static getInstance(): EnrollmentController {
@@ -40,13 +41,6 @@ export class EnrollmentController {
 	get = async (c: Context) => {
 		const { id } = c.req.param();
 		const enrollment = await this.service.getEnrollment(Number(id));
-		if (!enrollment) {
-			return sendErrorResponse(
-				c,
-				{ message: "Enrollment not found" },
-				StatusCodes.NOT_FOUND,
-			);
-		}
 		return sendSuccessResponse(c, enrollment);
 	};
 

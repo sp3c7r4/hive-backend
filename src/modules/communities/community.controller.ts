@@ -1,11 +1,13 @@
 import type { Context } from "hono";
-import { sendSuccessResponse, sendErrorResponse } from "@/helpers";
-import { CommunityService } from "./community.service";
 import { StatusCodes } from "http-status-codes";
+import { sendSuccessResponse } from "@/helpers";
+import { CommunityMessages } from "./community.message";
+import { CommunityService } from "./community.service";
 
 export class CommunityController {
-	private static instance: CommunityController;
+	private static instance: CommunityController | null;
 
+	/** @info - Services */
 	private readonly service: CommunityService;
 
 	static getInstance(): CommunityController {
@@ -30,22 +32,15 @@ export class CommunityController {
 	};
 
 	getBySlug = async (c: Context) => {
-		const { slug } = c.req.param();
+		const slug = c.req.param("slug")!;
 		const community = await this.service.getBySlug(slug);
-		if (!community) {
-			return sendErrorResponse(
-				c,
-				{ message: "Community not found" },
-				StatusCodes.NOT_FOUND,
-			);
-		}
 		return sendSuccessResponse(c, community);
 	};
 
 	list = async (c: Context) => {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const result = await this.service.list(page, limit);
+		const result = await this.service.list({ page, limit });
 		return sendSuccessResponse(c, result);
 	};
 
@@ -59,6 +54,6 @@ export class CommunityController {
 	delete = async (c: Context) => {
 		const { id } = c.req.param();
 		await this.service.delete(Number(id));
-		return sendSuccessResponse(c, { message: "Community deleted" });
+		return sendSuccessResponse(c, { message: CommunityMessages.DELETED });
 	};
 }

@@ -2,7 +2,7 @@ import { RelationalRepository } from "@/bases";
 import { courses, modules, lessons } from "./course.model";
 
 export class CourseRepository extends RelationalRepository<typeof courses> {
-	private static instance: CourseRepository;
+	private static instance: CourseRepository | null;
 
 	static getInstance(): CourseRepository {
 		if (!this.instance) this.instance = new CourseRepository();
@@ -15,7 +15,7 @@ export class CourseRepository extends RelationalRepository<typeof courses> {
 }
 
 export class ModuleRepository extends RelationalRepository<typeof modules> {
-	private static instance: ModuleRepository;
+	private static instance: ModuleRepository | null;
 
 	static getInstance(): ModuleRepository {
 		if (!this.instance) this.instance = new ModuleRepository();
@@ -28,7 +28,7 @@ export class ModuleRepository extends RelationalRepository<typeof modules> {
 }
 
 export class LessonRepository extends RelationalRepository<typeof lessons> {
-	private static instance: LessonRepository;
+	private static instance: LessonRepository | null;
 
 	static getInstance(): LessonRepository {
 		if (!this.instance) this.instance = new LessonRepository();

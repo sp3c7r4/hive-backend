@@ -3,7 +3,7 @@ import { certificates } from "./certificate.model";
 import { eq, and } from "drizzle-orm";
 
 export class CertificateRepository extends RelationalRepository<typeof certificates> {
-	private static instance: CertificateRepository;
+	private static instance: CertificateRepository | null;
 
 	static getInstance(): CertificateRepository {
 		if (!this.instance) this.instance = new CertificateRepository();
