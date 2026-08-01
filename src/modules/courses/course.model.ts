@@ -2,6 +2,7 @@ import {
 	boolean,
 	index,
 	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -121,6 +122,8 @@ export const lessons = pgTable(
 		liveMeetingLink: varchar("live_meeting_link", { length: 1000 }),
 		liveMeetingDate: varchar("live_meeting_date", { length: 255 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
+		/** @info - JSONB for lesson-type-specific config (assignment settings, quiz config, etc.) */
+		settings: jsonb("settings"),
 		...timestamps,
 	},
 	(table) => [
