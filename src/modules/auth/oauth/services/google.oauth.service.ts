@@ -1,10 +1,9 @@
 import { and, eq } from "drizzle-orm";
-import type { OAuth2Client } from "google-auth-library";
 import { type GoogleApis, google } from "googleapis";
 import { RelationalRepository } from "@/bases";
 import { config } from "@/config";
 import { TTL } from "@/constants";
-import { AuthMethods, EmailJobNames, type UserTypes } from "@/enums";
+import { AuthMethods, EmailJobNames, EmailTemplates, UserRole } from "@/enums";
 import {
 	decodeBase64,
 	generateAuthenticatedData,
@@ -16,10 +15,10 @@ import {
 	withPresignedUrl,
 	withTransaction,
 } from "@/helpers";
-import { userCredential } from "@/models";
+import { userCredentials } from "@/models";
 import {
 	getUserMapper,
-	type UserModelMapEntry,
+	type UserModelEntry,
 } from "@/modules/user-model-map";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
@@ -29,19 +28,19 @@ export class GoogleOAuthService {
 
 	private readonly emailQueueService: EmailQueueService;
 
-	private readonly google: GoogleApis;
-	private readonly googleAuth: OAuth2Client;
-	private readonly client: OAuth2Client;
+	private readonly googleClient: GoogleApis;
+	private readonly googleAuth: any;
+	private readonly client: any;
 
-	private readonly logger = logger;
+	private readonly log = logger;
 
 	private provider: AuthMethods = AuthMethods.GOOGLE;
 	private readonly cacheService: CacheService;
 
 	private constructor() {
-		this.google = google;
+		this.googleClient = google;
 		this.client = this.createOAuth2Client();
-		this.googleAuth = new this.google.auth.OAuth2();
+		this.googleAuth = new this.googleClient.auth.OAuth2();
 
 		this.cacheService = CacheService.getInstance();
 		this.emailQueueService = EmailQueueService.getInstance();
@@ -54,7 +53,7 @@ export class GoogleOAuthService {
 		return this.instance;
 	}
 
-	private createOAuth2Client(): OAuth2Client {
+	private createOAuth2Client() {
 		return new google.auth.OAuth2(
 			config.google.clientId,
 			config.google.clientSecret,
@@ -70,26 +69,26 @@ export class GoogleOAuthService {
 		return `${base}/api/v1/auth/google/callback`;
 	}
 
-	private resolveModelAndLabel(userType: UserTypes) {
-		const entry = getUserMapper()[userType];
+	private resolveModelAndLabel(userType: UserRole) {
+		const entry = getUserMapper()[userType as keyof ReturnType<typeof getUserMapper>];
 		if (!entry) throwBadRequestError("Invalid user type.");
-		return entry as UserModelMapEntry;
+		return entry as UserModelEntry;
 	}
 
-	private async exchangeCodeForUserInfo(oauthClient: OAuth2Client, code: any) {
+	private async exchangeCodeForUserInfo(oauthClient: any, code: string) {
 		const { tokens } = await oauthClient.getToken(code);
-		this.googleAuth.setCredentials({ access_token: tokens.access_token });
-		const { data: userInfo } = await this.google
+		oauthClient.setCredentials({ access_token: tokens.access_token! });
+		const response = await this.googleClient
 			.oauth2("v2")
-			.userinfo.get({ auth: this.googleAuth });
-		return { tokens, userInfo };
+			.userinfo.get({ auth: oauthClient as any });
+		return { tokens, userInfo: response.data };
 	}
 
 	private buildGoogleCredentials(tokens: Record<string, any>) {
 		return {
 			accessToken: tokens.access_token,
 			refreshToken: tokens.refresh_token,
-			expiryDate: new Date(tokens.expiry_date),
+			expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : undefined,
 			scope: tokens.scope,
 			tokenType: tokens.token_type,
 			idToken: tokens.id_token,
@@ -106,14 +105,14 @@ export class GoogleOAuthService {
 
 	getUserInfoFromAccessToken = async (accessToken: string) => {
 		this.googleAuth.setCredentials({ access_token: accessToken });
-		const { data } = await this.google
+		const response = await this.googleClient
 			.oauth2("v2")
-			.userinfo.get({ auth: this.googleAuth });
-		return data;
+			.userinfo.get({ auth: this.googleAuth as any });
+		return response.data;
 	};
 
-	authenticate = async (userType: UserTypes) => {
-		return this.client!.generateAuthUrl({
+	authenticate = async (userType: UserRole) => {
+		return this.client.generateAuthUrl({
 			access_type: "offline",
 			prompt: "consent",
 			scope: [
@@ -125,7 +124,7 @@ export class GoogleOAuthService {
 	};
 
 	callback = async (code: string, state: string) => {
-		const userType = decodeBase64(state) as UserTypes;
+		const userType = decodeBase64(state) as UserRole;
 		const { model, label, repository } = this.resolveModelAndLabel(userType);
 
 		let tokens: any, userInfo: any;
@@ -136,7 +135,7 @@ export class GoogleOAuthService {
 				code,
 			));
 		} catch (err) {
-			this.logger.error("Google OAuth token exchange failed", err);
+			this.log.error("Google OAuth token exchange failed", err);
 			return oauthResponsePage({
 				title: "OAuth Authentication Error",
 				message: "Failed to authenticate with Google. Please try again.",
@@ -145,11 +144,11 @@ export class GoogleOAuthService {
 			});
 		}
 
-		const credentialRepo = new RelationalRepository(userCredential);
+		const credentialRepo = new RelationalRepository(userCredentials);
 		const existingCredential = await credentialRepo.findOne(
 			and(
-				eq(userCredential.provider, this.provider),
-				eq(userCredential.providerAccountId, userInfo.id),
+				eq(userCredentials.provider, this.provider),
+				eq(userCredentials.providerAccountId, userInfo.id),
 			)!,
 		);
 
@@ -172,7 +171,7 @@ export class GoogleOAuthService {
 			try {
 				user = await withTransaction(async (tx) => {
 					const userRepo = new RelationalRepository(model, tx);
-					const credRepo = new RelationalRepository(userCredential, tx);
+					const credRepo = new RelationalRepository(userCredentials, tx);
 
 					const newUser = await userRepo.create({
 						firstName: userInfo.given_name!,
@@ -185,7 +184,8 @@ export class GoogleOAuthService {
 					} as any);
 
 					await credRepo.create({
-						userId: newUser.id,
+						entityId: newUser.id,
+						entityType: label,
 						provider: this.provider,
 						providerAccountId: userInfo.id!,
 						tokens: this.buildGoogleCredentials(tokens),
@@ -195,7 +195,7 @@ export class GoogleOAuthService {
 				});
 				isNewUser = true;
 			} catch (e) {
-				this.logger.error(
+				this.log.error(
 					"Error creating user during Google OAuth callback",
 					e,
 				);
@@ -212,7 +212,7 @@ export class GoogleOAuthService {
 				tokens: this.buildGoogleCredentials(tokens),
 			});
 
-			user = await repository.findById(existingCredential.userId);
+			user = await repository.findById(existingCredential.entityId);
 			if (user) {
 				await repository.update(user.id, { lastLoginAt: new Date() });
 			}
@@ -230,8 +230,8 @@ export class GoogleOAuthService {
 					name: sessionUser.firstName,
 					dashboardUrl: `${config.server.rootDomain}/dashboard`,
 				},
-				template: "welcome",
-			});
+				template: EmailTemplates.WELCOME,
+			} as any);
 		}
 
 		return oauthResponsePage({

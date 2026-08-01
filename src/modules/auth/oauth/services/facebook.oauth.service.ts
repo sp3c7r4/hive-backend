@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { config } from "@/config";
 import { TTL } from "@/constants";
-import { AuthMethods, EmailJobNames, type UserTypes } from "@/enums";
+import { AuthMethods, EmailJobNames, EmailTemplates, UserRole } from "@/enums";
 import {
 	decodeBase64,
 	generateAuthenticatedData,
@@ -16,7 +16,7 @@ import {
 	withTransaction,
 } from "@/helpers";
 import type { FacebookTokenInterface, FacebookUserInfo } from "@/interfaces";
-import { userCredential } from "@/models";
+import { userCredentials } from "@/models";
 import { getUserMapper } from "@/modules/user-model-map";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
@@ -61,8 +61,8 @@ export class FacebookOAuthService {
 		return `${base}/api/v1/auth/facebook/callback`;
 	}
 
-	private resolveModelAndLabel(userType: UserTypes) {
-		const entry = getUserMapper()[userType];
+	private resolveModelAndLabel(userType: UserRole) {
+		const entry = getUserMapper()[userType as keyof ReturnType<typeof getUserMapper>];
 		if (!entry) throwBadRequestError("Invalid user type.");
 		return entry;
 	}
@@ -154,7 +154,7 @@ export class FacebookOAuthService {
 		}
 	};
 
-	authenticate = async (userType: UserTypes) => {
+	authenticate = async (userType: UserRole) => {
 		const params = new URLSearchParams({
 			client_id: this.clientId,
 			redirect_uri: this.buildRedirectUrl(),
@@ -168,7 +168,7 @@ export class FacebookOAuthService {
 	};
 
 	callback = async (code: string, state: string) => {
-		const userType = decodeBase64(state) as UserTypes;
+		const userType = decodeBase64(state) as UserRole;
 		const { model, label, repository } = this.resolveModelAndLabel(userType);
 
 		let tokens: FacebookTokenInterface,
@@ -188,11 +188,11 @@ export class FacebookOAuthService {
 			});
 		}
 
-		const credentialRepo = new RelationalRepository(userCredential);
+		const credentialRepo = new RelationalRepository(userCredentials);
 		const existingCredential = await credentialRepo.findOne(
 			and(
-				eq(userCredential.provider, this.provider),
-				eq(userCredential.providerAccountId, userInfo.id),
+				eq(userCredentials.provider, this.provider),
+				eq(userCredentials.providerAccountId, userInfo.id),
 			)!,
 		);
 
@@ -214,7 +214,7 @@ export class FacebookOAuthService {
 			try {
 				user = await withTransaction(async (tx) => {
 					const userRepo = new RelationalRepository(model, tx);
-					const credRepo = new RelationalRepository(userCredential, tx);
+					const credRepo = new RelationalRepository(userCredentials, tx);
 
 					const newUser = await userRepo.create({
 						firstName: userInfo.first_name,
@@ -227,7 +227,8 @@ export class FacebookOAuthService {
 					} as any);
 
 					await credRepo.create({
-						userId: newUser.id,
+						entityId: newUser.id,
+						entityType: label,
 						provider: this.provider,
 						providerAccountId: userInfo.id,
 						tokens: this.buildFacebookCredentials(tokens),
@@ -254,7 +255,7 @@ export class FacebookOAuthService {
 				tokens: this.buildFacebookCredentials(tokens),
 			});
 
-			user = await repository.findById(existingCredential.userId);
+			user = await repository.findById(existingCredential.entityId);
 			if (user) {
 				await repository.update(user.id, { lastLoginAt: new Date() });
 			}
@@ -272,8 +273,8 @@ export class FacebookOAuthService {
 					name: sessionUser.firstName,
 					dashboardUrl: `${config.server.rootDomain}/dashboard`,
 				},
-				template: "welcome",
-			});
+				template: EmailTemplates.WELCOME,
+			} as any);
 		}
 
 		return oauthResponsePage({

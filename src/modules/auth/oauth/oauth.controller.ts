@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { AuthMethods, type OAuthAction, type UserTypes } from "@/enums";
+import { AuthMethods, UserRole } from "@/enums";
 import { sendSuccessResponse } from "@/helpers";
 import { FacebookOAuthService } from "./services/facebook.oauth.service";
 import { GoogleOAuthService } from "./services/google.oauth.service";
@@ -44,11 +44,8 @@ export class OauthController {
 
 	private authenticateGoogle = async (c: Context) => {
 		const { service } = this.resolveService(AuthMethods.GOOGLE);
-		const { userType, action } = c.req.query();
-		const data = await service.authenticate(
-			userType as UserTypes,
-			action as OAuthAction,
-		);
+		const { role } = c.req.query();
+		const data = await service.authenticate(role as UserRole);
 		console.log(data);
 		return sendSuccessResponse(c, {
 			message: "Google Oauth url generated successfully",
@@ -72,11 +69,8 @@ export class OauthController {
 
 	private authenticateFacebook = async (c: Context) => {
 		const { service } = this.resolveService(AuthMethods.FACEBOOK);
-		const { userType, action } = c.req.query();
-		const data = await service.authenticate(
-			userType as UserTypes,
-			action as OAuthAction,
-		);
+		const { role } = c.req.query();
+		const data = await service.authenticate(role as UserRole);
 		return sendSuccessResponse(c, {
 			message: "Facebook Oauth url generated successfully",
 			data: {
