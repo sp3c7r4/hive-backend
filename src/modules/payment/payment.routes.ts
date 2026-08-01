@@ -1,15 +1,31 @@
 import { Hono } from "hono";
-import { ZodEngine } from "@/services";
+import { JwtService, ZodEngine } from "@/services";
 import { PaymentController } from "./payment.controller";
-
-const _zodEngine = ZodEngine.getInstance();
+import { z } from "zod";
 
 export const paymentRouter = new Hono({ strict: true });
-/** @todo - Paystack Routes */
 export const paystackRouter = new Hono({ strict: true });
-export const paymentController = PaymentController.getInstance();
 
-paystackRouter.post("/", paymentController.paystack.handleWebook);
+const zod = ZodEngine.getInstance();
+const jwt = JwtService.getInstance();
+const controller = PaymentController.getInstance();
 
-paymentRouter.get("/cancel", paymentController.cancelPayment);
-paymentRouter.get("/callback", paymentController.callbackThanks);
+const initializeSchema = z.object({
+	type: z.enum(["enrollment", "community"]),
+	enrollmentId: z.number().optional(),
+	communityId: z.number().optional(),
+	studentId: z.number().optional(),
+	amount: z.number().positive(),
+});
+
+paymentRouter.post(
+	"/initialize",
+	jwt.validateToken,
+	zod.validate.body(initializeSchema),
+	controller.initialize,
+);
+
+paymentRouter.get("/cancel", controller.cancelPayment);
+paymentRouter.get("/callback", controller.callbackThanks);
+
+paystackRouter.post("/", controller.paystack.handleWebook);

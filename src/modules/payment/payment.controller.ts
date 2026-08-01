@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
+import { v4 as uuidv4 } from "uuid";
 import {
 	paymentCancelledPage,
 	paymentSuccessPage,
@@ -8,13 +9,14 @@ import {
 import { PaymentMessage } from "@/messages";
 import { PaymentService } from "./payment.service";
 import { PaystackService } from "./services";
+import { PaymentRepository } from "./payment.repository";
 
 export class PaymentController {
 	private static instance: PaymentController;
 
-	/** @info - Services */
 	private paymentService: PaymentService;
 	private paystackService: PaystackService;
+	private paymentRepo: PaymentRepository;
 
 	static getInstance(): PaymentController {
 		if (!this.instance) this.instance = new PaymentController();
@@ -24,7 +26,49 @@ export class PaymentController {
 	private constructor() {
 		this.paystackService = PaystackService.getInstance();
 		this.paymentService = PaymentService.getInstance();
+		this.paymentRepo = PaymentRepository.getInstance();
 	}
+
+	initialize = async (c: Context) => {
+		const authData = c.get("authData");
+		const { type, enrollmentId, communityId, studentId, amount } = await c.req.json();
+
+		const reference = `hive-${uuidv4()}`;
+		const email = authData.email;
+
+		/** @info - Create pending payment row */
+		await this.paymentRepo.create({
+			payerId: Number(authData.id),
+			payerType: authData.role,
+			enrollmentId: enrollmentId ?? null,
+			communityId: communityId ?? null,
+			studentId: studentId ?? null,
+			amount,
+			platformFee: Math.round(amount * 0.1),
+			type,
+			reference,
+			status: "pending",
+		} as any);
+
+		/** @info - Initialize Paystack transaction */
+		const result = await this.paystackService.initializeTransaction({
+			email,
+			amount,
+			reference,
+			metadata: {
+				paymentType: type,
+				enrollmentId,
+				communityId,
+				studentId,
+				payerId: authData.id,
+			},
+		} as any);
+
+		return sendSuccessResponse(c, {
+			authorizationUrl: (result as any).data?.authorization_url,
+			reference,
+		});
+	};
 
 	cancelPayment = async (c: Context) => {
 		const resHtml = paymentCancelledPage();
@@ -39,7 +83,6 @@ export class PaymentController {
 		return c.html(resHtml, StatusCodes.OK);
 	};
 
-	/** @info - Paystack methods */
 	private handleWebhook = async (c: Context) => {
 		const paystack_signature = c.req.header("x-paystack-signature");
 		const body = await c.req.json();
