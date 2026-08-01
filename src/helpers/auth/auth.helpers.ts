@@ -1,7 +1,6 @@
 import axios from "axios";
 import _ from "lodash";
 import { TTL } from "@/constants";
-import type { UserTypes } from "@/enums";
 import type { IAuthenticatedUser, IBaseUser } from "@/interfaces";
 import { CacheService } from "@/services/cache.service";
 import { JwtService } from "@/services/jwt.service";
@@ -67,7 +66,7 @@ export const generateAuthenticatedData = (
 
 export const generateAuthTokens = async (
 	authId: string,
-	userType: UserTypes,
+	userType: string,
 ) => {
 	const cacheService = CacheService.getInstance();
 	const jwtService = JwtService.getInstance();

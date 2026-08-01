@@ -10,9 +10,7 @@ import { connectPostgresDB, connectRedisDB } from "@/db";
 import { healthCheck } from "@/helpers";
 import { errorHandler, RequestLogger, routeNotFound } from "@/middlewares";
 import { router } from "@/routes";
-import {
-	EmailQueueService
-} from "@/services";
+import { EmailQueueService } from "@/services";
 import { logger } from "@/utils";
 
 const app = new Hono({
@@ -53,7 +51,7 @@ bullMQAdapter.setBasePath("/queue");
 
 createBullBoard({
 	queues: [
-		new BullMQAdapter(EmailQueueService.getInstance().getQueue())
+		new BullMQAdapter(EmailQueueService.getInstance().getQueue()),
 	],
 	serverAdapter: bullMQAdapter,
 	options: {
@@ -99,11 +97,9 @@ function startServer(port: number = PORT) {
 	});
 }
 
-// Initialize MongoDB and Redis
+// Initialize PostgreSQL and Redis
 connectPostgresDB(startServer);
 connectRedisDB();
-
-app.get("/", (c) => c.text("Hello World"));
 
 app.use("*", routeNotFound);
 

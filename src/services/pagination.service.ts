@@ -1,4 +1,4 @@
-import type { AnyTable, InferSelectModel, SQL } from "drizzle-orm";
+import type { InferSelectModel, SQL } from "drizzle-orm";
 import { asc, desc, count as drizzleCount, gt, lt } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import type {
@@ -12,7 +12,7 @@ const MAX_LIMIT = 100;
 
 type DbClient = ReturnType<typeof getDb>;
 
-export class PaginationService<T extends AnyTable<any>> {
+export class PaginationService<T extends Record<string, any>> {
 	private readonly model: T;
 	private readonly _explicitDb?: DbClient;
 
@@ -30,7 +30,7 @@ export class PaginationService<T extends AnyTable<any>> {
 		limit = 10,
 		where,
 		orderBy,
-	}: PaginateOptions = {}): Promise<PaginatedResult<InferSelectModel<T>>> {
+	}: PaginateOptions = {}): Promise<PaginatedResult<InferSelectModel<any>>> {
 		const safePage = Math.max(1, Number(page));
 		const safeLimit = Math.max(1, Math.min(Number(limit), MAX_LIMIT));
 		const offset = (safePage - 1) * safeLimit;
@@ -80,7 +80,7 @@ export class PaginationService<T extends AnyTable<any>> {
 		where,
 		orderBy,
 	}: CursorPaginateOptions = {}): Promise<
-		CursorPaginatedResult<InferSelectModel<T>>
+		CursorPaginatedResult<InferSelectModel<any>>
 	> {
 		const safeLimit = Math.max(1, Math.min(Number(limit), MAX_LIMIT));
 

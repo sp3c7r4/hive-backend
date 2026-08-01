@@ -1,14 +1,13 @@
 import { eq } from "drizzle-orm";
 import { PaymentStatus } from "@/enums";
-import { payment } from "@/models";
-import { PaymentRepository } from "@/repositories";
 import { serviceLogger } from "@/utils";
+
+// TODO: Import your actual payment table and repository
+// import { payment } from "@/models";
+// import { PaymentRepository } from "@/repositories";
 
 export class PaymentService {
 	private static instance: PaymentService;
-
-	/** @info - Repositories */
-	private paymentRepo: PaymentRepository;
 
 	/** @info - Utilities */
 	private log = serviceLogger("Payment Service");
@@ -18,18 +17,16 @@ export class PaymentService {
 		return this.instance;
 	}
 
-	private constructor() {
-		this.paymentRepo = PaymentRepository.getInstance();
-	}
+	private constructor() {}
 
 	cancelPayment = async (trackingCode: string) => {
 		try {
-			await this.paymentRepo.updateWhere(
-				eq(payment.trackingCode, trackingCode),
-				{
-					status: PaymentStatus.CANCELLED,
-				},
-			);
+			// TODO: Implement with your actual payment repository
+			// await this.paymentRepo.updateWhere(
+			// 	eq(payment.trackingCode, trackingCode),
+			// 	{ status: PaymentStatus.CANCELLED },
+			// );
+			this.log.info(`Payment cancelled: ${trackingCode}`);
 		} catch (e) {
 			this.log.error("Error canceling payment.", { error: e });
 			return;

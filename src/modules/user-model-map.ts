@@ -1,30 +1,31 @@
-import type { BaseUserService, RelationalRepository } from "@/bases";
-import { UserTypes } from "@/enums";
-import { AdminRepository, AdminService, admin } from "./admin";
-import { UserRepository, UserService, user } from "./user";
+import { instructors } from "@/modules/instructor/instructor.model";
+import { students } from "@/modules/student/student.model";
+import { parents } from "@/modules/parent/parent.model";
+import { UserRole } from "@/enums";
+import { RelationalRepository } from "@/bases/repositories";
 
-export interface UserModelMapEntry {
-	model: typeof user | typeof admin;
-	label: UserTypes;
-	service: BaseUserService;
-	repository: RelationalRepository<typeof user | typeof admin>;
+/**
+ * @info - Maps each UserRole to its Drizzle model and repository.
+ * Used by AuthService to resolve which table to query for a given role.
+ */
+export function getUserMapper() {
+	return {
+		[UserRole.INSTRUCTOR]: {
+			model: instructors,
+			repository: new RelationalRepository(instructors),
+			label: "instructor",
+		},
+		[UserRole.STUDENT]: {
+			model: students,
+			repository: new RelationalRepository(students),
+			label: "student",
+		},
+		[UserRole.PARENT]: {
+			model: parents,
+			repository: new RelationalRepository(parents),
+			label: "parent",
+		},
+	} as const;
 }
 
-export type UserModelMap = Record<UserTypes, UserModelMapEntry>;
-
-export const getUserMapper = (): UserModelMap => {
-	return {
-		[UserTypes.USER]: {
-			model: user,
-			label: UserTypes.USER,
-			service: UserService.getInstance(),
-			repository: UserRepository.getInstance(),
-		},
-		[UserTypes.ADMIN]: {
-			model: admin,
-			label: UserTypes.ADMIN,
-			service: AdminService.getInstance(),
-			repository: AdminRepository.getInstance(),
-		},
-	};
-};
+export type UserModelEntry = ReturnType<typeof getUserMapper>[keyof ReturnType<typeof getUserMapper>];

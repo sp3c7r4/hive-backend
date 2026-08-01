@@ -1,7 +1,11 @@
 import { BaseQueueService } from "@/bases/services/base.queue.service";
 import { QueueNames, type GenerateReceiptOptions } from "@/enums";
 
-export class ReceiptQueueService extends BaseQueueService<GenerateReceiptOptions> {
+export interface ReceiptJobData extends GenerateReceiptOptions {
+	idempotencyKey: string;
+}
+
+export class ReceiptQueueService extends BaseQueueService<ReceiptJobData> {
 	private static instance: ReceiptQueueService;
 
 	private constructor() {

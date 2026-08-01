@@ -7,7 +7,7 @@ const envFile = getEnvFile();
 config({ path: envFile, override: true });
 
 export default defineConfig({
-	schema: ["./src/**/*.model.ts", "./src/db/pg-enums.ts"],
+	schema: ["./src/**/*.model.ts"],
 	out: "./src/db/migrations",
 	dialect: "postgresql",
 	dbCredentials: {

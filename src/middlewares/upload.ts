@@ -1,7 +1,6 @@
 import type { Context, Next } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { extension } from "mime-types";
-import { generateImageKey } from "@/helpers/auth/auth.helpers";
+import { generateImageKey } from "@/helpers/id-generators";
 import { sendErrorResponse } from "@/helpers/response/send-response";
 import { StorageService } from "@/services/storage.service";
 
@@ -90,9 +89,7 @@ export class FileUploadMiddleware {
 		fieldName: string,
 		userId: string,
 	): Promise<UploadedFile | null> {
-		const ext = extension(file.type);
-		if (!ext) return null;
-
+		const ext = file.type.split("/")[1] ?? "bin";
 		const key = generateImageKey(fieldName, ext, userId);
 		await this.storageService.upload({
 			key,

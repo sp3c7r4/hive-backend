@@ -1,10 +1,11 @@
-import type { AuthLoginTypes } from "@/enums";
+import type { AuthLoginTypes, UserRole } from "@/enums";
 
 export interface SignupData {
 	firstName: string;
 	lastName: string;
 	email: string;
 	password: string;
+	role: UserRole;
 }
 
 export interface LoginData {
@@ -17,12 +18,10 @@ export interface ISignupDataWithMetadata extends SignupData {
 	ipAddress: string;
 	location: string;
 	userAgent: string;
-	userType: string;
 }
 
 export interface ILoginDataWithMetadata extends LoginData {
 	ipAddress: string;
 	location: string;
 	userAgent: string;
-	userType: string;
 }

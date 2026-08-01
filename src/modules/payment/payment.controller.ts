@@ -13,6 +13,7 @@ export class PaymentController {
 	private static instance: PaymentController;
 
 	/** @info - Services */
+	private paymentService: PaymentService;
 	private paystackService: PaystackService;
 
 	static getInstance(): PaymentController {
@@ -26,14 +27,6 @@ export class PaymentController {
 	}
 
 	cancelPayment = async (c: Context) => {
-		// /:trackingCode
-		// const trackingCode = c.req.param("trackingCode");
-		// if (!trackingCode)
-		// 	return sendSuccessResponse(c, {}, StatusCodes.BAD_REQUEST);
-
-		/** @info - Process cancelled payment */
-		// await this.paymentService.cancelPayment(trackingCode);
-
 		const resHtml = paymentCancelledPage();
 		return c.html(resHtml, StatusCodes.OK);
 	};

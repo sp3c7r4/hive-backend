@@ -62,7 +62,7 @@ export class EmailService {
 		console.log(pathName);
 		console.log(import.meta.url);
 		console.log(import.meta.dirname);
-		console.log(import.meta.dir);
+		console.log(import.meta.dirname);
 
 		if (!pathName.startsWith(templatesDir + path.sep)) {
 			throw new Error(`Invalid template name: ${template}`);

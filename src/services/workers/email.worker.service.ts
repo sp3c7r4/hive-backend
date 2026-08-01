@@ -4,16 +4,26 @@ import { QueueNames } from "@/enums";
 import { EmailService } from "@/services/mail.service";
 import { logger } from "@/utils";
 
-export class EmailWorkerService extends BaseWorkerService {
+interface EmailJobData {
+	message: {
+		to: string;
+		subject: string;
+		text?: string;
+		cc?: string[];
+		bcc?: string[];
+		replyTo?: string;
+	};
+	template: string;
+	locals: Record<string, any>;
+	identifier?: string;
+	idempotencyKey: string;
+}
+
+export class EmailWorkerService extends BaseWorkerService<EmailJobData> {
 	private static instance: EmailWorkerService;
 
-	/** @info - Services */
 	private readonly emailService: EmailService;
 
-	/**
-	 * @info - Gets singleton instance
-	 * @returns {EmailWorkerService}
-	 */
 	static getInstance() {
 		if (!this.instance) {
 			this.instance = new EmailWorkerService();
@@ -30,7 +40,7 @@ export class EmailWorkerService extends BaseWorkerService {
 		this.emailService = EmailService.getInstance();
 	}
 
-	protected async process(job: Job) {
+	protected async process(job: Job<EmailJobData>) {
 		try {
 			logger.info(`Processing email job ${job.id}`, {
 				jobName: job.name,
@@ -44,7 +54,6 @@ export class EmailWorkerService extends BaseWorkerService {
 		} catch (error: any) {
 			logger.error(`Error processing email job ${job.id}`, {
 				error: error.message,
-				details: error.details || error.originalError?.details,
 				stack: error.stack,
 				recipient: job.data?.message?.to,
 			});
