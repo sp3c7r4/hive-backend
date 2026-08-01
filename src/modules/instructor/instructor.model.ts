@@ -1,4 +1,5 @@
 import {
+	boolean,
 	jsonb,
 	pgTable,
 	uniqueIndex,
@@ -19,6 +20,8 @@ export const instructors = pgTable(
 		...BaseUser,
 		/** @info - Teaching specialization tags e.g. ["Web Development", "Graphic Design"] */
 		specializationTags: jsonb("specialization_tags").$type<string[]>().default([]),
+		/** @info - Admin flag for platform management */
+		isAdmin: boolean("is_admin").default(false),
 		...softDelete,
 	},
 	(table) => [
