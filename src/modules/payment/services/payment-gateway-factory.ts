@@ -16,12 +16,12 @@ export class PaymentFactoryService {
 		this.paystack = PaystackService.getInstance();
 	}
 
-	get = (serviceProvider: PaymentServiceProvider) => {
-		switch (serviceProvider) {
-			case PaymentServiceProvider.PAYSTACK:
-				return this.paystack;
-			default:
-				throw new Error(`Invalid Payment Provider: ${serviceProvider}`);
-		}
-	};
+  get = (serviceProvider: PaymentServiceProvider) => {
+    switch (serviceProvider) {
+      case PaymentServiceProvider.PAYSTACK:
+        return this.paystack;
+      default:
+        throw new Error(`Invalid Payment Provider: ${serviceProvider}`);
+    }
+  };
 }

@@ -12,14 +12,14 @@ import {
 import type { NewCourse, NewModule, NewLesson } from "./course.model";
 
 export class CourseService {
-	private static instance: CourseService | null;
+	private static instance: CourseService;
+	private coursesRepo: CourseRepository;
+	private modulesRepo: ModuleRepository;
+	private lessonsRepo: LessonRepository;
 
-	/** @info - Repositories */
-	private readonly courses: CourseRepository;
-	private readonly modules: ModuleRepository;
-	private readonly lessons: LessonRepository;
 	/** @info - Services */
-	private readonly paginationService = new PaginationService<typeof courses>(courses);
+	private paginationService: PaginationService<typeof courses>;
+
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Course");
 
@@ -29,21 +29,21 @@ export class CourseService {
 	}
 
 	private constructor() {
-		this.courses = CourseRepository.getInstance();
-		this.modules = ModuleRepository.getInstance();
-		this.lessons = LessonRepository.getInstance();
+		this.coursesRepo = CourseRepository.getInstance();
+		this.modulesRepo = ModuleRepository.getInstance();
+		this.lessonsRepo = LessonRepository.getInstance();
+		this.paginationService = new PaginationService(courses);
 	}
 
-	/** @info - Courses */
-	createCourse = async (data: NewCourse & { instructorId: number }) => {
-		const slug = this._slugify(data.title, data.instructorId);
-		return this.courses.create({ ...data, slug } as any);
+	/* Courses */
+
+	createCourse = async (data: NewCourse) => {
+		return this.coursesRepo.create(data as any);
 	};
 
 	getCourse = async (id: number) => {
-		const course = await this.courses.findById(id);
-		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
-		return course;
+		const course = await this.coursesRepo.findById(id);
+		return course ?? throwNotFoundError(CourseMessages.NOT_FOUND);
 	};
 
 	listCourses = async (params?: { page?: number; limit?: number }) => {
@@ -54,69 +54,59 @@ export class CourseService {
 	};
 
 	updateCourse = async (id: number, data: Partial<NewCourse>) => {
-		const course = await this.courses.update(id, data as any);
-		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
-		return course;
+		const course = await this.coursesRepo.update(id, data as any);
+		return course ?? throwNotFoundError(CourseMessages.NOT_FOUND);
 	};
 
 	deleteCourse = async (id: number): Promise<void> => {
-		const course = await this.courses.softDelete(id);
+		const course = await this.coursesRepo.softDelete(id);
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 		this.log.info(`Course ${id} soft-deleted`);
 	};
 
-	/** @info - Modules */
-	createModule = async (data: NewModule) => {
-		return this.modules.create(data as any);
+	/* Modules */
+
+	createModule = async (courseId: number, data: NewModule) => {
+		return this.modulesRepo.create({ ...data, courseId } as any);
 	};
 
 	listModules = async (courseId: number) => {
-		return this.modules.findMany(
-			eq(this.modules.getModel().courseId as any, courseId),
+		return this.modulesRepo.findMany(
+			eq(this.modulesRepo.getModel().courseId as any, courseId),
 		);
 	};
 
 	updateModule = async (id: number, data: Partial<NewModule>) => {
-		const mod = await this.modules.update(id, data as any);
-		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
-		return mod;
+		const mod = await this.modulesRepo.update(id, data as any);
+		return mod ?? throwNotFoundError(ModuleMessages.NOT_FOUND);
 	};
 
 	deleteModule = async (id: number): Promise<void> => {
-		const mod = await this.modules.delete(id);
+		const mod = await this.modulesRepo.softDelete(id);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
-		this.log.info(`Module ${id} deleted`);
+		this.log.info(`Module ${id} soft-deleted`);
 	};
 
-	/** @info - Lessons */
-	createLesson = async (data: NewLesson) => {
-		return this.lessons.create(data as any);
+	/* Lessons */
+
+	createLesson = async (moduleId: number, data: NewLesson) => {
+		return this.lessonsRepo.create({ ...data, moduleId } as any);
 	};
 
 	listLessons = async (moduleId: number) => {
-		return this.lessons.findMany(
-			eq(this.lessons.getModel().moduleId as any, moduleId),
+		return this.lessonsRepo.findMany(
+			eq(this.lessonsRepo.getModel().moduleId as any, moduleId),
 		);
 	};
 
 	updateLesson = async (id: number, data: Partial<NewLesson>) => {
-		const lesson = await this.lessons.update(id, data as any);
-		if (!lesson) throwNotFoundError(LessonMessages.NOT_FOUND);
-		return lesson;
+		const lesson = await this.lessonsRepo.update(id, data as any);
+		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
 	};
 
 	deleteLesson = async (id: number): Promise<void> => {
-		const lesson = await this.lessons.delete(id);
+		const lesson = await this.lessonsRepo.softDelete(id);
 		if (!lesson) throwNotFoundError(LessonMessages.NOT_FOUND);
-		this.log.info(`Lesson ${id} deleted`);
-	};
-
-	private _slugify = (title: string, instructorId: number): string => {
-		const base = title
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-|-$/g, "");
-		const suffix = instructorId.toString(36).slice(-4);
-		return `${base}-${suffix}`;
+		this.log.info(`Lesson ${id} soft-deleted`);
 	};
 }

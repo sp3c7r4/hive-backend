@@ -1,5 +1,6 @@
-import { serviceLogger } from "@/utils";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { serviceLogger } from "@/utils";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { QuizMessages } from "./quiz.message";
 import { QuizQuestionRepository, QuizAttemptRepository } from "./quiz.repository";
 
@@ -9,11 +10,10 @@ interface QuizSubmission {
 }
 
 export class QuizService {
-	private static instance: QuizService | null;
+	private static instance: QuizService;
+	private questions: QuizQuestionRepository;
+	private attempts: QuizAttemptRepository;
 
-	/** @info - Repositories */
-	private readonly questions: QuizQuestionRepository;
-	private readonly attempts: QuizAttemptRepository;
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Quiz");
 
@@ -27,16 +27,11 @@ export class QuizService {
 		this.attempts = QuizAttemptRepository.getInstance();
 	}
 
-	/**
-	 * @info - Submit answers for a quiz lesson and auto-grade.
-	 * Returns { total, correct, score, results[] }.
-	 */
 	submit = async (
-		userId: number,
+		authData: IAuthData,
 		lessonId: number,
 		submissions: QuizSubmission[],
 	) => {
-		try {
 		const allQuestions = await this.questions.findByLesson(lessonId);
 
 		if (allQuestions.length === 0) {
@@ -63,9 +58,9 @@ export class QuizService {
 			const isCorrect = sub.selectedAnswer === question.correctAnswer;
 			const points = isCorrect ? question.points : 0;
 
-			/** @info - Upsert: update if exists, create if new */
+			/* Upsert: update if exists, create if new */
 			const existing = await this.attempts.findByUserAndQuestion(
-				userId,
+				authData.id,
 				sub.questionId,
 			);
 
@@ -77,7 +72,7 @@ export class QuizService {
 				} as any);
 			} else {
 				await this.attempts.create({
-					userId,
+					userId: authData.id,
 					lessonId,
 					questionId: sub.questionId,
 					selectedAnswer: sub.selectedAnswer,
@@ -97,7 +92,9 @@ export class QuizService {
 			});
 		}
 
-		const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
+		const score = totalPoints > 0
+			? Math.round((earnedPoints / totalPoints) * 100)
+			: 0;
 
 		return {
 			total: allQuestions.length,
@@ -106,21 +103,9 @@ export class QuizService {
 			score,
 			results,
 		};
-		} catch (e: any) {
-			const cause = e?.cause;
-			const causeInfo = cause
-				? ` | cause: ${cause.message ?? cause}${
-						cause.code ? ` (code: ${cause.code})` : ""
-				}${cause.detail ? ` detail: ${cause.detail}` : ""}`
-				: "";
-			this.log.error(
-				`Error submitting quiz: ${e.message}${causeInfo} for user: ${userId}`,
-			);
-			throw e;
-		}
 	};
 
-	getAttempts = async (userId: number, lessonId: number) => {
-		return this.attempts.findByUserAndLesson(userId, lessonId);
+	getAttempts = async (authData: IAuthData, lessonId: number) => {
+		return this.attempts.findByUserAndLesson(authData.id, lessonId);
 	};
 }

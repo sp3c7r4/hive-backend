@@ -1,14 +1,11 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
-import { CommunityMessages } from "./community.message";
 import { CommunityService } from "./community.service";
 
 export class CommunityController {
-	private static instance: CommunityController | null;
-
-	/** @info - Services */
-	private readonly service: CommunityService;
+	private static instance: CommunityController;
+	private service: CommunityService;
 
 	static getInstance(): CommunityController {
 		if (!this.instance) this.instance = new CommunityController();
@@ -21,39 +18,49 @@ export class CommunityController {
 
 	create = async (c: Context) => {
 		const authData = c.get("authData");
-		const body = await c.req.json();
-
-		const community = await this.service.create({
-			...body,
-			ownerId: Number(authData.id),
-		});
-
-		return sendSuccessResponse(c, community, StatusCodes.CREATED);
-	};
-
-	getBySlug = async (c: Context) => {
-		const slug = c.req.param("slug")!;
-		const community = await this.service.getBySlug(slug);
-		return sendSuccessResponse(c, community);
+		const data = await this.service.create(authData, await c.req.json());
+		return sendSuccessResponse(c, {
+			message: "Community created successfully",
+			data,
+		}, StatusCodes.CREATED);
 	};
 
 	list = async (c: Context) => {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const result = await this.service.list({ page, limit });
-		return sendSuccessResponse(c, result);
+		const data = await this.service.list({ page, limit });
+		return sendSuccessResponse(c, {
+			message: "Communities fetched successfully",
+			data,
+		});
+	};
+
+	getBySlug = async (c: Context) => {
+		const slug = c.req.param("slug");
+		const data = await this.service.getBySlug(slug as string);
+		return sendSuccessResponse(c, {
+			message: "Community fetched successfully",
+			data,
+		});
 	};
 
 	update = async (c: Context) => {
-		const { id } = c.req.param();
-		const body = await c.req.json();
-		const community = await this.service.update(Number(id), body);
-		return sendSuccessResponse(c, community);
+		const id = c.req.param("id");
+		const data = await this.service.update(
+			id as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Community updated successfully",
+			data,
+		});
 	};
 
 	delete = async (c: Context) => {
-		const { id } = c.req.param();
-		await this.service.delete(Number(id));
-		return sendSuccessResponse(c, { message: CommunityMessages.DELETED });
+		const id = c.req.param("id");
+		await this.service.delete(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Community deleted successfully",
+		});
 	};
 }

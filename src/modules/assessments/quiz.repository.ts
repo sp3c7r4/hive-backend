@@ -3,7 +3,7 @@ import { quizQuestions, quizAttempts } from "./assessment.model";
 import { eq, and } from "drizzle-orm";
 
 export class QuizQuestionRepository extends RelationalRepository<typeof quizQuestions> {
-	private static instance: QuizQuestionRepository | null;
+	private static instance: QuizQuestionRepository;
 
 	static getInstance(): QuizQuestionRepository {
 		if (!this.instance) this.instance = new QuizQuestionRepository();
@@ -20,7 +20,7 @@ export class QuizQuestionRepository extends RelationalRepository<typeof quizQues
 }
 
 export class QuizAttemptRepository extends RelationalRepository<typeof quizAttempts> {
-	private static instance: QuizAttemptRepository | null;
+	private static instance: QuizAttemptRepository;
 
 	static getInstance(): QuizAttemptRepository {
 		if (!this.instance) this.instance = new QuizAttemptRepository();

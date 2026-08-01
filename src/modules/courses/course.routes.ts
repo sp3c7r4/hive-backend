@@ -39,5 +39,5 @@ moduleRouter.delete("/:id", controller.deleteModule);
 /** @info - Lesson routes nested under modules */
 moduleRouter.get("/:moduleId/lessons", controller.listLessons);
 moduleRouter.post("/:moduleId/lessons", zod.validate.body(createLessonSchema), controller.createLesson);
-moduleRouter.patch("/:id/lessons", zod.validate.body(updateLessonSchema), controller.updateLesson);
-moduleRouter.delete("/:id/lessons", controller.deleteLesson);
+moduleRouter.patch("/:id", zod.validate.body(updateLessonSchema), controller.updateLesson);
+moduleRouter.delete("/:id", controller.deleteLesson);

@@ -1,14 +1,14 @@
 import { eq } from "drizzle-orm";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CertificateMessages } from "./certificate.message";
 import { CertificateRepository } from "./certificate.repository";
 
 export class CertificateService {
-	private static instance: CertificateService | null;
+	private static instance: CertificateService;
+	private repo: CertificateRepository;
 
-	/** @info - Repositories */
-	private readonly repo: CertificateRepository;
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Certificate");
 
@@ -21,12 +21,7 @@ export class CertificateService {
 		this.repo = CertificateRepository.getInstance();
 	}
 
-	/**
-	 * @info - Issue a certificate if the student meets course requirements.
-	 * If already issued, return the existing certificate.
-	 */
-	issue = async (params: {
-		userId: number;
+	issue = async (authData: IAuthData, params: {
 		courseId: number;
 		enrollmentId: number;
 		completionPercent: number;
@@ -38,7 +33,6 @@ export class CertificateService {
 		allowCertificate: boolean;
 	}) => {
 		const {
-			userId,
 			courseId,
 			enrollmentId,
 			completionPercent,
@@ -54,11 +48,11 @@ export class CertificateService {
 			throwBadRequestError(CertificateMessages.NO_CERTIFICATE);
 		}
 
-		/** @info - Check if already issued */
-		const existing = await this.repo.findByUserAndCourse(userId, courseId);
+		/* Check if already issued */
+		const existing = await this.repo.findByUserAndCourse(authData.id, courseId);
 		if (existing) return existing;
 
-		/** @info - Validate requirements */
+		/* Validate requirements */
 		if (completionPercent < minCompletion) {
 			throwBadRequestError(
 				CertificateMessages.COMPLETION_BELOW(completionPercent, minCompletion),
@@ -75,11 +69,10 @@ export class CertificateService {
 			);
 		}
 
-		/** @info - Generate verification code */
-		const code = this._generateCode(userId, courseId);
+		const code = this._generateCode(authData.id, courseId);
 
 		return this.repo.create({
-			userId,
+			userId: authData.id,
 			courseId,
 			enrollmentId,
 			code,
@@ -93,7 +86,6 @@ export class CertificateService {
 		const cert = await this.repo.findByCode(code);
 		if (!cert) return null;
 
-		/** @info - Return minimal public verification info */
 		return {
 			code: cert.code,
 			issuedAt: cert.issuedAt,
@@ -103,9 +95,9 @@ export class CertificateService {
 		};
 	};
 
-	getUserCertificates = async (userId: number) => {
+	getUserCertificates = async (authData: IAuthData) => {
 		return this.repo.findMany(
-			eq(this.repo.getModel().userId as any, userId),
+			eq(this.repo.getModel().userId as any, authData.id),
 		);
 	};
 

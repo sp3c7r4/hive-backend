@@ -4,10 +4,8 @@ import { sendSuccessResponse } from "@/helpers";
 import { CourseService } from "./course.service";
 
 export class CourseController {
-	private static instance: CourseController | null;
-
-	/** @info - Services */
-	private readonly service: CourseService;
+	private static instance: CourseController;
+	private service: CourseService;
 
 	static getInstance(): CourseController {
 		if (!this.instance) this.instance = new CourseController();
@@ -18,106 +16,142 @@ export class CourseController {
 		this.service = CourseService.getInstance();
 	}
 
-	/** @info - Courses */
+	/* Courses */
+
 	create = async (c: Context) => {
-		const authData = c.get("authData");
-		const body = await c.req.json();
-
-		const course = await this.service.createCourse({
-			...body,
-			instructorId: Number(authData.id),
-		});
-
-		return sendSuccessResponse(c, course, StatusCodes.CREATED);
-	};
-
-	get = async (c: Context) => {
-		const { id } = c.req.param();
-		const course = await this.service.getCourse(Number(id));
-		return sendSuccessResponse(c, course);
+		const data = await this.service.createCourse(await c.req.json());
+		return sendSuccessResponse(c, {
+			message: "Course created successfully",
+			data,
+		}, StatusCodes.CREATED);
 	};
 
 	list = async (c: Context) => {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const result = await this.service.listCourses({ page, limit });
-		return sendSuccessResponse(c, result);
+		const data = await this.service.listCourses({ page, limit });
+		return sendSuccessResponse(c, {
+			message: "Courses fetched successfully",
+			data,
+		});
+	};
+
+	get = async (c: Context) => {
+		const id = c.req.param("id");
+		const data = await this.service.getCourse(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Course fetched successfully",
+			data,
+		});
 	};
 
 	update = async (c: Context) => {
-		const { id } = c.req.param();
-		const body = await c.req.json();
-		const course = await this.service.updateCourse(Number(id), body);
-		return sendSuccessResponse(c, course);
+		const id = c.req.param("id");
+		const data = await this.service.updateCourse(
+			id as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Course updated successfully",
+			data,
+		});
 	};
 
 	delete = async (c: Context) => {
-		const { id } = c.req.param();
-		await this.service.deleteCourse(Number(id));
-		return sendSuccessResponse(c, { message: "Course deleted" });
+		const id = c.req.param("id");
+		await this.service.deleteCourse(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Course deleted successfully",
+		});
 	};
 
-	/** @info - Modules */
+	/* Modules */
+
 	createModule = async (c: Context) => {
-		const { courseId } = c.req.param();
-		const body = await c.req.json();
-
-		const mod = await this.service.createModule({
-			...body,
-			courseId: Number(courseId),
-		});
-
-		return sendSuccessResponse(c, mod, StatusCodes.CREATED);
+		const courseId = c.req.param("courseId");
+		const data = await this.service.createModule(
+			courseId as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Module created successfully",
+			data,
+		}, StatusCodes.CREATED);
 	};
 
 	listModules = async (c: Context) => {
-		const { courseId } = c.req.param();
-		const modules = await this.service.listModules(Number(courseId));
-		return sendSuccessResponse(c, modules);
+		const courseId = c.req.param("courseId");
+		const data = await this.service.listModules(
+			courseId as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Modules fetched successfully",
+			data,
+		});
 	};
 
 	updateModule = async (c: Context) => {
-		const { id } = c.req.param();
-		const body = await c.req.json();
-		const mod = await this.service.updateModule(Number(id), body);
-		return sendSuccessResponse(c, mod);
+		const id = c.req.param("id");
+		const data = await this.service.updateModule(
+			id as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Module updated successfully",
+			data,
+		});
 	};
 
 	deleteModule = async (c: Context) => {
-		const { id } = c.req.param();
-		await this.service.deleteModule(Number(id));
-		return sendSuccessResponse(c, { message: "Module deleted" });
+		const id = c.req.param("id");
+		await this.service.deleteModule(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Module deleted successfully",
+		});
 	};
 
-	/** @info - Lessons */
+	/* Lessons */
+
 	createLesson = async (c: Context) => {
-		const { moduleId } = c.req.param();
-		const body = await c.req.json();
-
-		const lesson = await this.service.createLesson({
-			...body,
-			moduleId: Number(moduleId),
-		});
-
-		return sendSuccessResponse(c, lesson, StatusCodes.CREATED);
+		const moduleId = c.req.param("moduleId");
+		const data = await this.service.createLesson(
+			moduleId as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Lesson created successfully",
+			data,
+		}, StatusCodes.CREATED);
 	};
 
 	listLessons = async (c: Context) => {
-		const { moduleId } = c.req.param();
-		const lessons = await this.service.listLessons(Number(moduleId));
-		return sendSuccessResponse(c, lessons);
+		const moduleId = c.req.param("moduleId");
+		const data = await this.service.listLessons(
+			moduleId as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Lessons fetched successfully",
+			data,
+		});
 	};
 
 	updateLesson = async (c: Context) => {
-		const { id } = c.req.param();
-		const body = await c.req.json();
-		const lesson = await this.service.updateLesson(Number(id), body);
-		return sendSuccessResponse(c, lesson);
+		const id = c.req.param("id");
+		const data = await this.service.updateLesson(
+			id as unknown as number,
+			await c.req.json(),
+		);
+		return sendSuccessResponse(c, {
+			message: "Lesson updated successfully",
+			data,
+		});
 	};
 
 	deleteLesson = async (c: Context) => {
-		const { id } = c.req.param();
-		await this.service.deleteLesson(Number(id));
-		return sendSuccessResponse(c, { message: "Lesson deleted" });
+		const id = c.req.param("id");
+		await this.service.deleteLesson(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Lesson deleted successfully",
+		});
 	};
 }

@@ -3,7 +3,7 @@ import { enrollments, lessonProgress } from "./enrollment.model";
 import { eq, and } from "drizzle-orm";
 
 export class EnrollmentRepository extends RelationalRepository<typeof enrollments> {
-	private static instance: EnrollmentRepository | null;
+	private static instance: EnrollmentRepository;
 
 	static getInstance(): EnrollmentRepository {
 		if (!this.instance) this.instance = new EnrollmentRepository();
@@ -25,7 +25,7 @@ export class EnrollmentRepository extends RelationalRepository<typeof enrollment
 }
 
 export class LessonProgressRepository extends RelationalRepository<typeof lessonProgress> {
-	private static instance: LessonProgressRepository | null;
+	private static instance: LessonProgressRepository;
 
 	static getInstance(): LessonProgressRepository {
 		if (!this.instance) this.instance = new LessonProgressRepository();
@@ -49,5 +49,17 @@ export class LessonProgressRepository extends RelationalRepository<typeof lesson
 		return this.findMany(
 			eq(lessonProgress.enrollmentId, enrollmentId),
 		);
+	};
+
+	upsertProgress = async (enrollmentId: number, lessonId: number, userId: number) => {
+		const existing = await this.findByEnrollmentAndLesson(enrollmentId, lessonId);
+		if (existing) {
+			return this.update(existing.id, { completedAt: new Date() } as any);
+		}
+		return this.create({
+			enrollmentId,
+			lessonId,
+			userId,
+		} as any);
 	};
 }

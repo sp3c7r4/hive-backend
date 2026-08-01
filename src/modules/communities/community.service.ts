@@ -2,18 +2,19 @@ import { eq } from "drizzle-orm";
 import { throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CommunityMessages } from "./community.message";
 import { communities } from "./community.model";
 import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
 
 export class CommunityService {
-	private static instance: CommunityService | null;
+	private static instance: CommunityService;
+	private repo: CommunityRepository;
 
-	/** @info - Repositories */
-	private readonly repo: CommunityRepository;
 	/** @info - Services */
-	private readonly paginationService = new PaginationService<typeof communities>(communities);
+	private paginationService: PaginationService<typeof communities>;
+
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Community");
 
@@ -24,11 +25,12 @@ export class CommunityService {
 
 	private constructor() {
 		this.repo = CommunityRepository.getInstance();
+		this.paginationService = new PaginationService(communities);
 	}
 
-	create = async (data: NewCommunity & { ownerId: number }) => {
-		const slug = this._slugify(data.name, data.ownerId);
-		return this.repo.create({ ...data, slug } as any);
+	create = async (authData: IAuthData, data: NewCommunity) => {
+		const slug = this._slugify(data.name, authData.id);
+		return this.repo.create({ ...data, slug, ownerId: authData.id } as any);
 	};
 
 	getById = async (id: number) => {
@@ -39,8 +41,7 @@ export class CommunityService {
 		const community = await this.repo.findOne(
 			eq(this.repo.getModel().slug as any, slug),
 		);
-		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
-		return community;
+		return community ?? throwNotFoundError(CommunityMessages.NOT_FOUND);
 	};
 
 	list = async (params?: { page?: number; limit?: number }) => {
@@ -52,8 +53,7 @@ export class CommunityService {
 
 	update = async (id: number, data: Partial<NewCommunity>) => {
 		const community = await this.repo.update(id, data as any);
-		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
-		return community;
+		return community ?? throwNotFoundError(CommunityMessages.NOT_FOUND);
 	};
 
 	delete = async (id: number): Promise<void> => {

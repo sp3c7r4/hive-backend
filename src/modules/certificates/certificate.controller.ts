@@ -6,10 +6,8 @@ import { CertificateMessages } from "./certificate.message";
 import { CertificateService } from "./certificate.service";
 
 export class CertificateController {
-	private static instance: CertificateController | null;
-
-	/** @info - Services */
-	private readonly service: CertificateService;
+	private static instance: CertificateController;
+	private service: CertificateService;
 
 	static getInstance(): CertificateController {
 		if (!this.instance) this.instance = new CertificateController();
@@ -20,34 +18,34 @@ export class CertificateController {
 		this.service = CertificateService.getInstance();
 	}
 
-	/** @info - Issue certificate after meeting requirements */
 	issue = async (c: Context) => {
 		const authData = c.get("authData");
-		const body = await c.req.json();
-
-		const cert = await this.service.issue({
-			userId: Number(authData.id),
-			...body,
-		});
-
-		return sendSuccessResponse(c, cert, StatusCodes.CREATED);
+		const data = await this.service.issue(authData, await c.req.json());
+		return sendSuccessResponse(c, {
+			message: "Certificate issued successfully",
+			data,
+		}, StatusCodes.CREATED);
 	};
 
-	/** @info - Public verification — no auth required */
+	/* Public verification — no auth */
 	verify = async (c: Context) => {
-		const code = c.req.param("code")!;
-		const cert = await this.service.verify(code);
+		const code = c.req.param("code");
+		const data = await this.service.verify(code as string);
 
-		if (!cert) throwNotFoundError(CertificateMessages.NOT_FOUND);
+		if (!data) throwNotFoundError(CertificateMessages.NOT_FOUND);
 
-		return sendSuccessResponse(c, cert);
+		return sendSuccessResponse(c, {
+			message: "Certificate verified successfully",
+			data,
+		});
 	};
 
 	list = async (c: Context) => {
 		const authData = c.get("authData");
-		const certs = await this.service.getUserCertificates(
-			Number(authData.id),
-		);
-		return sendSuccessResponse(c, certs);
+		const data = await this.service.getUserCertificates(authData);
+		return sendSuccessResponse(c, {
+			message: "Certificates fetched successfully",
+			data,
+		});
 	};
 }

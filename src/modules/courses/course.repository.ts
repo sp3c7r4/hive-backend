@@ -1,8 +1,9 @@
 import { RelationalRepository } from "@/bases";
 import { courses, modules, lessons } from "./course.model";
+import { eq, and } from "drizzle-orm";
 
 export class CourseRepository extends RelationalRepository<typeof courses> {
-	private static instance: CourseRepository | null;
+	private static instance: CourseRepository;
 
 	static getInstance(): CourseRepository {
 		if (!this.instance) this.instance = new CourseRepository();
@@ -15,7 +16,7 @@ export class CourseRepository extends RelationalRepository<typeof courses> {
 }
 
 export class ModuleRepository extends RelationalRepository<typeof modules> {
-	private static instance: ModuleRepository | null;
+	private static instance: ModuleRepository;
 
 	static getInstance(): ModuleRepository {
 		if (!this.instance) this.instance = new ModuleRepository();
@@ -25,10 +26,14 @@ export class ModuleRepository extends RelationalRepository<typeof modules> {
 	private constructor() {
 		super(modules);
 	}
+
+	findByCourse = async (courseId: number) => {
+		return this.findMany(eq(modules.courseId, courseId));
+	};
 }
 
 export class LessonRepository extends RelationalRepository<typeof lessons> {
-	private static instance: LessonRepository | null;
+	private static instance: LessonRepository;
 
 	static getInstance(): LessonRepository {
 		if (!this.instance) this.instance = new LessonRepository();
@@ -38,4 +43,8 @@ export class LessonRepository extends RelationalRepository<typeof lessons> {
 	private constructor() {
 		super(lessons);
 	}
+
+	findByModule = async (moduleId: number) => {
+		return this.findMany(eq(lessons.moduleId, moduleId));
+	};
 }
