@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { healthCheck } from "@/helpers";
 import { quizRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
+import { certificateRouter } from "@/modules/certificates";
 import { communityRouter } from "@/modules/communities";
 import { courseRouter, moduleRouter } from "@/modules/courses";
 import { enrollmentRouter } from "@/modules/enrollments";
@@ -15,6 +16,7 @@ export const router = new Hono();
 router.get("/", healthCheck);
 
 router.route("/auth", authRouter);
+router.route("/certificates", certificateRouter);
 router.route("/communities", communityRouter);
 router.route("/courses", courseRouter);
 router.route("/enrollments", enrollmentRouter);
