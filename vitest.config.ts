@@ -10,6 +10,7 @@ export default defineConfig({
 	},
 	test: {
 		globals: true,
+		env: { NODE_ENV: "development" },
 		setupFiles: ["./tests/setup.ts"],
 		testTimeout: 30_000,
 		hookTimeout: 120_000,
