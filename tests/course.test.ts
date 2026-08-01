@@ -63,3 +63,22 @@ describe("GET /api/v1/modules/:moduleId/lessons", () => {
 		expect(res.status).toBe(401);
 	});
 });
+
+describe("POST /api/v1/courses/:courseId/modules/:moduleId/lessons/:lessonId/generate-meeting", () => {
+	it("returns 401 without auth", async () => {
+		const res = await testApp.request(
+			"/api/v1/courses/1/modules/1/lessons/1/generate-meeting",
+			{
+				method: "POST",
+				body: JSON.stringify({
+					provider: "google",
+					summary: "Test Meeting",
+					startTime: "2026-08-02T10:00:00Z",
+					endTime: "2026-08-02T11:00:00Z",
+				}),
+				headers: auth,
+			},
+		);
+		expect(res.status).toBe(401);
+	});
+});

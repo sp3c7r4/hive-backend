@@ -1,3 +1,4 @@
+import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
 import { eq } from "drizzle-orm";
 import { throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
@@ -108,5 +109,42 @@ export class CourseService {
 		const lesson = await this.lessonsRepo.softDelete(id);
 		if (!lesson) throwNotFoundError(LessonMessages.NOT_FOUND);
 		this.log.info(`Lesson ${id} soft-deleted`);
+	};
+
+	/* Live Class Meeting Generation */
+
+	generateMeeting = async (
+		lessonId: number,
+		options: {
+			provider: "google" | "zoom";
+			summary: string;
+			description?: string;
+			startTime: string;
+			endTime: string;
+			attendees?: Array<{ entityId: number; entityType: string }>;
+			duration?: number;
+			autoRecord?: boolean;
+		},
+	) => {
+		const scheduler = MeetingSchedulerService.getInstance();
+
+		const result = await scheduler.scheduleMeeting({
+			provider: options.provider,
+			summary: options.summary,
+			description: options.description,
+			startTime: options.startTime,
+			endTime: options.endTime,
+			attendees: options.attendees?.map((a) => `${a.entityType}:${a.entityId}`),
+			duration: options.duration,
+			autoRecord: options.autoRecord,
+		});
+
+		/* Store the meeting link on the lesson */
+		await this.lessonsRepo.update(lessonId, {
+			liveMeetingLink: result.joinLink,
+			liveMeetingDate: options.startTime,
+		} as any);
+
+		return result;
 	};
 }

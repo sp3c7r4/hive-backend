@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { JwtService, ZodEngine } from "@/services";
+import { requireInstructor } from "@/middlewares/auth";
 import { CourseController } from "./course.controller";
 import {
 	createCourseSchema,
@@ -8,6 +9,7 @@ import {
 	updateCourseSchema,
 	updateModuleSchema,
 	updateLessonSchema,
+	generateMeetingSchema,
 } from "./course.schema";
 
 export const courseRouter = new Hono({ strict: true });
@@ -29,6 +31,15 @@ courseRouter.delete("/:id", controller.delete);
 /** @info - Module routes nested under courses */
 courseRouter.get("/:courseId/modules", controller.listModules);
 courseRouter.post("/:courseId/modules", zod.validate.body(createModuleSchema), controller.createModule);
+
+/** @info - Live class meeting generation — instructor only */
+courseRouter.post(
+	"/:courseId/modules/:moduleId/lessons/:lessonId/generate-meeting",
+	jwt.validateToken,
+	requireInstructor,
+	zod.validate.body(generateMeetingSchema),
+	controller.generateMeeting,
+);
 
 export const moduleRouter = new Hono({ strict: true });
 moduleRouter.use("*", jwt.validateToken);

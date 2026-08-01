@@ -154,4 +154,19 @@ export class CourseController {
 			message: "Lesson deleted successfully",
 		});
 	};
+
+	/* Live Class Meeting Generation */
+
+	generateMeeting = async (c: Context) => {
+		const lessonId = c.req.param("lessonId");
+		const body = await c.req.json();
+		const data = await this.service.generateMeeting(
+			lessonId as unknown as number,
+			body,
+		);
+		return sendSuccessResponse(c, {
+			message: "Meeting generated successfully",
+			data,
+		});
+	};
 }

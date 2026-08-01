@@ -5,12 +5,7 @@ import axios, {
 	type CreateAxiosDefaults,
 } from "axios";
 
-/**
- * @info - Api Service
- * E.g. const paystack = new ApiService<Paths>("https://api.paystack.co");
- * paystack.get(""/transaction/verify/:reference"")
- */
-export class ApiService<T> {
+export class ApiService<T extends Record<string, any>> {
 	private api: AxiosInstance;
 
 	constructor(
@@ -21,14 +16,14 @@ export class ApiService<T> {
 	}
 
 	get = async <R = unknown>(
-		path: T[keyof T] extends string ? T[keyof T] : never,
+		path: T[keyof T],
 		config?: Omit<AxiosRequestConfig, "url">,
 	): Promise<AxiosResponse<R>> => {
 		return await this.api.get(path, config);
 	};
 
 	post = async <R = unknown>(
-		path: T[keyof T] extends string ? T[keyof T] : never,
+		path: T[keyof T],
 		data?: any,
 		config?: Omit<AxiosRequestConfig, "url">,
 	): Promise<AxiosResponse<R>> => {

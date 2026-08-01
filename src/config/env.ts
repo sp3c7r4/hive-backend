@@ -65,6 +65,12 @@ const EnvSchema = z.object({
 
 	ZEUS: z.string(),
 	ATHENA: z.string(),
+
+	ZOOM_ACCOUNT_ID: z.string().optional(),
+	ZOOM_CLIENT_ID: z.string().optional(),
+	ZOOM_CLIENT_SECRET: z.string().optional(),
+
+	GOOGLE_REFRESH_TOKEN: z.string().optional(),
 });
 
 export type EnvType = z.infer<typeof EnvSchema>;

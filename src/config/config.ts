@@ -61,6 +61,13 @@ export const config = {
 		clientId: env.GOOGLE_CLIENT_ID,
 		clientSecret: env.GOOGLE_CLIENT_SECRET,
 		redirectUri: env.GOOGLE_REDIRECT_URI,
+		refreshToken: env.GOOGLE_REFRESH_TOKEN,
+	},
+
+	zoom: {
+		accountId: env.ZOOM_ACCOUNT_ID,
+		clientId: env.ZOOM_CLIENT_ID,
+		clientSecret: env.ZOOM_CLIENT_SECRET,
 	},
 
 	github: {

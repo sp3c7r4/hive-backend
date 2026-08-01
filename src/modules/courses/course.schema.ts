@@ -42,3 +42,17 @@ export const createLessonSchema = z.object({
 export const updateCourseSchema = createCourseSchema.partial();
 export const updateModuleSchema = createModuleSchema.partial();
 export const updateLessonSchema = createLessonSchema.partial();
+
+export const generateMeetingSchema = z.object({
+	provider: z.enum(["google", "zoom"]),
+	summary: z.string().min(1),
+	description: z.string().optional(),
+	startTime: z.string().min(1),
+	endTime: z.string().min(1),
+	attendees: z.array(z.object({
+		entityId: z.number().int(),
+		entityType: z.string(),
+	})).optional(),
+	duration: z.number().int().optional(),
+	autoRecord: z.boolean().optional(),
+});
