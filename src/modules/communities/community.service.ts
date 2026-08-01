@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, count, sql, sum } from "drizzle-orm";
 import { throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
@@ -7,6 +7,9 @@ import { CommunityMessages } from "./community.message";
 import { communities } from "./community.model";
 import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
+import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { courses } from "@/modules/courses/course.model";
+import { getDb } from "@/db/postgres.db";
 
 export class CommunityService {
 	private static instance: CommunityService;
@@ -60,6 +63,54 @@ export class CommunityService {
 		const community = await this.repo.softDelete(id);
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
 		this.log.info(`Community ${id} soft-deleted`);
+	};
+
+	/* Analytics */
+
+	analytics = async (slug: string, params?: { from?: string; to?: string }) => {
+		const db = getDb();
+
+		/* Find community by slug first */
+		const community = await this.repo.findOne(
+			eq(this.repo.getModel().slug as any, slug),
+		);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+
+		/* Course enrollments per course */
+		const courseEnrollments = await db
+			.select({
+				courseId: courses.id,
+				courseTitle: courses.title,
+				count: count(enrollments.id),
+			})
+			.from(courses)
+			.leftJoin(enrollments, eq(enrollments.courseId, courses.id))
+			.where(eq(courses.communityId, community!.id))
+			.groupBy(courses.id, courses.title);
+
+		/* Active members (enrollments in community courses) */
+		const activeResult = await db
+			.select({ value: count(enrollments.id) })
+			.from(enrollments)
+			.innerJoin(courses, eq(enrollments.courseId, courses.id))
+			.where(eq(courses.communityId, community!.id));
+		const activeMembers = Number(activeResult[0]?.value ?? 0);
+
+		/* Revenue (sum of course prices × enrollment counts) */
+		const revResult = await db
+			.select({
+				rev: sql<number>`COALESCE(SUM(${courses.price} * ${courses.enrollmentCount}), 0)`,
+			})
+			.from(courses)
+			.where(eq(courses.communityId, community!.id));
+		const revenue = Number(revResult[0]?.rev ?? 0);
+
+		return {
+			community: { id: community!.id, name: community!.name, slug: community!.slug },
+			courseEnrollments,
+			activeMembers,
+			revenue,
+		};
 	};
 
 	private _slugify = (name: string, ownerId: number): string => {

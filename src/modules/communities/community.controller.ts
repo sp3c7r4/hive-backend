@@ -63,4 +63,17 @@ export class CommunityController {
 			message: "Community deleted successfully",
 		});
 	};
+
+	/* Analytics */
+
+	analytics = async (c: Context) => {
+		const slug = c.req.param("slug");
+		const from = c.req.query("from");
+		const to = c.req.query("to");
+		const data = await this.service.analytics(slug as string, { from, to });
+		return sendSuccessResponse(c, {
+			message: "Community analytics fetched successfully",
+			data,
+		});
+	};
 }

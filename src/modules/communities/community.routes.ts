@@ -15,5 +15,6 @@ communityRouter.use("*", jwt.validateToken);
 communityRouter.post("/", zod.validate.body(createCommunitySchema), controller.create);
 communityRouter.get("/", controller.list);
 communityRouter.get("/:slug", controller.getBySlug);
+communityRouter.get("/:slug/analytics", controller.analytics);
 communityRouter.patch("/:id", zod.validate.body(updateCommunitySchema), controller.update);
 communityRouter.delete("/:id", controller.delete);
