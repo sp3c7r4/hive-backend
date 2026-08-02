@@ -3,6 +3,7 @@ export enum EmailTemplates {
 	VERIFY_OTP = "verify-otp",
 	WELCOME = "welcome",
 	RECEIPT = "receipt",
+	CHILD_LINKED = "child-linked",
 }
 
 export enum Templates {
