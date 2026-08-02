@@ -9,6 +9,10 @@ export const createUserSchema = z.object({
 	role: z.enum(Object.values(UserRole) as [string, ...string[]]),
 });
 
+export const selectRoleSchema = z.object({
+	role: z.enum(Object.values(UserRole) as [string, ...string[]]),
+});
+
 export const loginUserSchema = z
 	.object({
 		email: z.string().email(),
