@@ -9,10 +9,10 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { students } from "@/modules/student/student.model";
+import { users } from "@/models/user.model";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { communities } from "@/modules/communities/community.model";
-import { instructors } from "@/modules/instructor/instructor.model";
 import {
 	PaymentTransactionStatus,
 	PaymentTransactionType,
@@ -20,7 +20,6 @@ import {
 	WithdrawalStatus,
 	TableNames,
 } from "@/enums";
-import { userRoleEnum } from "@/bases/models/base.user.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
 export const paymentStatusEnum = pgEnum("payment_status", Object.values(PaymentTransactionStatus) as [string, ...string[]]);
@@ -29,40 +28,37 @@ export const paymentMethodEnum = pgEnum("payment_method", Object.values(PaymentT
 export const withdrawalStatusEnum = pgEnum("withdrawal_status", Object.values(WithdrawalStatus) as [string, ...string[]]);
 
 /**
- * @info - Payment record.
- *         payerId + payerType is polymorphic — payer can be a student or parent.
- *         studentId is the child beneficiary when a parent pays.
+ * @info - Payment record. payerId points to users.id.
+ *         payerRole provides context (student / parent) without a polymorphic FK.
  */
 export const payments = pgTable(
 	TableNames.PAYMENTS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-		/** @info - ID of the payer in their role table */
-		payerId: integer("payer_id").notNull(),
-		/** @info - Which role table payerId refers to (student / parent) */
-		payerType: userRoleEnum("payer_type").notNull(),
+		payerId: integer("payer_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "restrict" }),
+		/** @info - Role context for the payer (student / parent) */
+		payerRole: userRoleEnum("payer_role").notNull(),
 		enrollmentId: integer("enrollment_id")
 			.references(() => enrollments.id, { onDelete: "set null" }),
 		communityId: integer("community_id")
 			.references(() => communities.id, { onDelete: "set null" }),
-		/** @info - Amount in kobo */
 		amount: integer("amount").notNull(),
-		/** @info - Platform fee in kobo, 10% of amount */
 		platformFee: integer("platform_fee").default(0),
 		status: paymentStatusEnum("status").default("pending").notNull(),
 		method: paymentMethodEnum("method").default("paystack").notNull(),
 		reference: varchar("reference", { length: 255 }).notNull(),
 		type: paymentTypeEnum("type").notNull(),
 		description: text("description"),
-		/** @info - Child beneficiary when a parent pays for a student's course */
 		studentId: integer("student_id")
-			.references(() => students.id, { onDelete: "set null" }),
+			.references(() => users.id, { onDelete: "set null" }),
 		receiptUrl: varchar("receipt_url", { length: 1000 }),
 		...timestamps,
 	},
 	(table) => [
 		uniqueIndex("uq_payments_reference").on(table.reference),
-		index("idx_payments_payer").on(table.payerId, table.payerType),
+		index("idx_payments_payer").on(table.payerId),
 		index("idx_payments_enrollment").on(table.enrollmentId),
 		index("idx_payments_status").on(table.status),
 		index("idx_payments_student").on(table.studentId),
@@ -76,8 +72,7 @@ export const withdrawals = pgTable(
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		instructorId: integer("instructor_id")
 			.notNull()
-			.references(() => instructors.id, { onDelete: "restrict" }),
-		/** @info - Amount in kobo */
+			.references(() => users.id, { onDelete: "restrict" }),
 		amount: integer("amount").notNull(),
 		bankName: varchar("bank_name", { length: 255 }).notNull(),
 		accountNumber: varchar("account_number", { length: 20 }).notNull(),
@@ -102,6 +97,10 @@ export type NewWithdrawal = typeof withdrawals.$inferInsert;
 
 /** @info - Relations */
 export const paymentsRelations = relations(payments, ({ one }) => ({
+	payer: one(users, {
+		fields: [payments.payerId],
+		references: [users.id],
+	}),
 	enrollment: one(enrollments, {
 		fields: [payments.enrollmentId],
 		references: [enrollments.id],
@@ -110,15 +109,15 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
 		fields: [payments.communityId],
 		references: [communities.id],
 	}),
-	student: one(students, {
+	student: one(users, {
 		fields: [payments.studentId],
-		references: [students.id],
+		references: [users.id],
 	}),
 }));
 
 export const withdrawalsRelations = relations(withdrawals, ({ one }) => ({
-	instructor: one(instructors, {
+	instructor: one(users, {
 		fields: [withdrawals.instructorId],
-		references: [instructors.id],
+		references: [users.id],
 	}),
 }));

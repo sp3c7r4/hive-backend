@@ -4,9 +4,10 @@
  */
 export enum TableNames {
 	USERS = "users",
-	INSTRUCTORS = "instructors",
-	STUDENTS = "students",
-	PARENTS = "parents",
+	USER_ROLES = "user_roles",
+	INSTRUCTOR_PROFILES = "instructor_profiles",
+	STUDENT_PROFILES = "student_profiles",
+	PARENT_PROFILES = "parent_profiles",
 	PARENT_CHILD_LINKS = "parent_child_links",
 	COMMUNITIES = "communities",
 	COMMUNITY_MEMBERS = "community_members",

@@ -10,12 +10,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
-import { students } from "@/modules/student/student.model";
+import { users } from "@/models/user.model";
 import { courses } from "@/modules/courses/course.model";
-import { instructors } from "@/modules/instructor/instructor.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-/** @info - Student review for a course, one per student per course */
+/** @info - User review for a course, one per user per course */
 export const reviews = pgTable(
 	TableNames.REVIEWS,
 	{
@@ -23,16 +22,13 @@ export const reviews = pgTable(
 		courseId: integer("course_id")
 			.notNull()
 			.references(() => courses.id, { onDelete: "cascade" }),
-		/** @info - The student who wrote this review */
 		userId: integer("user_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
-		/** @info - 1–5 star rating */
+			.references(() => users.id, { onDelete: "cascade" }),
 		rating: integer("rating").notNull(),
 		title: varchar("title", { length: 255 }),
 		comment: text("comment").notNull(),
 		helpfulCount: integer("helpful_count").default(0),
-		/** @info - IDs of users who marked this review as helpful */
 		helpfulByUserIds: jsonb("helpful_by_user_ids").$type<number[]>().default([]),
 		...timestamps,
 	},
@@ -44,7 +40,7 @@ export const reviews = pgTable(
 	],
 );
 
-/** @info - Instructor's reply to a student review, one reply per review */
+/** @info - Instructor's reply to a user review, one reply per review */
 export const instructorReplies = pgTable(
 	TableNames.INSTRUCTOR_REPLIES,
 	{
@@ -54,7 +50,7 @@ export const instructorReplies = pgTable(
 			.references(() => reviews.id, { onDelete: "cascade" }),
 		instructorId: integer("instructor_id")
 			.notNull()
-			.references(() => instructors.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		comment: text("comment").notNull(),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 	},
@@ -75,9 +71,9 @@ export const reviewsRelations = relations(reviews, ({ one }) => ({
 		fields: [reviews.courseId],
 		references: [courses.id],
 	}),
-	student: one(students, {
+	user: one(users, {
 		fields: [reviews.userId],
-		references: [students.id],
+		references: [users.id],
 	}),
 	reply: one(instructorReplies),
 }));
@@ -87,8 +83,8 @@ export const instructorRepliesRelations = relations(instructorReplies, ({ one })
 		fields: [instructorReplies.reviewId],
 		references: [reviews.id],
 	}),
-	instructor: one(instructors, {
+	instructor: one(users, {
 		fields: [instructorReplies.instructorId],
-		references: [instructors.id],
+		references: [users.id],
 	}),
 }));

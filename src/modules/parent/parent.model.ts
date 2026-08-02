@@ -6,37 +6,34 @@ import {
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { BaseUser } from "@/bases/models/base.user.model";
 import { TableNames } from "@/enums";
-import { students } from "@/modules/student/student.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
-import { softDelete } from "@/models/soft-delete.model";
+import { timestamps } from "@/models/timestamps.b.model";
+import { users } from "@/models/user.model";
 
-/** @info - Parent — spreads BaseUser. There is no separate users table. */
-export const parents = pgTable(
-	TableNames.PARENTS,
+/** @info - Parent-specific profile. Core identity lives in users table. */
+export const parentProfiles = pgTable(
+	TableNames.PARENT_PROFILES,
 	{
-		...BaseUser,
-		...softDelete,
+		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		...timestamps,
 	},
-	(table) => [
-		uniqueIndex("uq_parents_email").on(table.email),
-	],
 );
 
-/** @info - Links a parent to a child student for monitoring */
+/** @info - Links a parent to a child student for monitoring. Both users. */
 export const parentChildLinks = pgTable(
 	TableNames.PARENT_CHILD_LINKS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		parentId: integer("parent_id")
 			.notNull()
-			.references(() => parents.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		studentId: integer("student_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		linkedAt: timestamp("linked_at").defaultNow().notNull(),
-		...softDelete,
 	},
 	(table) => [
 		uniqueIndex("uq_parent_child_link").on(table.parentId, table.studentId),
@@ -45,24 +42,27 @@ export const parentChildLinks = pgTable(
 	],
 );
 
-export type Parent = typeof parents.$inferSelect;
-export type NewParent = typeof parents.$inferInsert;
+export type ParentProfile = typeof parentProfiles.$inferSelect;
+export type NewParentProfile = typeof parentProfiles.$inferInsert;
 export type ParentChildLink = typeof parentChildLinks.$inferSelect;
 export type NewParentChildLink = typeof parentChildLinks.$inferInsert;
 
 /** @info - Relations */
-export const parentsRelations = relations(parents, ({ many }) => ({
+export const parentProfilesRelations = relations(parentProfiles, ({ one, many }) => ({
+	user: one(users, {
+		fields: [parentProfiles.userId],
+		references: [users.id],
+	}),
 	childLinks: many(parentChildLinks),
-	enrollments: many(enrollments),
 }));
 
 export const parentChildLinksRelations = relations(parentChildLinks, ({ one }) => ({
-	parent: one(parents, {
+	parent: one(users, {
 		fields: [parentChildLinks.parentId],
-		references: [parents.id],
+		references: [users.id],
 	}),
-	student: one(students, {
+	student: one(users, {
 		fields: [parentChildLinks.studentId],
-		references: [students.id],
+		references: [users.id],
 	}),
 }));

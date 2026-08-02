@@ -17,7 +17,8 @@ import {
 } from "@/helpers";
 import type { FacebookTokenInterface, FacebookUserInfo } from "@/interfaces";
 import { userCredentials } from "@/models";
-import { getUserMapper } from "@/modules/user-model-map";
+import { users, UserRepository } from "@/models/user.model";
+import { user_roles, UserRoleRepository } from "@/models/user-role.model";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
 
@@ -31,7 +32,7 @@ export class FacebookOAuthService {
 
 	private provider: AuthMethods = AuthMethods.FACEBOOK;
 
-	private readonly logger = logger;
+	private readonly log = logger;
 	private readonly cacheService: CacheService;
 	private readonly emailQueueService: EmailQueueService;
 
@@ -61,12 +62,6 @@ export class FacebookOAuthService {
 		return `${base}/api/v1/auth/facebook/callback`;
 	}
 
-	private resolveModelAndLabel(userType: UserRole) {
-		const entry = getUserMapper()[userType as keyof ReturnType<typeof getUserMapper>];
-		if (!entry) throwBadRequestError("Invalid user type.");
-		return entry;
-	}
-
 	private buildFacebookCredentials(tokens: any) {
 		return {
 			accessToken: tokens.access_token,
@@ -85,10 +80,10 @@ export class FacebookOAuthService {
 		return { tokens, userInfo };
 	}
 
-	private async finaliseSession(userData: Record<string, any>) {
+	private async finaliseSession(userData: Record<string, any>, userType: string) {
 		const authenticatedUser = generateAuthenticatedData(userData);
 		const authId = generateAuthId(userData.id.toString());
-		const gen_tokens = await generateAuthTokens(authId, userData.userType);
+		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
 		return { user: await withPresignedUrl<any>(authenticatedUser), gen_tokens };
 	}
@@ -107,7 +102,7 @@ export class FacebookOAuthService {
 
 			return response.data;
 		} catch (error: any) {
-			this.logger.error("Facebook token exchange error:", error.response?.data);
+			this.log.error("Facebook token exchange error:", error.response?.data);
 			throwBadRequestError(
 				error.response?.data?.error?.message ||
 					"Failed to get Facebook access token",
@@ -146,7 +141,7 @@ export class FacebookOAuthService {
 				picture: userInfo.picture?.data?.url,
 			};
 		} catch (error: any) {
-			this.logger.error("Facebook user info error:", error.response?.data);
+			this.log.error("Facebook user info error:", error.response?.data);
 			throwBadRequestError(
 				error.response?.data?.error?.message ||
 					"Failed to fetch Facebook user profile",
@@ -169,7 +164,6 @@ export class FacebookOAuthService {
 
 	callback = async (code: string, state: string) => {
 		const userType = decodeBase64(state) as UserRole;
-		const { model, label, repository } = this.resolveModelAndLabel(userType);
 
 		let tokens: FacebookTokenInterface,
 			userInfo: FacebookUserInfo,
@@ -179,7 +173,7 @@ export class FacebookOAuthService {
 		try {
 			({ tokens, userInfo } = await this.exchangeCodeForUserInfo(code));
 		} catch (err: any) {
-			this.logger.error("Facebook OAuth exchange failed", err);
+			this.log.error("Facebook OAuth exchange failed", err);
 			return oauthResponsePage({
 				title: "OAuth Authentication Error",
 				message: "Failed to authenticate with Facebook. Please try again.",
@@ -196,16 +190,19 @@ export class FacebookOAuthService {
 			)!,
 		);
 
+		const userRepo = UserRepository.getInstance();
+		const userRoleRepo = UserRoleRepository.getInstance();
+
 		isNewUser = false;
 
 		if (!existingCredential) {
-			const existingUser = await repository.findOne(
-				eq(model.email, userInfo.email),
+			const existingUser = await userRepo.findOne(
+				eq(users.email, userInfo.email),
 			);
 			if (existingUser) {
 				return oauthResponsePage({
 					title: "Account Not Linked",
-					message: `A ${label} account with this email already exists. Please login using your email and password, then link your Facebook account from settings.`,
+					message: `An account with this email already exists. Please login using your email and password, then link your Facebook account from settings.`,
 					status: "error",
 					payload: { type: "oauth_error", code: "ACCOUNT_NOT_LINKED" },
 				});
@@ -213,32 +210,38 @@ export class FacebookOAuthService {
 
 			try {
 				user = await withTransaction(async (tx) => {
-					const userRepo = new RelationalRepository(model, tx);
-					const credRepo = new RelationalRepository(userCredentials, tx);
+					const uRepo = new RelationalRepository(users, tx);
+					const cRepo = new RelationalRepository(userCredentials, tx);
+					const urRepo = new RelationalRepository(user_roles, tx);
 
-					const newUser = await userRepo.create({
+					const newUser = await uRepo.create({
 						firstName: userInfo.first_name,
 						lastName: userInfo.last_name,
 						email: userInfo.email,
-						avatar: userInfo.picture,
+						avatarUrl: userInfo.picture,
 						emailVerified: true,
 						emailVerifiedAt: new Date(),
 						lastLoginAt: new Date(),
 					} as any);
 
-					await credRepo.create({
-						entityId: newUser.id,
-						entityType: label,
+					await cRepo.create({
+						userId: newUser.id,
+						role: userType,
 						provider: this.provider,
 						providerAccountId: userInfo.id,
 						tokens: this.buildFacebookCredentials(tokens),
+					} as any);
+
+					await urRepo.create({
+						userId: newUser.id,
+						role: userType,
 					} as any);
 
 					return newUser;
 				});
 				isNewUser = true;
 			} catch (e) {
-				this.logger.error(
+				this.log.error(
 					"Error creating user during Facebook OAuth callback",
 					e,
 				);
@@ -255,13 +258,13 @@ export class FacebookOAuthService {
 				tokens: this.buildFacebookCredentials(tokens),
 			});
 
-			user = await repository.findById(existingCredential.entityId);
+			user = await userRepo.findById(existingCredential.userId);
 			if (user) {
-				await repository.update(user.id, { lastLoginAt: new Date() });
+				await userRepo.update(user.id, { lastLoginAt: new Date() });
 			}
 		}
 
-		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user);
+		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user, userType);
 
 		if (isNewUser) {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {

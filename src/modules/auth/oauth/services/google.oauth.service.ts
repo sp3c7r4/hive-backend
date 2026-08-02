@@ -16,10 +16,8 @@ import {
 	withTransaction,
 } from "@/helpers";
 import { userCredentials } from "@/models";
-import {
-	getUserMapper,
-	type UserModelEntry,
-} from "@/modules/user-model-map";
+import { users, UserRepository } from "@/models/user.model";
+import { user_roles, UserRoleRepository } from "@/models/user-role.model";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
 
@@ -69,12 +67,6 @@ export class GoogleOAuthService {
 		return `${base}/api/v1/auth/google/callback`;
 	}
 
-	private resolveModelAndLabel(userType: UserRole) {
-		const entry = getUserMapper()[userType as keyof ReturnType<typeof getUserMapper>];
-		if (!entry) throwBadRequestError("Invalid user type.");
-		return entry as UserModelEntry;
-	}
-
 	private async exchangeCodeForUserInfo(oauthClient: any, code: string) {
 		const { tokens } = await oauthClient.getToken(code);
 		oauthClient.setCredentials({ access_token: tokens.access_token! });
@@ -95,10 +87,10 @@ export class GoogleOAuthService {
 		};
 	}
 
-	private async finaliseSession(userData: Record<string, any>) {
+	private async finaliseSession(userData: Record<string, any>, userType: string) {
 		const authenticatedUser = generateAuthenticatedData(userData);
 		const authId = generateAuthId(userData.id.toString());
-		const gen_tokens = await generateAuthTokens(authId, userData.userType);
+		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
 		return { user: await withPresignedUrl<any>(authenticatedUser), gen_tokens };
 	}
@@ -125,7 +117,6 @@ export class GoogleOAuthService {
 
 	callback = async (code: string, state: string) => {
 		const userType = decodeBase64(state) as UserRole;
-		const { model, label, repository } = this.resolveModelAndLabel(userType);
 
 		let tokens: any, userInfo: any;
 
@@ -152,17 +143,20 @@ export class GoogleOAuthService {
 			)!,
 		);
 
+		const userRepo = UserRepository.getInstance();
+		const userRoleRepo = UserRoleRepository.getInstance();
+
 		let user: any;
 		let isNewUser = false;
 
 		if (!existingCredential) {
-			const existingUser = await repository.findOne(
-				eq(model.email, userInfo.email),
+			const existingUser = await userRepo.findOne(
+				eq(users.email, userInfo.email),
 			);
 			if (existingUser) {
 				return oauthResponsePage({
 					title: "Account Not Linked",
-					message: `A ${label} account with this email already exists. Please login using your email and password, then link your Google account from settings.`,
+					message: `An account with this email already exists. Please login using your email and password, then link your Google account from settings.`,
 					status: "error",
 					payload: { type: "oauth_error", code: "ACCOUNT_NOT_LINKED" },
 				});
@@ -170,25 +164,31 @@ export class GoogleOAuthService {
 
 			try {
 				user = await withTransaction(async (tx) => {
-					const userRepo = new RelationalRepository(model, tx);
-					const credRepo = new RelationalRepository(userCredentials, tx);
+					const uRepo = new RelationalRepository(users, tx);
+					const cRepo = new RelationalRepository(userCredentials, tx);
+					const urRepo = new RelationalRepository(user_roles, tx);
 
-					const newUser = await userRepo.create({
+					const newUser = await uRepo.create({
 						firstName: userInfo.given_name!,
 						lastName: userInfo.family_name!,
 						email: userInfo.email!,
-						avatar: userInfo.picture!,
+						avatarUrl: userInfo.picture!,
 						emailVerified: true,
 						emailVerifiedAt: new Date(),
 						lastLoginAt: new Date(),
 					} as any);
 
-					await credRepo.create({
-						entityId: newUser.id,
-						entityType: label,
+					await cRepo.create({
+						userId: newUser.id,
+						role: userType,
 						provider: this.provider,
 						providerAccountId: userInfo.id!,
 						tokens: this.buildGoogleCredentials(tokens),
+					} as any);
+
+					await urRepo.create({
+						userId: newUser.id,
+						role: userType,
 					} as any);
 
 					return newUser;
@@ -212,13 +212,13 @@ export class GoogleOAuthService {
 				tokens: this.buildGoogleCredentials(tokens),
 			});
 
-			user = await repository.findById(existingCredential.entityId);
+			user = await userRepo.findById(existingCredential.userId);
 			if (user) {
-				await repository.update(user.id, { lastLoginAt: new Date() });
+				await userRepo.update(user.id, { lastLoginAt: new Date() });
 			}
 		}
 
-		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user);
+		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user, userType);
 
 		if (isNewUser) {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {

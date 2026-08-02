@@ -23,7 +23,8 @@ import {
 	JwtService,
 } from "@/services";
 import type { ILoginDataWithMetadata, ISignupDataWithMetadata } from "@/shared";
-import { getUserMapper } from "@/modules/user-model-map";
+import { users, UserRepository } from "@/models/user.model";
+import { user_roles, UserRoleRepository } from "@/models/user-role.model";
 
 export class AuthService {
 	private static instance: AuthService;
@@ -32,6 +33,8 @@ export class AuthService {
 	private readonly jwtService: JwtService;
 	private readonly encryptionService: EncryptionService;
 	private readonly cacheService: CacheService;
+	private readonly userRepo: UserRepository;
+	private readonly userRoleRepo: UserRoleRepository;
 
 	static getInstance(): AuthService {
 		if (!this.instance) {
@@ -45,19 +48,12 @@ export class AuthService {
 		this.emailQueueService = EmailQueueService.getInstance();
 		this.jwtService = JwtService.getInstance();
 		this.encryptionService = EncryptionService.getInstance();
-	}
-
-	private resolveModel(role: string) {
-		const mapper = getUserMapper();
-		const entry = mapper[role as keyof typeof mapper];
-		if (!entry) throwBadRequestError(`Invalid role: ${role}`);
-		return entry;
+		this.userRepo = UserRepository.getInstance();
+		this.userRoleRepo = UserRoleRepository.getInstance();
 	}
 
 	signup = async (data: ISignupDataWithMetadata) => {
-		const { model, repository } = this.resolveModel(data.role);
-
-		const existing = await repository.findOne(eq(model.email, data.email));
+		const existing = await this.userRepo.findOne(eq(users.email, data.email));
 		if (existing) throwBadRequestError("Email already exists");
 
 		const authId = generateAuthId();
@@ -107,41 +103,43 @@ export class AuthService {
 
 	login = async (data: ILoginDataWithMetadata) => {
 		const { email, password } = data;
-		const mapper = getUserMapper();
 
-		/** @info - Try each role table to find the user */
-		let foundUser: any = null;
-		let foundRole: string | null = null;
+		const user = await this.userRepo.findOne(eq(users.email, email));
+		if (!user) throwNotFoundError("Invalid email or password");
 
-		for (const [role, entry] of Object.entries(mapper)) {
-			const user = await entry.repository.findOne(eq(entry.model.email, email));
-			if (user) {
-				foundUser = user;
-				foundRole = role;
-				break;
-			}
-		}
+		/* Check soft-delete */
+		const userAny = user as any;
+		if (userAny.deleted_at) throwNotFoundError("Invalid email or password");
 
-		if (!foundUser || foundUser.deletedAt)
-			throwNotFoundError("Invalid email or password");
+		if (!userAny.passwordHash)
+			throwUnauthorizedError(
+				"This account uses OAuth. Please sign in with Google or Facebook.",
+			);
 
 		const isPasswordValid = await this.encryptionService.compare(
 			password,
-			foundUser.hash!,
+			userAny.passwordHash,
 		);
 		if (!isPasswordValid) throwUnauthorizedError("Invalid email or password");
 
-		const authId = generateAuthId(foundUser.id);
-		const { hash: _, ...sanitized } = foundUser;
-		const authenticatedUser = generateAuthenticatedData(sanitized);
+		const authId = generateAuthId(user!.id.toString());
 
-		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
+		await this.cacheService.set(authId, userAny, TTL.IN_30_MINUTES);
 
-		await this.resolveModel(foundRole!).repository.update(foundUser.id, {
+		await this.userRepo.update(user!.id, {
 			lastLoginAt: new Date(),
 		} as any);
 
-		const tokens = await generateAuthTokens(authId, foundRole as any);
+		/* Get user's roles for the JWT */
+		const userRoles = await this.userRoleRepo.findMany(
+			eq(user_roles.userId, user!.id),
+		);
+		const primaryRole = userRoles[0]?.role ?? "student";
+
+		const { passwordHash: _, deleted_at: __, hash: ___, ...sanitized } = userAny;
+		const authenticatedUser = generateAuthenticatedData(sanitized);
+
+		const tokens = await generateAuthTokens(authId, primaryRole);
 
 		return {
 			message: "Login successful",
@@ -164,12 +162,10 @@ export class AuthService {
 
 		if (!userData) {
 			const userId = grabUserIdFromAuthId(authId);
-			const { repository } = this.resolveModel(userType);
-
-			const user = await repository.findById(Number(userId));
+			const user = await this.userRepo.findById(Number(userId));
 			if (!user) throwUnauthorizedError("User not found.");
 
-			const { hash: _, ...sanitized } = user as any;
+			const { passwordHash: _, deleted_at: __, ...sanitized } = user as any;
 			userData = {
 				...generateAuthenticatedData(sanitized),
 				authId,
@@ -228,35 +224,44 @@ export class AuthService {
 		}
 
 		const role = (rest as any).role;
-		const { repository } = this.resolveModel(role);
 		let user: any = null;
 
 		if (action === JwtAction.VERIFY_EMAIL) {
 			const { firstName, lastName, email } = rest;
-			const decryptedPassword = this.encryptionService.decrypt((rest as any).password!);
+			const decryptedPassword = this.encryptionService.decrypt(
+				(rest as any).password!,
+			);
+			const hashedPassword = await this.encryptionService.hash(
+				decryptedPassword,
+			);
 
-			const hashedPassword = await this.encryptionService.hash(decryptedPassword);
-
-			user = await repository.create({
+			user = await this.userRepo.create({
 				firstName,
 				lastName,
 				email,
-				hash: hashedPassword,
-				role,
+				passwordHash: hashedPassword,
 				emailVerified: true,
 				emailVerifiedAt: new Date(),
 			} as any);
+
+			await this.userRoleRepo.create({
+				userId: user.id,
+				role,
+			} as any);
 		} else if (action === JwtAction.AUTHENTICATE) {
-			const { repository: repo, model } = this.resolveModel(role);
-			user = await repo.findOne(eq(model.email, (rest as any).email));
+			user = await this.userRepo.findOne(
+				eq(users.email, (rest as any).email),
+			);
 			if (user) {
-				user = await repo.update(user.id, { lastLoginAt: new Date() });
+				user = await this.userRepo.update(user.id, {
+					lastLoginAt: new Date(),
+				});
 			}
 		} else if (action === JwtAction.FORGOT_PASSWORD) {
-			const { email } = rest;
-			const { repository: repo, model } = this.resolveModel(role);
-			user = await repo.findOne(eq(model.email, email));
-			if (!user) throwNotFoundError("User not found.");
+			const { email } = rest as any;
+			const foundUser = await this.userRepo.findOne(eq(users.email, email));
+			if (!foundUser) throwNotFoundError("User not found.");
+			user = foundUser;
 
 			const newAuthId = generateAuthId(user.id.toString());
 			const accessToken = this.jwtService.generateToken(newAuthId);
@@ -279,18 +284,19 @@ export class AuthService {
 
 		if (!user) throwBadRequestError("User not found.");
 
-		const { hash: _, ...sanitized } = user;
+		const userAny = user as any;
+		const { passwordHash: _, deleted_at: __, ...sanitized } = userAny;
 		const authenticatedUser = generateAuthenticatedData(sanitized);
 
 		if (action === JwtAction.VERIFY_EMAIL) {
 			this.emailQueueService.add(EmailJobNames.WELCOME as any, {
 				message: {
-					to: authenticatedUser.email,
+					to: (authenticatedUser as any).email,
 					subject: "Welcome to Hive! 🐝",
 				},
-				template: "welcome",
+				template: "welcome" as any,
 				locals: {
-					name: authenticatedUser.firstName,
+					name: (authenticatedUser as any).firstName,
 					dashboardUrl: `${config.server.rootDomain}/dashboard`,
 				},
 			});
@@ -307,40 +313,29 @@ export class AuthService {
 
 		const tokens = await generateAuthTokens(newAuthId, role);
 
-		return { user: await withPresignedUrl<any>(authenticatedUser), ...tokens };
+		return {
+			user: await withPresignedUrl<any>(authenticatedUser),
+			...tokens,
+		};
 	};
 
 	forgotPassword = async (
 		email: string,
 		metadata: { ipAddress: string; location: string; userAgent: string },
 	) => {
-		const mapper = getUserMapper();
+		const user = await this.userRepo.findOne(eq(users.email, email));
+		if (!user) throwNotFoundError("No account found with this email.");
 
-		/** @info - Find which role table the email belongs to */
-		let foundUser: any = null;
-		let foundRole: string | null = null;
-
-		for (const [role, entry] of Object.entries(mapper)) {
-			const user = await entry.repository.findOne(eq(entry.model.email, email));
-			if (user) {
-				foundUser = user;
-				foundRole = role;
-				break;
-			}
-		}
-
-		if (!foundUser) throwNotFoundError("No account found with this email.");
-
-		const authId = generateAuthId(foundUser.id.toString());
-		const otpId = generateOTPId(foundUser.id.toString());
+		const authId = generateAuthId(user!.id.toString());
+		const otpId = generateOTPId(user!.id.toString());
 		const otp = generateOTP();
 
 		const cacheData = {
 			authId,
 			otpId,
-			email: foundUser.email,
+			email: user!.email,
 			action: JwtAction.FORGOT_PASSWORD,
-			role: foundRole,
+			role: "user",
 		};
 
 		await Promise.all([
@@ -354,13 +349,13 @@ export class AuthService {
 
 		this.emailQueueService.add(EmailJobNames.RESET_PASSWORD as any, {
 			message: {
-				to: foundUser.email,
+				to: user!.email,
 				subject: "Reset your password",
 			},
-			template: "reset-password",
+			template: "reset-password" as any,
 			locals: {
 				otp,
-				name: foundUser.firstName,
+				name: user!.firstName,
 				expiryMinutes: TTL.IN_30_MINUTES / 60,
 				timestamp: new Date().toISOString(),
 				ipAddress: metadata.ipAddress,
@@ -395,29 +390,23 @@ export class AuthService {
 	};
 
 	resetPassword = async (authData: IAuthData, newPassword: string) => {
-		const role = (authData as any).role;
-		const { repository } = this.resolveModel(role);
-
-		const user = await repository.findById(Number(authData.id));
+		const user = await this.userRepo.findById(Number(authData.id));
 		if (!user) throwNotFoundError("User not found.");
 
 		const hashedPassword = await this.encryptionService.hash(newPassword);
-		await repository.update(user.id, {
-			hash: hashedPassword,
+		await this.userRepo.update(user!.id, {
+			passwordHash: hashedPassword,
 			passwordChangedAt: new Date(),
 		} as any);
 
-		this.invalidateAllTokens(user.id.toString());
+		this.invalidateAllTokens(user!.id.toString());
 	};
 
 	me = async (authData: IAuthData) => {
-		const role = authData.userType;
-		const { repository } = this.resolveModel(role);
-
-		const user = await repository.findById(Number(authData.id));
+		const user = await this.userRepo.findById(Number(authData.id));
 		if (!user) throwNotFoundError("User not found.");
 
-		const { hash: _, password: __, ...sanitized } = user as any;
+		const { passwordHash: _, deleted_at: __, ...sanitized } = user! as any;
 
 		return withPresignedUrl<any>(sanitized);
 	};

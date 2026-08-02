@@ -10,15 +10,15 @@ import {
 	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 import { lessons } from "@/modules/courses/course.model";
-import { students } from "@/modules/student/student.model";
+import { users } from "@/models/user.model";
 import {
 	QuizQuestionType,
 	AssignmentSubmissionStatus,
 	TableNames,
 } from "@/enums";
 import { timestamps } from "@/models/timestamps.b.model";
-import { relations } from "drizzle-orm";
 
 export const quizQuestionTypeEnum = pgEnum("quiz_question_type", Object.values(QuizQuestionType) as [string, ...string[]]);
 export const assignmentSubmissionStatusEnum = pgEnum(
@@ -49,14 +49,14 @@ export const quizQuestions = pgTable(
 	],
 );
 
-/** @info - One record per question per student per attempt */
+/** @info - One record per question per user per attempt */
 export const quizAttempts = pgTable(
 	TableNames.QUIZ_ATTEMPTS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		userId: integer("user_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		lessonId: integer("lesson_id")
 			.notNull()
 			.references(() => lessons.id, { onDelete: "cascade" }),
@@ -74,14 +74,14 @@ export const quizAttempts = pgTable(
 	],
 );
 
-/** @info - Student submission for an assignment-type lesson */
+/** @info - User submission for an assignment-type lesson */
 export const assignmentSubmissions = pgTable(
 	TableNames.ASSIGNMENT_SUBMISSIONS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		userId: integer("user_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		lessonId: integer("lesson_id")
 			.notNull()
 			.references(() => lessons.id, { onDelete: "cascade" }),
@@ -109,7 +109,6 @@ export type NewQuizAttempt = typeof quizAttempts.$inferInsert;
 export type AssignmentSubmission = typeof assignmentSubmissions.$inferSelect;
 export type NewAssignmentSubmission = typeof assignmentSubmissions.$inferInsert;
 
-
 /** @info - Relations */
 export const quizQuestionsRelations = relations(quizQuestions, ({ one, many }) => ({
 	lesson: one(lessons, {
@@ -120,9 +119,9 @@ export const quizQuestionsRelations = relations(quizQuestions, ({ one, many }) =
 }));
 
 export const quizAttemptsRelations = relations(quizAttempts, ({ one }) => ({
-	student: one(students, {
+	user: one(users, {
 		fields: [quizAttempts.userId],
-		references: [students.id],
+		references: [users.id],
 	}),
 	lesson: one(lessons, {
 		fields: [quizAttempts.lessonId],
@@ -135,9 +134,9 @@ export const quizAttemptsRelations = relations(quizAttempts, ({ one }) => ({
 }));
 
 export const assignmentSubmissionsRelations = relations(assignmentSubmissions, ({ one }) => ({
-	student: one(students, {
+	user: one(users, {
 		fields: [assignmentSubmissions.userId],
-		references: [students.id],
+		references: [users.id],
 	}),
 	lesson: one(lessons, {
 		fields: [assignmentSubmissions.lessonId],

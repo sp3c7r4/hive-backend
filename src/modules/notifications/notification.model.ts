@@ -7,24 +7,26 @@ import {
 	timestamp,
 	varchar,
 } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+import { users } from "@/models/user.model";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import {
 	NotificationType,
 	TableNames,
 } from "@/enums";
-import { userRoleEnum } from "@/bases/models/base.user.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
 export const notificationTypeEnum = pgEnum("notification_type", Object.values(NotificationType) as [string, ...string[]]);
 
-/** @info - Polymorphic notification — entityId + entityType references the recipient's role table */
+/** @info - Notification linked to a user. Role column provides context (student/instructor/parent). */
 export const notifications = pgTable(
 	TableNames.NOTIFICATIONS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-		/** @info - ID of the recipient in their role table */
-		entityId: integer("entity_id").notNull(),
-		/** @info - Which role table entityId refers to */
-		entityType: userRoleEnum("entity_type").notNull(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		role: userRoleEnum("role").notNull(),
 		type: notificationTypeEnum("type").notNull(),
 		title: varchar("title", { length: 255 }).notNull(),
 		message: varchar("message", { length: 1000 }).notNull(),
@@ -33,7 +35,7 @@ export const notifications = pgTable(
 		...timestamps,
 	},
 	(table) => [
-		index("idx_notifications_entity").on(table.entityId, table.entityType),
+		index("idx_notifications_user").on(table.userId),
 		index("idx_notifications_type").on(table.type),
 		index("idx_notifications_read_at").on(table.readAt),
 	],
@@ -42,4 +44,10 @@ export const notifications = pgTable(
 export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
 
-/** @info - Relations: none. Notification entityId + entityType is polymorphic — no direct FK to a single role table. */
+/** @info - Relations */
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+	user: one(users, {
+		fields: [notifications.userId],
+		references: [users.id],
+	}),
+}));

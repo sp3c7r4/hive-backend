@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { RelationalRepository } from "@/bases/repositories/relational.repository";
-import { students } from "@/modules/student/student.model";
+import { users } from "@/models/user.model";
 import { test } from "@/modules/test/test.schema";
 
 describe("RelationalRepository soft-delete scope", () => {
-	it("detects soft-delete column on students table", () => {
-		const repo = new RelationalRepository(students);
-		// students has deleted_at from softDelete helper
+	it("detects soft-delete column on users table", () => {
+		const repo = new RelationalRepository(users);
+		// users has deleted_at from softDelete helper
 		expect(repo).toBeDefined();
 	});
 
@@ -17,7 +17,7 @@ describe("RelationalRepository soft-delete scope", () => {
 	});
 
 	it("findById accepts includeDeleted option", () => {
-		const repo = new RelationalRepository(students);
+		const repo = new RelationalRepository(users);
 		expect(repo.findById).toBeDefined();
 		// Type check: options param accepted
 		const _opts = { includeDeleted: true };
@@ -25,7 +25,7 @@ describe("RelationalRepository soft-delete scope", () => {
 	});
 
 	it("softDelete sets deleted_at instead of hard-deleting", () => {
-		const repo = new RelationalRepository(students);
+		const repo = new RelationalRepository(users);
 		expect(repo.softDelete).toBeDefined();
 	});
 });

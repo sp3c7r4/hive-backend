@@ -8,29 +8,27 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
-import { students } from "@/modules/student/student.model";
-import { parents } from "@/modules/parent/parent.model";
+import { users } from "@/models/user.model";
 import { courses, lessons } from "@/modules/courses/course.model";
 import { payments } from "@/modules/payment/payment.model";
 import { certificates } from "@/modules/certificates/certificate.model";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-/** @info - Tracks a student's enrollment in a course */
+/** @info - Tracks a user's enrollment in a course */
 export const enrollments = pgTable(
 	TableNames.ENROLLMENTS,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-		/** @info - The student taking the course */
 		userId: integer("user_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		courseId: integer("course_id")
 			.notNull()
 			.references(() => courses.id, { onDelete: "cascade" }),
 		/** @info - Parent who paid for this enrollment, null if self-enrolled */
 		enrolledById: integer("enrolled_by_id")
-			.references(() => parents.id, { onDelete: "set null" }),
+			.references(() => users.id, { onDelete: "set null" }),
 		progressPercent: integer("progress_percent").default(0),
 		completedAt: timestamp("completed_at"),
 		expiresAt: timestamp("expires_at"),
@@ -57,7 +55,6 @@ export const lessonProgress = pgTable(
 			.notNull()
 			.references(() => lessons.id, { onDelete: "cascade" }),
 		completed: boolean("completed").default(false),
-		/** @info - Last video position in seconds, for resume playback */
 		lastPositionSeconds: integer("last_position_seconds").default(0),
 		completedAt: timestamp("completed_at"),
 		updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -76,17 +73,17 @@ export type NewLessonProgress = typeof lessonProgress.$inferInsert;
 
 /** @info - Relations */
 export const enrollmentsRelations = relations(enrollments, ({ one, many }) => ({
-	student: one(students, {
+	user: one(users, {
 		fields: [enrollments.userId],
-		references: [students.id],
+		references: [users.id],
 	}),
 	course: one(courses, {
 		fields: [enrollments.courseId],
 		references: [courses.id],
 	}),
-	enrolledBy: one(parents, {
+	enrolledBy: one(users, {
 		fields: [enrollments.enrolledById],
-		references: [parents.id],
+		references: [users.id],
 	}),
 	lessonProgress: many(lessonProgress),
 	payments: many(payments),

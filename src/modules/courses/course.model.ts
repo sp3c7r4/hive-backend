@@ -10,7 +10,7 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { instructors } from "@/modules/instructor/instructor.model";
+import { users } from "@/models/user.model";
 import { communities } from "@/modules/communities/community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { certificates } from "@/modules/certificates/certificate.model";
@@ -34,14 +34,14 @@ export const courseStatusEnum = pgEnum("course_status", Object.values(CourseStat
 export const lessonTypeEnum = pgEnum("lesson_type", Object.values(LessonType) as [string, ...string[]]);
 export const lessonStatusEnum = pgEnum("lesson_status", Object.values(LessonStatus) as [string, ...string[]]);
 
-/** @info - A course belongs to one community and is owned by one instructor */
+/** @info - A course belongs to one community and is owned by one user (instructor) */
 export const courses = pgTable(
 	TableNames.COURSES,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		instructorId: integer("instructor_id")
 			.notNull()
-			.references(() => instructors.id, { onDelete: "restrict" }),
+			.references(() => users.id, { onDelete: "restrict" }),
 		communityId: integer("community_id")
 			.notNull()
 			.references(() => communities.id, { onDelete: "restrict" }),
@@ -52,10 +52,8 @@ export const courses = pgTable(
 		category: varchar("category", { length: 255 }),
 		difficulty: courseDifficultyEnum("difficulty").default("beginner").notNull(),
 		visibility: courseVisibilityEnum("visibility").default("public").notNull(),
-		/** @info - Price in kobo, 0 = free */
 		price: integer("price").default(0).notNull(),
 		isFree: boolean("is_free").default(true),
-		/** @info - Monthly subscription price in kobo */
 		monthlyPrice: integer("monthly_price"),
 		coverImageUrl: varchar("cover_image_url", { length: 500 }),
 		sequentialAccess: boolean("sequential_access").default(false),
@@ -68,7 +66,6 @@ export const courses = pgTable(
 		minAttendancePercent: integer("min_attendance_percent").default(60),
 		status: courseStatusEnum("status").default("draft").notNull(),
 		enrollmentCount: integer("enrollment_count").default(0),
-		/** @info - Stored as 0–50, divide by 10 for display */
 		averageRating: integer("average_rating").default(0),
 		reviewCount: integer("review_count").default(0),
 		...timestamps,
@@ -112,7 +109,6 @@ export const lessons = pgTable(
 		title: varchar("title", { length: 255 }).notNull(),
 		description: text("description"),
 		type: lessonTypeEnum("type").default("video").notNull(),
-		/** @info - Human-readable duration e.g. "12:30" */
 		duration: varchar("duration", { length: 100 }),
 		sortOrder: integer("sort_order").default(0).notNull(),
 		freePreview: boolean("free_preview").default(false),
@@ -122,7 +118,6 @@ export const lessons = pgTable(
 		liveMeetingLink: varchar("live_meeting_link", { length: 1000 }),
 		liveMeetingDate: varchar("live_meeting_date", { length: 255 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
-		/** @info - JSONB for lesson-type-specific config (assignment settings, quiz config, etc.) */
 		settings: jsonb("settings"),
 		...timestamps,
 	},
@@ -142,9 +137,9 @@ export type NewLesson = typeof lessons.$inferInsert;
 
 /** @info - Relations */
 export const coursesRelations = relations(courses, ({ one, many }) => ({
-	instructor: one(instructors, {
+	instructor: one(users, {
 		fields: [courses.instructorId],
-		references: [instructors.id],
+		references: [users.id],
 	}),
 	community: one(communities, {
 		fields: [courses.communityId],

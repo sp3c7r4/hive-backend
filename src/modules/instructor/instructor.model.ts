@@ -1,39 +1,41 @@
 import {
 	boolean,
+	integer,
 	jsonb,
 	pgTable,
-	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { BaseUser } from "@/bases/models/base.user.model";
 import { TableNames } from "@/enums";
-import { softDelete } from "@/models/soft-delete.model";
+import { timestamps } from "@/models/timestamps.b.model";
+import { users } from "@/models/user.model";
 import { communities } from "@/modules/communities/community.model";
 import { courses } from "@/modules/courses/course.model";
 import { instructorReplies } from "@/modules/reviews/review.model";
 import { withdrawals } from "@/modules/payment/payment.model";
 
-/** @info - Instructor — spreads BaseUser. There is no separate users table. */
-export const instructors = pgTable(
-	TableNames.INSTRUCTORS,
+/** @info - Instructor-specific profile. Core identity lives in users table. */
+export const instructorProfiles = pgTable(
+	TableNames.INSTRUCTOR_PROFILES,
 	{
-		...BaseUser,
-		/** @info - Teaching specialization tags e.g. ["Web Development", "Graphic Design"] */
+		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
 		specializationTags: jsonb("specialization_tags").$type<string[]>().default([]),
-		/** @info - Admin flag for platform management */
 		isAdmin: boolean("is_admin").default(false),
-		...softDelete,
+		...timestamps,
 	},
-	(table) => [
-		uniqueIndex("uq_instructors_email").on(table.email),
-	],
 );
 
-export type Instructor = typeof instructors.$inferSelect;
-export type NewInstructor = typeof instructors.$inferInsert;
+export type InstructorProfile = typeof instructorProfiles.$inferSelect;
+export type NewInstructorProfile = typeof instructorProfiles.$inferInsert;
 
 /** @info - Relations */
-export const instructorsRelations = relations(instructors, ({ many }) => ({
+export const instructorProfilesRelations = relations(instructorProfiles, ({ one, many }) => ({
+	user: one(users, {
+		fields: [instructorProfiles.userId],
+		references: [users.id],
+	}),
 	communities: many(communities),
 	courses: many(courses),
 	replies: many(instructorReplies),

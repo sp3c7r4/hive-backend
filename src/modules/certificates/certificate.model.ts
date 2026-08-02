@@ -8,25 +8,24 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
-import { students } from "@/modules/student/student.model";
+import { users } from "@/models/user.model";
 import { courses } from "@/modules/courses/course.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 
-/** @info - Issued when a student meets all certificate requirements for a course */
+/** @info - Issued when a user meets all certificate requirements for a course */
 export const certificates = pgTable(
 	TableNames.CERTIFICATES,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		userId: integer("user_id")
 			.notNull()
-			.references(() => students.id, { onDelete: "cascade" }),
+			.references(() => users.id, { onDelete: "cascade" }),
 		courseId: integer("course_id")
 			.notNull()
 			.references(() => courses.id, { onDelete: "cascade" }),
 		enrollmentId: integer("enrollment_id")
 			.notNull()
 			.references(() => enrollments.id, { onDelete: "cascade" }),
-		/** @info - Publicly shareable verification code, accessible at /verify/:code */
 		code: varchar("code", { length: 100 }).notNull(),
 		issuedAt: timestamp("issued_at").defaultNow().notNull(),
 		completionPercent: integer("completion_percent").notNull(),
@@ -47,9 +46,9 @@ export type NewCertificate = typeof certificates.$inferInsert;
 
 /** @info - Relations */
 export const certificatesRelations = relations(certificates, ({ one }) => ({
-	student: one(students, {
+	user: one(users, {
 		fields: [certificates.userId],
-		references: [students.id],
+		references: [users.id],
 	}),
 	course: one(courses, {
 		fields: [certificates.courseId],

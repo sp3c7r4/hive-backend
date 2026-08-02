@@ -10,10 +10,10 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { instructors } from "@/modules/instructor/instructor.model";
+import { users } from "@/models/user.model";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { courses } from "@/modules/courses/course.model";
 import { payments } from "@/modules/payment/payment.model";
-import { userRoleEnum } from "@/bases/models/base.user.model";
 import {
 	CommunityVisibility,
 	CommunityMemberRole,
@@ -29,14 +29,14 @@ export const communityMemberRoleEnum = pgEnum("community_member_role", Object.va
 export const communityMemberStatusEnum = pgEnum("community_member_status", Object.values(CommunityMemberStatus) as [string, ...string[]]);
 export const communityInviteStatusEnum = pgEnum("community_invite_status", Object.values(CommunityInviteStatus) as [string, ...string[]]);
 
-/** @info - Top-level container for courses and social interaction, owned by an instructor */
+/** @info - Top-level container for courses and social interaction, owned by a user (instructor) */
 export const communities = pgTable(
 	TableNames.COMMUNITIES,
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		ownerId: integer("owner_id")
 			.notNull()
-			.references(() => instructors.id, { onDelete: "restrict" }),
+			.references(() => users.id, { onDelete: "restrict" }),
 		name: varchar("name", { length: 255 }).notNull(),
 		slug: varchar("slug", { length: 255 }).notNull(),
 		description: text("description"),
@@ -44,12 +44,10 @@ export const communities = pgTable(
 		visibility: communityVisibilityEnum("visibility").default("public").notNull(),
 		requiresApproval: boolean("requires_approval").default(false),
 		isPaid: boolean("is_paid").default(false),
-		/** @info - Price in kobo, null if free */
 		price: integer("price"),
 		coverImageUrl: varchar("cover_image_url", { length: 500 }),
 		memberCount: integer("member_count").default(0),
 		courseCount: integer("course_count").default(0),
-		/** @info - Stored as 0–50, divide by 10 for display */
 		averageRating: integer("average_rating").default(0),
 		reviewCount: integer("review_count").default(0),
 		sequentialCourses: boolean("sequential_courses").default(false),
@@ -67,7 +65,7 @@ export const communities = pgTable(
 	],
 );
 
-/** @info - Polymorphic membership — entityId + entityType references the role table */
+/** @info - Membership linking a user to a community. Role column for context (student/instructor/parent). */
 export const communityMembers = pgTable(
 	TableNames.COMMUNITY_MEMBERS,
 	{
@@ -75,20 +73,20 @@ export const communityMembers = pgTable(
 		communityId: integer("community_id")
 			.notNull()
 			.references(() => communities.id, { onDelete: "cascade" }),
-		/** @info - ID of the member in their role table (instructors / students / parents) */
-		entityId: integer("entity_id").notNull(),
-		/** @info - Which role table entityId refers to */
-		entityType: userRoleEnum("entity_type").notNull(),
-		role: communityMemberRoleEnum("role").default("member").notNull(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		role: userRoleEnum("role").notNull(),
+		memberRole: communityMemberRoleEnum("member_role").default("member").notNull(),
 		status: communityMemberStatusEnum("status").default("active").notNull(),
 		joinedAt: timestamp("joined_at").defaultNow().notNull(),
 		expiresAt: timestamp("expires_at"),
 		...timestamps,
 	},
 	(table) => [
-		uniqueIndex("uq_community_member").on(table.communityId, table.entityId, table.entityType),
+		uniqueIndex("uq_community_member").on(table.communityId, table.userId),
 		index("idx_community_members_community").on(table.communityId),
-		index("idx_community_members_entity").on(table.entityId, table.entityType),
+		index("idx_community_members_user").on(table.userId),
 		index("idx_community_members_status").on(table.status),
 	],
 );
@@ -101,8 +99,9 @@ export const communityInvites = pgTable(
 		communityId: integer("community_id")
 			.notNull()
 			.references(() => communities.id, { onDelete: "cascade" }),
-		/** @info - ID of the inviter in their role table */
-		invitedBy: integer("invited_by").notNull(),
+		invitedBy: integer("invited_by")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
 		email: varchar("email", { length: 255 }).notNull(),
 		status: communityInviteStatusEnum("status").default("pending").notNull(),
 		sentAt: timestamp("sent_at").defaultNow().notNull(),
@@ -125,9 +124,9 @@ export type NewCommunityInvite = typeof communityInvites.$inferInsert;
 
 /** @info - Relations */
 export const communitiesRelations = relations(communities, ({ one, many }) => ({
-	owner: one(instructors, {
+	owner: one(users, {
 		fields: [communities.ownerId],
-		references: [instructors.id],
+		references: [users.id],
 	}),
 	members: many(communityMembers),
 	invites: many(communityInvites),
@@ -140,11 +139,19 @@ export const communityMembersRelations = relations(communityMembers, ({ one }) =
 		fields: [communityMembers.communityId],
 		references: [communities.id],
 	}),
+	user: one(users, {
+		fields: [communityMembers.userId],
+		references: [users.id],
+	}),
 }));
 
 export const communityInvitesRelations = relations(communityInvites, ({ one }) => ({
 	community: one(communities, {
 		fields: [communityInvites.communityId],
 		references: [communities.id],
+	}),
+	inviter: one(users, {
+		fields: [communityInvites.invitedBy],
+		references: [users.id],
 	}),
 }));

@@ -9,12 +9,13 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import { users } from "@/models/user.model";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import {
 	ConversationType,
 	MessageType,
 	TableNames,
 } from "@/enums";
-import { userRoleEnum } from "@/bases/models/base.user.model";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
@@ -27,7 +28,6 @@ export const conversations = pgTable(
 	{
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		type: conversationTypeEnum("type").default("direct").notNull(),
-		/** @info - Only for group conversations */
 		title: varchar("title", { length: 255 }),
 		lastMessageAt: timestamp("last_message_at"),
 		...timestamps,
@@ -37,7 +37,7 @@ export const conversations = pgTable(
 	],
 );
 
-/** @info - Polymorphic participant — entityId + entityType references the role table */
+/** @info - Links a user to a conversation. Role column provides context (student/instructor/parent). */
 export const conversationParticipants = pgTable(
 	TableNames.CONVERSATION_PARTICIPANTS,
 	{
@@ -45,17 +45,17 @@ export const conversationParticipants = pgTable(
 		conversationId: integer("conversation_id")
 			.notNull()
 			.references(() => conversations.id, { onDelete: "cascade" }),
-		/** @info - ID of the participant in their role table */
-		entityId: integer("entity_id").notNull(),
-		/** @info - Which role table entityId refers to */
-		entityType: userRoleEnum("entity_type").notNull(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		role: userRoleEnum("role").notNull(),
 		joinedAt: timestamp("joined_at").defaultNow().notNull(),
 		leftAt: timestamp("left_at"),
 	},
 	(table) => [
-		uniqueIndex("uq_conversation_participant").on(table.conversationId, table.entityId, table.entityType),
+		uniqueIndex("uq_conversation_participant").on(table.conversationId, table.userId),
 		index("idx_conversation_participants_conversation").on(table.conversationId),
-		index("idx_conversation_participants_entity").on(table.entityId, table.entityType),
+		index("idx_conversation_participants_user").on(table.userId),
 	],
 );
 
@@ -67,8 +67,9 @@ export const messages = pgTable(
 		conversationId: integer("conversation_id")
 			.notNull()
 			.references(() => conversations.id, { onDelete: "cascade" }),
-		/** @info - ID of the sender in their role table */
-		senderId: integer("sender_id").notNull(),
+		senderId: integer("sender_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
 		type: messageTypeEnum("type").default("text").notNull(),
 		content: text("content"),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
@@ -101,11 +102,19 @@ export const conversationParticipantsRelations = relations(conversationParticipa
 		fields: [conversationParticipants.conversationId],
 		references: [conversations.id],
 	}),
+	user: one(users, {
+		fields: [conversationParticipants.userId],
+		references: [users.id],
+	}),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
 	conversation: one(conversations, {
 		fields: [messages.conversationId],
 		references: [conversations.id],
+	}),
+	sender: one(users, {
+		fields: [messages.senderId],
+		references: [users.id],
 	}),
 }));

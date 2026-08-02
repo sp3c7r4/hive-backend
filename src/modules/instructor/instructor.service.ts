@@ -1,13 +1,10 @@
-import { eq, count, sql, desc, and, gte, lte, sum } from "drizzle-orm";
-import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { eq, count, sql, desc, and, gte, lte } from "drizzle-orm";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { InstructorMessages } from "./instructor.message";
-import { instructors } from "./instructor.model";
 import { courses } from "@/modules/courses/course.model";
 import { lessons } from "@/modules/courses/course.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
-import { reviews } from "@/modules/reviews/review.model";
 import { CourseRepository } from "@/modules/courses/course.repository";
 import { getDb } from "@/db/postgres.db";
 
