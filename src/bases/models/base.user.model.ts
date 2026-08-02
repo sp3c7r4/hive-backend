@@ -11,7 +11,7 @@ import type { IUserPreferences } from "@/interfaces";
 import { UserRole } from "@/enums";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
+export const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
 
 /**
  * @info - Shared identity columns spread into every role table (instructors, students, parents).

@@ -28,11 +28,11 @@ import {
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const courseDifficultyEnum = pgEnum("course_difficulty", Object.values(CourseDifficulty) as [string, ...string[]]);
-const courseVisibilityEnum = pgEnum("course_visibility", Object.values(CourseVisibility) as [string, ...string[]]);
-const courseStatusEnum = pgEnum("course_status", Object.values(CourseStatus) as [string, ...string[]]);
-const lessonTypeEnum = pgEnum("lesson_type", Object.values(LessonType) as [string, ...string[]]);
-const lessonStatusEnum = pgEnum("lesson_status", Object.values(LessonStatus) as [string, ...string[]]);
+export const courseDifficultyEnum = pgEnum("course_difficulty", Object.values(CourseDifficulty) as [string, ...string[]]);
+export const courseVisibilityEnum = pgEnum("course_visibility", Object.values(CourseVisibility) as [string, ...string[]]);
+export const courseStatusEnum = pgEnum("course_status", Object.values(CourseStatus) as [string, ...string[]]);
+export const lessonTypeEnum = pgEnum("lesson_type", Object.values(LessonType) as [string, ...string[]]);
+export const lessonStatusEnum = pgEnum("lesson_status", Object.values(LessonStatus) as [string, ...string[]]);
 
 /** @info - A course belongs to one community and is owned by one instructor */
 export const courses = pgTable(

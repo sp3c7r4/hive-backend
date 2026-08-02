@@ -9,13 +9,12 @@ import {
 } from "drizzle-orm/pg-core";
 import {
 	NotificationType,
-	UserRole,
 	TableNames,
 } from "@/enums";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const notificationTypeEnum = pgEnum("notification_type", Object.values(NotificationType) as [string, ...string[]]);
-const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
+export const notificationTypeEnum = pgEnum("notification_type", Object.values(NotificationType) as [string, ...string[]]);
 
 /** @info - Polymorphic notification — entityId + entityType references the recipient's role table */
 export const notifications = pgTable(

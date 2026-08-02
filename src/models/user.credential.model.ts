@@ -8,20 +8,16 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import _ from "lodash";
-import { AuthMethods, UserRole, TableNames } from "@/enums";
+import { AuthMethods, TableNames } from "@/enums";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { timestamps } from "./timestamps.b.model";
 
-const providerEnum = pgEnum(
+export const providerEnum = pgEnum(
 	"auth_provider",
 	Object.values(_.omit(AuthMethods, AuthMethods.EMAIL)) as [
 		string,
 		...string[],
 	],
-);
-
-const userRoleEnum = pgEnum(
-	"user_role",
-	Object.values(UserRole) as [string, ...string[]],
 );
 
 /** @info - OAuth credential linking a polymorphic user (instructor/student/parent) to a provider account */

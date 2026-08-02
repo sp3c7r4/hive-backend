@@ -20,8 +20,8 @@ import {
 import { timestamps } from "@/models/timestamps.b.model";
 import { relations } from "drizzle-orm";
 
-const quizQuestionTypeEnum = pgEnum("quiz_question_type", Object.values(QuizQuestionType) as [string, ...string[]]);
-const assignmentSubmissionStatusEnum = pgEnum(
+export const quizQuestionTypeEnum = pgEnum("quiz_question_type", Object.values(QuizQuestionType) as [string, ...string[]]);
+export const assignmentSubmissionStatusEnum = pgEnum(
 	"assignment_submission_status",
 	Object.values(AssignmentSubmissionStatus) as [string, ...string[]],
 );

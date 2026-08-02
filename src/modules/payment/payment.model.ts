@@ -18,16 +18,15 @@ import {
 	PaymentTransactionType,
 	PaymentTransactionMethod,
 	WithdrawalStatus,
-	UserRole,
 	TableNames,
 } from "@/enums";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const paymentStatusEnum = pgEnum("payment_status", Object.values(PaymentTransactionStatus) as [string, ...string[]]);
-const paymentTypeEnum = pgEnum("payment_type", Object.values(PaymentTransactionType) as [string, ...string[]]);
-const paymentMethodEnum = pgEnum("payment_method", Object.values(PaymentTransactionMethod) as [string, ...string[]]);
-const withdrawalStatusEnum = pgEnum("withdrawal_status", Object.values(WithdrawalStatus) as [string, ...string[]]);
-const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
+export const paymentStatusEnum = pgEnum("payment_status", Object.values(PaymentTransactionStatus) as [string, ...string[]]);
+export const paymentTypeEnum = pgEnum("payment_type", Object.values(PaymentTransactionType) as [string, ...string[]]);
+export const paymentMethodEnum = pgEnum("payment_method", Object.values(PaymentTransactionMethod) as [string, ...string[]]);
+export const withdrawalStatusEnum = pgEnum("withdrawal_status", Object.values(WithdrawalStatus) as [string, ...string[]]);
 
 /**
  * @info - Payment record.

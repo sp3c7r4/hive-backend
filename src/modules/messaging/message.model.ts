@@ -12,15 +12,14 @@ import { relations } from "drizzle-orm";
 import {
 	ConversationType,
 	MessageType,
-	UserRole,
 	TableNames,
 } from "@/enums";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const conversationTypeEnum = pgEnum("conversation_type", Object.values(ConversationType) as [string, ...string[]]);
-const messageTypeEnum = pgEnum("message_type", Object.values(MessageType) as [string, ...string[]]);
-const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
+export const conversationTypeEnum = pgEnum("conversation_type", Object.values(ConversationType) as [string, ...string[]]);
+export const messageTypeEnum = pgEnum("message_type", Object.values(MessageType) as [string, ...string[]]);
 
 /** @info - Direct or group conversation */
 export const conversations = pgTable(

@@ -13,22 +13,21 @@ import { relations } from "drizzle-orm";
 import { instructors } from "@/modules/instructor/instructor.model";
 import { courses } from "@/modules/courses/course.model";
 import { payments } from "@/modules/payment/payment.model";
+import { userRoleEnum } from "@/bases/models/base.user.model";
 import {
 	CommunityVisibility,
 	CommunityMemberRole,
 	CommunityMemberStatus,
 	CommunityInviteStatus,
-	UserRole,
 	TableNames,
 } from "@/enums";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
-const communityVisibilityEnum = pgEnum("community_visibility", Object.values(CommunityVisibility) as [string, ...string[]]);
-const communityMemberRoleEnum = pgEnum("community_member_role", Object.values(CommunityMemberRole) as [string, ...string[]]);
-const communityMemberStatusEnum = pgEnum("community_member_status", Object.values(CommunityMemberStatus) as [string, ...string[]]);
-const communityInviteStatusEnum = pgEnum("community_invite_status", Object.values(CommunityInviteStatus) as [string, ...string[]]);
-const userRoleEnum = pgEnum("user_role", Object.values(UserRole) as [string, ...string[]]);
+export const communityVisibilityEnum = pgEnum("community_visibility", Object.values(CommunityVisibility) as [string, ...string[]]);
+export const communityMemberRoleEnum = pgEnum("community_member_role", Object.values(CommunityMemberRole) as [string, ...string[]]);
+export const communityMemberStatusEnum = pgEnum("community_member_status", Object.values(CommunityMemberStatus) as [string, ...string[]]);
+export const communityInviteStatusEnum = pgEnum("community_invite_status", Object.values(CommunityInviteStatus) as [string, ...string[]]);
 
 /** @info - Top-level container for courses and social interaction, owned by an instructor */
 export const communities = pgTable(
