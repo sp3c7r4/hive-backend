@@ -123,7 +123,13 @@ export class FileUploadMiddleware {
 						options.fallback[
 							Math.floor(Math.random() * options.fallback.length)
 						];
-					c.set("uploadedFile", {
+					console.log({
+           	key,
+           	originalName: "default",
+           	size: 0,
+           	mimeType: "",
+          })
+          c.set("uploadedFile", {
 						key,
 						originalName: "default",
 						size: 0,

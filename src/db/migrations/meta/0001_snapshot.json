@@ -1,6 +1,6 @@
 {
-  "id": "de2b7721-8867-44e6-bde9-0e6c5005cfe9",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "88f304c1-a791-4de6-8e34-f4a8b17c6bf7",
+  "prevId": "de2b7721-8867-44e6-bde9-0e6c5005cfe9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -318,7 +318,7 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'{\"theme\":\"system\",\"locale\":\"en-US\",\"timezone\":\"UTC\",\"notifications\":{\"email\":true,\"push\":true,\"marketing\":false,\"digest\":\"none\"}}'::jsonb"
+          "default": "'{\"theme\":\"system\",\"locale\":\"en-US\",\"timezone\":\"UTC\",\"notifications\":{\"email\":true,\"sms\":false,\"whatsapp\":false,\"push\":true}}'::jsonb"
         },
         "deleted_at": {
           "name": "deleted_at",
@@ -3231,7 +3231,20 @@
           "name": "student_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "linked_email": {
+          "name": "linked_email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
         },
         "linked_at": {
           "name": "linked_at",
@@ -3283,6 +3296,21 @@
           "columns": [
             {
               "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_parent_child_email": {
+          "name": "idx_parent_child_email",
+          "columns": [
+            {
+              "expression": "linked_email",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
