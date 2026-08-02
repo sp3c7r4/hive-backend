@@ -15,10 +15,6 @@ import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 import { user_roles } from "./user-role.model";
 
-/**
- * @info - Single users table. Roles live in user_roles junction.
- *         Role-specific fields live in profile tables (instructor_profiles, etc.).
- */
 export const users = pgTable(
 	TableNames.USERS,
 	{
@@ -44,9 +40,9 @@ export const users = pgTable(
 				timezone: "UTC",
 				notifications: {
 					email: true,
+					sms: false,
+					whatsapp: false,
 					push: true,
-					marketing: false,
-					digest: "none",
 				},
 			}),
 		...softDelete,
@@ -60,7 +56,6 @@ export const users = pgTable(
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
-/** @info - Relations */
 export const usersRelations = relations(users, ({ many }) => ({
 	roles: many(user_roles),
 }));

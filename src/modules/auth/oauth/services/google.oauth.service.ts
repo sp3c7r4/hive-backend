@@ -16,10 +16,10 @@ import {
 	withTransaction,
 } from "@/helpers";
 import { userCredentials } from "@/models";
-import { users } from "@/models/user.model";
-import { UserRepository } from "@/models/user.repository";
-import { user_roles } from "@/models/user-role.model";
-import { UserRoleRepository } from "@/models/user-role.repository";
+import { users } from "@/modules/user/user.model";
+import { UserRepository } from "@/modules/user/user.repository";
+import { user_roles } from "@/modules/user/user-role.model";
+import { UserRoleRepository } from "@/modules/user/user-role.repository";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
 
@@ -94,7 +94,7 @@ export class GoogleOAuthService {
 		const authId = generateAuthId(userData.id.toString());
 		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
-		return { user: await withPresignedUrl<any>(authenticatedUser), gen_tokens };
+		return { user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"), gen_tokens };
 	}
 
 	getUserInfoFromAccessToken = async (accessToken: string) => {

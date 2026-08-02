@@ -1,6 +1,6 @@
 /** @info - Barrel re-export for drizzle-kit — only *.model.ts tables and pg-enums belong here */
-export * from "@/models/user.model";
-export * from "@/models/user-role.model";
+export * from "@/modules/user/user.model";
+export * from "@/modules/user/user-role.model";
 export * from "@/models/user.credential.model";
 export * from "@/modules/assessments/assessment.model";
 export * from "@/modules/certificates/certificate.model";

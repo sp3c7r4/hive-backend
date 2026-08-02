@@ -6,7 +6,7 @@ import {
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
 import { timestamps } from "@/models/timestamps.b.model";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 import { quizAttempts, assignmentSubmissions } from "@/modules/assessments/assessment.model";
 import { certificates } from "@/modules/certificates/certificate.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";

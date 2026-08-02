@@ -4,11 +4,12 @@ import {
 	pgTable,
 	timestamp,
 	uniqueIndex,
+	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
 import { timestamps } from "@/models/timestamps.b.model";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 
 /** @info - Parent-specific profile. Core identity lives in users table. */
 export const parentProfiles = pgTable(
@@ -22,7 +23,7 @@ export const parentProfiles = pgTable(
 	},
 );
 
-/** @info - Links a parent to a child student for monitoring. Both users. */
+/** @info - Links a parent to a child student for monitoring. Supports pending invites. */
 export const parentChildLinks = pgTable(
 	TableNames.PARENT_CHILD_LINKS,
 	{
@@ -30,15 +31,19 @@ export const parentChildLinks = pgTable(
 		parentId: integer("parent_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
+		/** @info - Null until the child accepts the invite or signs up */
 		studentId: integer("student_id")
-			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
+		/** @info - Email used to look up the child (stored while pending) */
+		linkedEmail: varchar("linked_email", { length: 255 }),
+		status: varchar("status", { length: 20 }).default("active").notNull(),
 		linkedAt: timestamp("linked_at").defaultNow().notNull(),
 	},
 	(table) => [
 		uniqueIndex("uq_parent_child_link").on(table.parentId, table.studentId),
 		index("idx_parent_child_parent").on(table.parentId),
 		index("idx_parent_child_student").on(table.studentId),
+		index("idx_parent_child_email").on(table.linkedEmail),
 	],
 );
 

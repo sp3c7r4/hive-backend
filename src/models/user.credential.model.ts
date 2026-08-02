@@ -11,7 +11,7 @@ import { relations } from "drizzle-orm";
 import _ from "lodash";
 import { AuthMethods, TableNames } from "@/enums";
 import { userRoleEnum } from "@/bases/models/base.user.model";
-import { users } from "./user.model";
+import { users } from "@/modules/user/user.model";
 import { timestamps } from "./timestamps.b.model";
 
 export const providerEnum = pgEnum(

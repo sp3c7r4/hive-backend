@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { RelationalRepository } from "@/bases/repositories/relational.repository";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 import { test } from "@/modules/test/test.schema";
 
 describe("RelationalRepository soft-delete scope", () => {

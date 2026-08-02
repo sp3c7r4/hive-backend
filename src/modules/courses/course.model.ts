@@ -10,7 +10,7 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 import { communities } from "@/modules/communities/community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { certificates } from "@/modules/certificates/certificate.model";

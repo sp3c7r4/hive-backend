@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { lessons } from "@/modules/courses/course.model";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 import {
 	QuizQuestionType,
 	AssignmentSubmissionStatus,

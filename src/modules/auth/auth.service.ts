@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { RelationalRepository } from "@/bases/repositories";
 import { config } from "@/config";
 import { TTL } from "@/constants";
 import { EmailJobNames } from "@/enums";
@@ -23,10 +24,13 @@ import {
 	JwtService,
 } from "@/services";
 import type { ILoginDataWithMetadata, ISignupDataWithMetadata } from "@/shared";
-import { users } from "@/models/user.model";
-import { UserRepository } from "@/models/user.repository";
-import { user_roles } from "@/models/user-role.model";
-import { UserRoleRepository } from "@/models/user-role.repository";
+import { users } from "@/modules/user/user.model";
+import { UserRepository } from "@/modules/user/user.repository";
+import { user_roles } from "@/modules/user/user-role.model";
+import { UserRoleRepository } from "@/modules/user/user-role.repository";
+import { instructorProfiles } from "@/modules/instructor/instructor.model";
+import { studentProfiles } from "@/modules/student/student.model";
+import { parentProfiles } from "@/modules/parent/parent.model";
 
 export class AuthService {
 	private static instance: AuthService;
@@ -109,7 +113,6 @@ export class AuthService {
 		const user = await this.userRepo.findOne(eq(users.email, email));
 		if (!user) throwNotFoundError("Invalid email or password");
 
-		/* Check soft-delete */
 		const userAny = user as any;
 		if (userAny.deleted_at) throwNotFoundError("Invalid email or password");
 
@@ -126,26 +129,33 @@ export class AuthService {
 
 		const authId = generateAuthId(user!.id.toString());
 
-		await this.cacheService.set(authId, userAny, TTL.IN_30_MINUTES);
+		/* Get user's roles for the JWT — may be empty for new users who haven't picked a role */
+		const userRoles = await this.userRoleRepo.findMany(
+			eq(user_roles.userId, user!.id),
+		);
+		const primaryRole = userRoles[0]?.role ?? "";
+
+		const { passwordHash: _, deleted_at: __, hash: ___, ...sanitized } = userAny;
+
+		await this.cacheService.set(
+			authId,
+			{ ...sanitized, roles: userRoles.map((r) => r.role) },
+			TTL.IN_30_MINUTES,
+		);
 
 		await this.userRepo.update(user!.id, {
 			lastLoginAt: new Date(),
 		} as any);
 
-		/* Get user's roles for the JWT */
-		const userRoles = await this.userRoleRepo.findMany(
-			eq(user_roles.userId, user!.id),
-		);
-		const primaryRole = userRoles[0]?.role ?? "student";
-
-		const { passwordHash: _, deleted_at: __, hash: ___, ...sanitized } = userAny;
 		const authenticatedUser = generateAuthenticatedData(sanitized);
-
 		const tokens = await generateAuthTokens(authId, primaryRole);
 
 		return {
 			message: "Login successful",
-			user: await withPresignedUrl<any>(authenticatedUser),
+			user: await withPresignedUrl<any>({
+				...authenticatedUser,
+				roles: userRoles.map((r) => r.role),
+			}, "avatarUrl"),
 			...tokens,
 		};
 	};
@@ -177,7 +187,7 @@ export class AuthService {
 			await this.cacheService.set(authId, userData, TTL.IN_30_MINUTES);
 		}
 
-		return generateAuthTokens(authId, userType);
+		return generateAuthTokens(authId, userType ?? "");
 	};
 
 	logout = async (refreshToken: string) => {
@@ -225,11 +235,11 @@ export class AuthService {
 			throwBadRequestError("Invalid code. Please try again.");
 		}
 
-		const role = (rest as any).role;
 		let user: any = null;
 
 		if (action === JwtAction.VERIFY_EMAIL) {
 			const { firstName, lastName, email } = rest;
+			const role = (rest as any).role;
 			const decryptedPassword = this.encryptionService.decrypt(
 				(rest as any).password!,
 			);
@@ -237,6 +247,7 @@ export class AuthService {
 				decryptedPassword,
 			);
 
+			/* Create user + assign their chosen role */
 			user = await this.userRepo.create({
 				firstName,
 				lastName,
@@ -250,6 +261,15 @@ export class AuthService {
 				userId: user.id,
 				role,
 			} as any);
+
+			/* Seed the profile row for the chosen role */
+			if (role === "instructor") {
+				await new RelationalRepository(instructorProfiles).create({ userId: user.id } as any);
+			} else if (role === "student") {
+				await new RelationalRepository(studentProfiles).create({ userId: user.id } as any);
+			} else if (role === "parent") {
+				await new RelationalRepository(parentProfiles).create({ userId: user.id } as any);
+			}
 		} else if (action === JwtAction.AUTHENTICATE) {
 			user = await this.userRepo.findOne(
 				eq(users.email, (rest as any).email),
@@ -313,10 +333,10 @@ export class AuthService {
 			TTL.IN_30_MINUTES,
 		);
 
-		const tokens = await generateAuthTokens(newAuthId, role);
+		const tokens = await generateAuthTokens(newAuthId, (rest as any).role ?? "");
 
 		return {
-			user: await withPresignedUrl<any>(authenticatedUser),
+			user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"),
 			...tokens,
 		};
 	};
@@ -337,7 +357,6 @@ export class AuthService {
 			otpId,
 			email: user!.email,
 			action: JwtAction.FORGOT_PASSWORD,
-			role: "user",
 		};
 
 		await Promise.all([
@@ -368,6 +387,52 @@ export class AuthService {
 
 		const accessToken = this.jwtService.generateToken(authId);
 		return { accessToken };
+	};
+
+	/**
+	 * @info - Called after signup. User picks their first role.
+	 *         Creates a user_roles row and the corresponding profile row.
+	 */
+	selectRole = async (authData: IAuthData, role: string) => {
+		const userId = Number(authData.id);
+
+		/* Check user exists */
+		const user = await this.userRepo.findById(userId);
+		if (!user) throwNotFoundError("User not found.");
+
+		/* Check role not already assigned — one role per user, locked */
+		const existing = await this.userRoleRepo.findMany(
+			eq(user_roles.userId, userId),
+		);
+		if (existing.length > 0) {
+			throwBadRequestError(
+				"A role is already assigned to this account. Each user is locked to one role.",
+			);
+		}
+
+		/* Create user_roles row */
+		await this.userRoleRepo.create({
+			userId,
+			role,
+		} as any);
+
+		/* Create profile row for the role */
+		if (role === "instructor") {
+			await new RelationalRepository(instructorProfiles).create({ userId } as any);
+		} else if (role === "student") {
+			await new RelationalRepository(studentProfiles).create({ userId } as any);
+		} else if (role === "parent") {
+			await new RelationalRepository(parentProfiles).create({ userId } as any);
+		}
+
+		/* Refresh the roles list */
+		const roles = await this.userRoleRepo.findMany(
+			eq(user_roles.userId, userId),
+		);
+
+		return {
+			roles: roles.map((r) => r.role),
+		};
 	};
 
 	private invalidateAllTokens = async (userId: string) => {
@@ -408,8 +473,15 @@ export class AuthService {
 		const user = await this.userRepo.findById(Number(authData.id));
 		if (!user) throwNotFoundError("User not found.");
 
+		const roles = await this.userRoleRepo.findMany(
+			eq(user_roles.userId, user!.id),
+		);
+
 		const { passwordHash: _, deleted_at: __, ...sanitized } = user! as any;
 
-		return withPresignedUrl<any>(sanitized);
+		return withPresignedUrl<any>({
+			...sanitized,
+			roles: roles.map((r) => r.role),
+		}, "avatarUrl");
 	};
 }

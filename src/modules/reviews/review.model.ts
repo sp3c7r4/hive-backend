@@ -10,7 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
-import { users } from "@/models/user.model";
+import { users } from "@/modules/user/user.model";
 import { courses } from "@/modules/courses/course.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
