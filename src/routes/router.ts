@@ -10,6 +10,7 @@ import { instructorRouter } from "@/modules/instructor";
 import { paymentRouter } from "@/modules/payment";
 import { testRouter } from "@/modules/test";
 import { uploadRouter } from "@/modules/upload";
+import { userRouter } from "@/modules/user/user.routes";
 import { webhookRouter } from "./webhook.routes";
 
 export const router = new Hono();
@@ -28,4 +29,5 @@ router.route("/submissions", submissionRouter);
 router.route("/test", testRouter);
 router.route("/payment", paymentRouter);
 router.route("/upload", uploadRouter);
+router.route("/user", userRouter);
 router.route("/webhook", webhookRouter);
