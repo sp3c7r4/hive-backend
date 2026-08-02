@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { sendSuccessResponse } from "@/helpers";
+import { formDataToObject } from "@/helpers/middleware";
 import { AuthService } from "./auth.service";
 
 export class AuthController {
@@ -107,6 +108,16 @@ export class AuthController {
 		return sendSuccessResponse(c, {
 			message:
 				"Password reset successfully. Please login with your new password.",
+		});
+	};
+
+	selectRole = async (c: Context) => {
+		const authData = c.get("authData");
+		const { role } = await c.req.json();
+		const result = await this.authService.selectRole(authData, role);
+		return sendSuccessResponse(c, {
+			message: `Role "${role}" added successfully.`,
+			data: result,
 		});
 	};
 }

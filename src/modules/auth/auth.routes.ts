@@ -8,6 +8,7 @@ import {
 	loginUserSchema,
 	refreshTokenSchema,
 	resetPasswordSchema,
+	selectRoleSchema,
 	verifyEmailSchema,
 } from "@/shared";
 import { AuthController } from "./auth.controller";
@@ -79,4 +80,11 @@ authRouter.post(
 	"/logout-all",
 	zodEngine.validate.body(refreshTokenSchema),
 	authController.logoutAll,
+);
+
+/** @info - Role selection (post-signup onboarding) */
+authRouter.post(
+	"/roles",
+	zodEngine.validate.body(selectRoleSchema),
+	authController.selectRole,
 );
