@@ -9,15 +9,11 @@ import {
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { RelationalRepository } from "@/bases/repositories";
 import type { IUserPreferences } from "@/interfaces";
 import { TableNames } from "@/enums";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 import { user_roles } from "./user-role.model";
-import { instructorProfiles } from "@/modules/instructor/instructor.model";
-import { studentProfiles } from "@/modules/student/student.model";
-import { parentProfiles } from "@/modules/parent/parent.model";
 
 /**
  * @info - Single users table. Roles live in user_roles junction.
@@ -67,20 +63,4 @@ export type NewUser = typeof users.$inferInsert;
 /** @info - Relations */
 export const usersRelations = relations(users, ({ many }) => ({
 	roles: many(user_roles),
-	instructorProfile: many(instructorProfiles),
-	studentProfile: many(studentProfiles),
-	parentProfile: many(parentProfiles),
 }));
-
-export class UserRepository extends RelationalRepository<typeof users> {
-	private static instance: UserRepository;
-
-	static getInstance(): UserRepository {
-		if (!this.instance) this.instance = new UserRepository();
-		return this.instance;
-	}
-
-	private constructor() {
-		super(users);
-	}
-}

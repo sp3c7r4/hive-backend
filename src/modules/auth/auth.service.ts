@@ -23,8 +23,10 @@ import {
 	JwtService,
 } from "@/services";
 import type { ILoginDataWithMetadata, ISignupDataWithMetadata } from "@/shared";
-import { users, UserRepository } from "@/models/user.model";
-import { user_roles, UserRoleRepository } from "@/models/user-role.model";
+import { users } from "@/models/user.model";
+import { UserRepository } from "@/models/user.repository";
+import { user_roles } from "@/models/user-role.model";
+import { UserRoleRepository } from "@/models/user-role.repository";
 
 export class AuthService {
 	private static instance: AuthService;

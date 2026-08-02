@@ -1,5 +1,5 @@
 import { config } from "@dotenvx/dotenvx";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 
 const getEnvFile = () => `.env.${process.env.NODE_ENV || "development"}`;
 const envFile = getEnvFile();
@@ -75,20 +75,6 @@ const EnvSchema = z.object({
 
 export type EnvType = z.infer<typeof EnvSchema>;
 
-export const env = (await EnvSchema.parseAsync(process.env).catch(
-	(e: Error | ZodError) => {
-		if (e instanceof ZodError) {
-			e.issues.map((i) => {
-				const key = i.path.join(".");
-				console.log(`❌ ${key} is missing`);
-				return process.exit(1);
-			});
-		} else {
-			const message = e instanceof Error ? e.message : String(e);
-			console.log(`Error occuered: ${message}`);
-			return process.exit(1);
-		}
-	},
-)) as EnvType;
+export const env = EnvSchema.parse(process.env) as EnvType;
 
 console.log("[ENV] using environment file:", envFile);

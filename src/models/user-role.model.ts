@@ -4,7 +4,6 @@ import {
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { RelationalRepository } from "@/bases/repositories";
 import { userRoleEnum } from "@/bases/models/base.user.model";
 import { TableNames } from "@/enums";
 import { users } from "./user.model";
@@ -38,16 +37,3 @@ export const userRolesRelations = relations(user_roles, ({ one }) => ({
 		references: [users.id],
 	}),
 }));
-
-export class UserRoleRepository extends RelationalRepository<typeof user_roles> {
-	private static instance: UserRoleRepository;
-
-	static getInstance(): UserRoleRepository {
-		if (!this.instance) this.instance = new UserRoleRepository();
-		return this.instance;
-	}
-
-	private constructor() {
-		super(user_roles);
-	}
-}

@@ -16,8 +16,10 @@ import {
 	withTransaction,
 } from "@/helpers";
 import { userCredentials } from "@/models";
-import { users, UserRepository } from "@/models/user.model";
-import { user_roles, UserRoleRepository } from "@/models/user-role.model";
+import { users } from "@/models/user.model";
+import { UserRepository } from "@/models/user.repository";
+import { user_roles } from "@/models/user-role.model";
+import { UserRoleRepository } from "@/models/user-role.repository";
 import { CacheService, EmailQueueService } from "@/services";
 import { logger } from "@/utils";
 
