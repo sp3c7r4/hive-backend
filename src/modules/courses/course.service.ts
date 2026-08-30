@@ -90,7 +90,20 @@ export class CourseService {
 		}
 
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
-		return withPresignedUrl(course!, "coverImageUrl");
+
+		/* @info - Include the community so the UI can label + gate private
+		 * courses without a second lookup */
+		const enriched = { ...course } as Record<string, unknown>;
+		if (course!.communityId != null) {
+			const [comm] = await db
+				.select({ name: communities.name, slug: communities.slug })
+				.from(communities)
+				.where(eq(communities.id, course!.communityId))
+				.limit(1);
+			enriched.communityName = comm?.name ?? null;
+			enriched.communitySlug = comm?.slug ?? null;
+		}
+		return withPresignedUrl(enriched, "coverImageUrl");
 	};
 
 	listCourses = async (params?: { page?: number; limit?: number; communityId?: number }) => {
