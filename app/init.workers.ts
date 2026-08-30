@@ -6,18 +6,27 @@
  *   npm run start:prod:workers   (production)
  */
 
+import { connectPostgresDB, getDb } from "@/db/postgres.db";
+import { BrowserEngine } from "@/services/engine/browser.engine";
 import { CacheService } from "@/services/cache.service";
 import { EmailWorkerService } from "@/services/workers/email.worker.service";
+import { CertificateWorkerService } from "@/services/workers/certificate.worker.service";
 
-// Trigger Redis connection
+// Trigger Redis + Postgres connections (the certificate worker queries the DB)
 CacheService.getInstance();
+connectPostgresDB(async () => {
+	console.log("[Workers] Database connected");
 
-console.log("[Workers] Initializing...");
+	// ── Browser for document generation (certificates, receipts) ──
+	await BrowserEngine.getInstance().start();
 
-// ── Register workers ──────────────────────────────────
-EmailWorkerService.getInstance();
+	// ── Register workers ──────────────────────────────────
+	EmailWorkerService.getInstance();
+	CertificateWorkerService.getInstance();
 
-console.log("[Workers] All workers registered and listening.");
+	console.log("[Workers] All workers registered and listening.");
+});
+void getDb;
 
 // Graceful shutdown
 const shutdown = async () => {

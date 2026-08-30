@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { withPresignedUrl } from "@/helpers/storage.helper";
 import { serviceLogger } from "@/utils";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
@@ -9,6 +10,7 @@ import { EmailQueueService } from "@/services/queues/email.queue.service";
 import { CertificateMessages } from "./certificate.message";
 import { CertificateRepository } from "./certificate.repository";
 import { courses } from "@/modules/courses/course.model";
+import { users } from "@/modules/user/user.model";
 
 export class CertificateService {
 	private static instance: CertificateService;
@@ -120,6 +122,29 @@ export class CertificateService {
 	verify = async (code: string) => {
 		const cert = await this.repo.findByCode(code);
 		if (!cert) return null;
+		const db = getDb();
+
+		/* @info - Enrich for the public verify page (student + course + instructor) */
+		const [course] = await db
+			.select({
+				title: courses.title,
+				instructorId: courses.instructorId,
+			})
+			.from(courses)
+			.where(eq(courses.id, cert.courseId))
+			.limit(1);
+		const [student] = await db
+			.select({ firstName: users.firstName, lastName: users.lastName })
+			.from(users)
+			.where(eq(users.id, cert.userId))
+			.limit(1);
+		const [instructor] = course?.instructorId
+			? await db
+					.select({ firstName: users.firstName, lastName: users.lastName })
+					.from(users)
+					.where(eq(users.id, course.instructorId))
+					.limit(1)
+			: [undefined];
 
 		return {
 			code: cert.code,
@@ -127,13 +152,33 @@ export class CertificateService {
 			completionPercent: cert.completionPercent,
 			quizScorePercent: cert.quizScorePercent,
 			attendancePercent: cert.attendancePercent,
+			studentName: `${student?.firstName ?? ""} ${student?.lastName ?? ""}`.trim(),
+			courseTitle: course?.title ?? "Course",
+			instructorName: `${instructor?.firstName ?? ""} ${instructor?.lastName ?? ""}`.trim(),
+			pdfUrl: cert.pdfUrl ? withPresignedUrl(cert as any, "pdfUrl").pdfUrl : null,
 		};
 	};
 
 	getUserCertificates = async (authData: IAuthData) => {
-		return this.repo.findMany(
+		const rows = await this.repo.findMany(
 			eq(this.repo.getModel().userId as any, authData.id),
 		);
+		const db = getDb();
+		const enriched = await Promise.all(
+			(rows as any[]).map(async (c) => {
+				const [course] = await db
+					.select({ title: courses.title })
+					.from(courses)
+					.where(eq(courses.id, c.courseId))
+					.limit(1);
+				return {
+					...c,
+					courseTitle: course?.title ?? "Course",
+					pdfUrl: c.pdfUrl ? withPresignedUrl(c, "pdfUrl").pdfUrl : null,
+				};
+			}),
+		);
+		return enriched;
 	};
 
 	private _generateCode = (userId: number, courseId: number): string => {

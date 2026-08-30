@@ -2,10 +2,12 @@ export enum QueueNames {
 	EMAIL = "hive-email-queue",
 	RECEIPT = "hive-receipt",
 	SUBSCRIPTION_EXPIRY = "hive-subscription-expiry-queue",
+	CERTIFICATE = "hive-certificate",
 }
 
 export enum JobNames {
 	SEND_EMAIL = "send-email-job",
+	GENERATE_CERTIFICATE = "generate-certificate-job",
 }
 
 export enum EmailJobNames {

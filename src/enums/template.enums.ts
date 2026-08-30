@@ -12,6 +12,7 @@ export enum EmailTemplates {
 
 export enum Templates {
 	RECEIPT = "receipt",
+	CERTIFICATE = "certificate",
 }
 
 export interface ReceiptBusiness {

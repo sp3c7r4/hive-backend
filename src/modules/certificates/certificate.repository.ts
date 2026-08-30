@@ -1,6 +1,6 @@
 import { RelationalRepository } from "@/bases";
 import { certificates } from "./certificate.model";
-import { eq, and } from "drizzle-orm";
+import { and, eq, ilike } from "drizzle-orm";
 
 export class CertificateRepository extends RelationalRepository<typeof certificates> {
 	private static instance: CertificateRepository;
@@ -24,6 +24,7 @@ export class CertificateRepository extends RelationalRepository<typeof certifica
 	};
 
 	findByCode = async (code: string) => {
-		return this.findOne(eq(certificates.code, code));
+		/* @info - Case-insensitive: verification links may arrive lowercased */
+		return this.findOne(ilike(certificates.code, code));
 	};
 }
