@@ -30,7 +30,10 @@ export class ChatPubSubService {
 	private ensureSubscriber = async () => {
 		if (this.subscriber) return;
 		const client = CacheService.getInstance().getRedisClient();
-		this.subscriber = client.duplicate() as Redis;
+		/* @info - Disable ioredis's INFO ready-check on the duplicate: subscribe()
+		 * flips the connection to subscriber mode immediately, so the internal
+		 * ready-check would run INFO and crash with "only P|S)SUBSCRIBE allowed". */
+		this.subscriber = client.duplicate({ enableReadyCheck: false }) as Redis;
 		this.subscriber.on("message", (channel, message) => {
 			const userId = Number(channel.split(":")[2]);
 			if (!userId) return;
