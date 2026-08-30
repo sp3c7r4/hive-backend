@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
+import { formDataToObject } from "@/helpers/middleware";
 import { CommunityService } from "./community.service";
 
 export class CommunityController {
@@ -18,17 +19,25 @@ export class CommunityController {
 
 	create = async (c: Context) => {
 		const authData = c.get("authData");
-		const data = await this.service.create(authData, await c.req.json());
+
+		/* FormData path — file handled by upload middleware */
+		const formData = await c.req.formData();
+		const data: Record<string, any> = formDataToObject(formData);
+    data.coverImageUrl = c.get("uploadedFile")?.key;
+
+		const result = await this.service.create(authData, data as any);
 		return sendSuccessResponse(c, {
 			message: "Community created successfully",
-			data,
+			data: result,
 		}, StatusCodes.CREATED);
 	};
 
 	list = async (c: Context) => {
+		const authData = c.get("authData");
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const data = await this.service.list({ page, limit });
+		const scope = c.req.query("scope") as "mine" | undefined;
+		const data = await this.service.list({ page, limit, userId: authData?.id, scope });
 		return sendSuccessResponse(c, {
 			message: "Communities fetched successfully",
 			data,
@@ -37,7 +46,8 @@ export class CommunityController {
 
 	getBySlug = async (c: Context) => {
 		const slug = c.req.param("slug");
-		const data = await this.service.getBySlug(slug as string);
+		const authData = c.get("authData");
+		const data = await this.service.getBySlug(slug as string, authData);
 		return sendSuccessResponse(c, {
 			message: "Community fetched successfully",
 			data,
@@ -58,9 +68,19 @@ export class CommunityController {
 
 	delete = async (c: Context) => {
 		const id = c.req.param("id");
-		await this.service.delete(id as unknown as number);
+		const permanent = c.req.query("permanent") === "true";
+		await this.service.delete(id as unknown as number, permanent);
 		return sendSuccessResponse(c, {
-			message: "Community deleted successfully",
+			message: permanent ? "Community permanently deleted" : "Community deleted successfully",
+		});
+	};
+
+	restore = async (c: Context) => {
+		const id = c.req.param("id");
+		const data = await this.service.restore(id as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Community unarchived successfully",
+			data,
 		});
 	};
 

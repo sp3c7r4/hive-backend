@@ -1,0 +1,144 @@
+import { eq, and } from "drizzle-orm";
+import type { Context, Next } from "hono";
+import { StatusCodes } from "http-status-codes";
+import { sendErrorResponse } from "@/helpers/response/send-response";
+import { getDb } from "@/db/postgres.db";
+import { communities, communityMembers } from "@/modules/communities/community.model";
+
+/**
+ * @info - Require the authenticated user to be a member of the community
+ *         identified by the :slug route parameter. Sets `community` and
+ *         `communityMember` on context for downstream handlers.
+ */
+export const requireCommunityMember = async (c: Context, next: Next) => {
+	const authData = c.get("authData");
+	if (!authData?.id) {
+		return sendErrorResponse(
+			c,
+			{ message: "Authentication required." },
+			StatusCodes.UNAUTHORIZED,
+		);
+	}
+
+	const slug = c.req.param("slug");
+	if (!slug) {
+		return sendErrorResponse(
+			c,
+			{ message: "Community slug is required." },
+			StatusCodes.BAD_REQUEST,
+		);
+	}
+
+	const db = getDb();
+
+	const [community] = await db
+		.select({ id: communities.id, slug: communities.slug })
+		.from(communities)
+		.where(eq(communities.slug, slug))
+		.limit(1);
+
+	if (!community) {
+		return sendErrorResponse(
+			c,
+			{ message: "Community not found." },
+			StatusCodes.NOT_FOUND,
+		);
+	}
+
+	const [member] = await db
+		.select()
+		.from(communityMembers)
+		.where(
+			and(
+				eq(communityMembers.communityId, community.id),
+				eq(communityMembers.userId, Number(authData.id)),
+			),
+		)
+		.limit(1);
+
+	if (!member) {
+		return sendErrorResponse(
+			c,
+			{ message: "You must be a member of this community." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+
+	c.set("community", community);
+	c.set("communityMember", member);
+
+	await next();
+};
+
+/**
+ * @info - Require the authenticated user to be an owner or admin of
+ *         the community identified by the :slug route parameter.
+ *         Implies requireCommunityMember.
+ */
+export const requireCommunityAdmin = async (c: Context, next: Next) => {
+	const authData = c.get("authData");
+	if (!authData?.id) {
+		return sendErrorResponse(
+			c,
+			{ message: "Authentication required." },
+			StatusCodes.UNAUTHORIZED,
+		);
+	}
+
+	const slug = c.req.param("slug");
+	if (!slug) {
+		return sendErrorResponse(
+			c,
+			{ message: "Community slug is required." },
+			StatusCodes.BAD_REQUEST,
+		);
+	}
+
+	const db = getDb();
+
+	const [community] = await db
+		.select({ id: communities.id, slug: communities.slug })
+		.from(communities)
+		.where(eq(communities.slug, slug))
+		.limit(1);
+
+	if (!community) {
+		return sendErrorResponse(
+			c,
+			{ message: "Community not found." },
+			StatusCodes.NOT_FOUND,
+		);
+	}
+
+	const [member] = await db
+		.select()
+		.from(communityMembers)
+		.where(
+			and(
+				eq(communityMembers.communityId, community.id),
+				eq(communityMembers.userId, Number(authData.id)),
+			),
+		)
+		.limit(1);
+
+	if (!member) {
+		return sendErrorResponse(
+			c,
+			{ message: "Admin access required." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+
+	if (member.memberRole !== "owner" && member.memberRole !== "admin") {
+		return sendErrorResponse(
+			c,
+			{ message: "Admin access required." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+
+	c.set("community", community);
+	c.set("communityMember", member);
+
+	await next();
+};

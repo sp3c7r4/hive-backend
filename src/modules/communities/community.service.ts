@@ -1,15 +1,29 @@
-import { eq, count, sql, sum } from "drizzle-orm";
-import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { eq, and, or, isNull, inArray, count, sql } from "drizzle-orm";
+import { throwNotFoundError, throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CommunityMessages } from "./community.message";
-import { communities } from "./community.model";
+import { communities, communityMembers } from "./community.model";
 import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { courses } from "@/modules/courses/course.model";
+import { payments } from "@/modules/payment/payment.model";
 import { getDb } from "@/db/postgres.db";
+import { withPresignedUrl, withTransaction } from "@/helpers";
+import { RelationalRepository } from "@/bases";
+
+/** @info - Map drizzle's camelCase timestamps to the API contract (handles both raw
+ *          rows with camelCase `createdAt` and legacy snake_case rows) */
+export const toCommunityDto = <T extends Record<string, any>>(community: T) => {
+	const { created_at, updated_at, ...rest } = community;
+	return {
+		...rest,
+		createdAt: created_at ?? rest.createdAt ?? null,
+		updatedAt: updated_at ?? rest.updatedAt ?? null,
+	};
+};
 
 export class CommunityService {
 	private static instance: CommunityService;
@@ -32,37 +46,149 @@ export class CommunityService {
 	}
 
 	create = async (authData: IAuthData, data: NewCommunity) => {
-		const slug = this._slugify(data.name, authData.id);
-		return this.repo.create({ ...data, slug, ownerId: authData.id } as any);
+		const db = getDb();
+		const slug = await this._uniqueSlug(data.name, authData.id);
+
+    const createdCommunity = await withTransaction(async (tx) => {
+      const communityRepo = new RelationalRepository(communities, tx);
+      const communityMembersRepo = new RelationalRepository(communityMembers, tx);
+
+      const community = await communityRepo.create({ ...data, slug, ownerId: authData.id, memberCount: 1 } as any);
+
+  		/* Auto-add the creator as the owner member */
+  		const existing = await db
+  			.select({ id: communityMembers.id })
+  			.from(communityMembers)
+  			.where(
+  				and(
+  					eq(communityMembers.communityId, community!.id),
+  					eq(communityMembers.userId, authData.id),
+  				),
+  			)
+  			.limit(1);
+
+  		if (existing.length === 0) {
+  			await communityMembersRepo.create({
+  				communityId: community!.id,
+  				userId: authData.id,
+  				role: "instructor" as any,
+  				memberRole: "owner" as any,
+  				status: "active" as any,
+  			});
+      }
+
+      return community;
+    })
+
+
+		return toCommunityDto(withPresignedUrl(createdCommunity, "coverImageUrl"));
 	};
 
 	getById = async (id: number) => {
 		return this.repo.findById(id);
 	};
 
-	getBySlug = async (slug: string) => {
+	getBySlug = async (slug: string, authData?: IAuthData) => {
+		/* includeDeleted: owners must be able to open their archived communities */
 		const community = await this.repo.findOne(
 			eq(this.repo.getModel().slug as any, slug),
+			{ includeDeleted: true },
 		);
-		return community ?? throwNotFoundError(CommunityMessages.NOT_FOUND);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+
+		/* Archived communities are only visible to their owner */
+		if ((community as any).deletedAt && (community as any).ownerId !== authData?.id) {
+			throwNotFoundError(CommunityMessages.NOT_FOUND);
+		}
+
+		return withPresignedUrl(community!, "coverImageUrl");
 	};
 
-	list = async (params?: { page?: number; limit?: number }) => {
-		return this.paginationService.paginate({
+	list = async (params?: { page?: number; limit?: number; userId?: number; scope?: "mine" }) => {
+		const db = getDb();
+
+		let where: any;
+		if (params?.scope === "mine" && params.userId) {
+			/* My Communities: owned OR actively a member of. Owner's archived ones included. */
+			const memberIds = db
+				.select({ communityId: communityMembers.communityId })
+				.from(communityMembers)
+				.where(
+					and(
+						eq(communityMembers.userId, params.userId),
+						eq(communityMembers.status, "active"),
+					),
+				);
+			where = and(
+				or(eq(communities.ownerId, params.userId), inArray(communities.id, memberIds)),
+				or(isNull(communities.deletedAt), eq(communities.ownerId, params.userId)),
+			);
+		} else {
+			/* Explore: public + live communities only */
+			where = and(
+				isNull(communities.deletedAt),
+				eq(communities.visibility, "public"),
+			);
+		}
+
+		const result = await this.paginationService.paginate({
 			page: params?.page ?? 1,
 			limit: params?.limit ?? 20,
+			where,
 		});
+
+		return { ...result, data: result.data.map((c) => toCommunityDto(withPresignedUrl(c, "coverImageUrl"))) };
 	};
 
 	update = async (id: number, data: Partial<NewCommunity>) => {
 		const community = await this.repo.update(id, data as any);
-		return community ?? throwNotFoundError(CommunityMessages.NOT_FOUND);
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		return toCommunityDto(withPresignedUrl(community!, "coverImageUrl"));
 	};
 
-	delete = async (id: number): Promise<void> => {
-		const community = await this.repo.softDelete(id);
+	delete = async (id: number, permanent = false): Promise<void> => {
+		if (!permanent) {
+			const community = await this.repo.softDelete(id);
+			if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+			this.log.info(`Community ${id} soft-deleted`);
+			return;
+		}
+
+		/* Permanent delete — DB cascades members/invites/feed, but courses and
+		 * payments reference the community with restrict/no-action. */
+		const db = getDb();
+		const community = await this.repo.findById(id, { includeDeleted: true });
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
-		this.log.info(`Community ${id} soft-deleted`);
+
+		const [courseRows] = await db
+			.select({ value: count() })
+			.from(courses)
+			.where(eq(courses.communityId, id));
+		if (Number(courseRows?.value ?? 0) > 0) {
+			throwBadRequestError(
+				"Cannot permanently delete this community: it has courses. Delete or move the courses first.",
+			);
+		}
+
+		const [paymentRows] = await db
+			.select({ value: count() })
+			.from(payments)
+			.where(eq(payments.communityId, id));
+		if (Number(paymentRows?.value ?? 0) > 0) {
+			throwBadRequestError(
+				"Cannot permanently delete this community: payment records exist.",
+			);
+		}
+
+		await db.delete(communities).where(eq(communities.id, id));
+		this.log.info(`Community ${id} permanently deleted`);
+	};
+
+	restore = async (id: number) => {
+		const community = await this.repo.update(id, { deletedAt: null } as any, { includeDeleted: true });
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		this.log.info(`Community ${id} unarchived`);
+		return toCommunityDto(withPresignedUrl(community!, "coverImageUrl"));
 	};
 
 	/* Analytics */
@@ -120,5 +246,31 @@ export class CommunityService {
 			.replace(/^-|-$/g, "");
 		const suffix = ownerId.toString(36).slice(-4);
 		return `${base}-${suffix}`;
+	};
+
+	private _uniqueSlug = async (
+		name: string,
+		ownerId: number,
+	): Promise<string> => {
+		const base = this._slugify(name, ownerId);
+
+		/* Check if slug already exists */
+		const existing = await this.repo.findOne(
+			eq(this.repo.getModel().slug as any, base),
+		);
+		if (!existing) return base;
+
+		/* Collision — append a random 4-char suffix until unique */
+		for (let i = 0; i < 5; i++) {
+			const rand = Math.random().toString(36).slice(2, 6);
+			const candidate = `${base}-${rand}`;
+			const dup = await this.repo.findOne(
+				eq(this.repo.getModel().slug as any, candidate),
+			);
+			if (!dup) return candidate;
+		}
+
+		/* Extremely unlikely — fallback to timestamp */
+		return `${base}-${Date.now().toString(36)}`;
 	};
 }
