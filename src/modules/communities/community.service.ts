@@ -5,6 +5,7 @@ import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CommunityMessages } from "./community.message";
 import { communities, communityMembers } from "./community.model";
+import { users } from "@/modules/user/user.model";
 import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
@@ -101,7 +102,39 @@ export class CommunityService {
 			throwNotFoundError(CommunityMessages.NOT_FOUND);
 		}
 
-		return withPresignedUrl(community!, "coverImageUrl");
+		const db = getDb();
+		const [owner] = await db
+			.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+			.from(users)
+			.where(eq(users.id, community!.ownerId))
+			.limit(1);
+
+		/* @info - Real membership state for the authenticated visitor (join page) */
+		let membership: "active" | "pending" | "none" = "none";
+		if (authData?.id) {
+			const [member] = await db
+				.select({ status: communityMembers.status })
+				.from(communityMembers)
+				.where(
+					and(
+						eq(communityMembers.communityId, community!.id),
+						eq(communityMembers.userId, Number(authData.id)),
+					),
+				)
+				.limit(1);
+			membership = member ? (member.status === "pending" ? "pending" : "active") : "none";
+		}
+
+		return {
+			...toCommunityDto(withPresignedUrl(community!, "coverImageUrl")),
+			owner: owner
+				? {
+						name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim(),
+						avatarUrl: owner.avatarUrl ? withPresignedUrl(owner, "avatarUrl").avatarUrl : null,
+					}
+				: null,
+			membership,
+		};
 	};
 
 	list = async (params?: { page?: number; limit?: number; userId?: number; scope?: "mine" | "owned" }) => {

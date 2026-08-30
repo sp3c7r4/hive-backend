@@ -1,76 +1,96 @@
-// Dev fixture seeder — recreates the known dev users + a paid course +
-// community after a fresh migration. Idempotent (ON CONFLICT DO NOTHING).
-// NOTE: password-less rows — dev sessions are minted via Redis (see
-// scripts/e2e/common.py), so no credential hashes are needed here.
+// Dev fixture seeder — idempotent, email-based. Creates the known dev users
+// (reusing existing rows by email), the instructor profile, a paid + a free
+// course, and a community with members. Prints the resolved ids.
 import { Pool } from "pg";
 import { config } from "@/config";
 
 const pool = new Pool({ connectionString: config.db.uri });
 
-const users: Array<[number, string, string, string]> = [
-  [5, "Sarafa", "Satae", "sarafasatar@gmail.com"],
-  [6, "Testing", "User", "vekogep220@murkstar.com"],
-  [8, "Invite", "Tester", "invite.tester@hive.test"],
-  [10, "John", "Doe", "salomih362@robustq.com"],
+const users = [
+  ["Sarafa", "Satae", "sarafasatar@gmail.com"],
+  ["Testing", "User", "vekogep220@murkstar.com"],
+  ["Test", "Student", "test-student@gmail.com"],
 ];
 
-for (const [id, first, last, email] of users) {
-  await pool.query(
-    `INSERT INTO users (id, first_name, last_name, email, onboarded) OVERRIDING SYSTEM VALUE VALUES ($1,$2,$3,$4, true)
-     ON CONFLICT (id) DO NOTHING`,
-    [id, first, last, email],
+const userIds: Record<string, number> = {};
+for (const [first, last, email] of users) {
+  const ins = await pool.query(
+    `INSERT INTO users (first_name, last_name, email, onboarded)
+     VALUES ($1,$2,$3, true)
+     ON CONFLICT (email) DO UPDATE SET onboarded = true
+     RETURNING id`,
+    [first, last, email],
   );
+  userIds[email] = ins.rows[0].id as number;
 }
 
-const roles: Array<[number, string]> = [
-  [5, "instructor"],
-  [5, "student"],
-  [6, "student"],
-  [8, "student"],
-  [10, "student"],
-];
-for (const [userId, role] of roles) {
+const instructorId = userIds["sarafasatar@gmail.com"];
+const studentEmail = users.find((u) => u[1] === "Student")![2];
+const studentId = userIds[studentEmail];
+
+// Roles (user_roles unique on (user_id, role))
+for (const [email, role] of [
+  ["sarafasatar@gmail.com", "instructor"],
+  ["sarafasatar@gmail.com", "student"],
+  [studentEmail, "student"],
+] as const) {
   await pool.query(
     `INSERT INTO user_roles (user_id, role) VALUES ($1,$2)
      ON CONFLICT (user_id, role) DO NOTHING`,
-    [userId, role],
+    [userIds[email], role],
   );
 }
 
-// Instructor profile + admin flag for user 5 (admin withdrawals queue)
+// Instructor profile + admin flag
 await pool.query(
   `INSERT INTO instructor_profiles (user_id, is_admin)
-   SELECT 5, true WHERE NOT EXISTS (SELECT 1 FROM instructor_profiles WHERE user_id = 5)`,
+   SELECT $1, true WHERE NOT EXISTS (SELECT 1 FROM instructor_profiles WHERE user_id = $1)`,
+  [instructorId],
 );
 
-// Community owned by 5, members 6 + 10
-await pool.query(
-  `INSERT INTO communities (id, owner_id, name, slug, visibility) OVERRIDING SYSTEM VALUE
-   VALUES (9, 5, 'Typescript', 'typescript-5', 'public')
-   ON CONFLICT (id) DO NOTHING`,
+// Community first (courses reference it)
+const comm = await pool.query(
+  `INSERT INTO communities (owner_id, name, slug, visibility)
+   VALUES ($1, 'Typescript', 'typescript-5', 'public')
+   ON CONFLICT (slug) DO NOTHING
+   RETURNING id`,
+  [instructorId],
 );
-for (const userId of [6, 10]) {
+let communityId = comm.rows[0]?.id;
+if (!communityId) {
+  const r = await pool.query(`SELECT id FROM communities WHERE slug = 'typescript-5'`);
+  communityId = r.rows[0].id as number;
+}
+
+// Courses (paid 50000 kobo + free)
+const courseA = await pool.query(
+  `INSERT INTO courses (instructor_id, community_id, title, slug, price, status, visibility)
+   VALUES ($1, $2, 'Car course', 'car-course-3', 50000, 'published', 'public')
+   ON CONFLICT (slug) DO NOTHING
+   RETURNING id`,
+  [instructorId, communityId],
+);
+const courseB = await pool.query(
+  `INSERT INTO courses (instructor_id, community_id, title, slug, price, status, visibility)
+   VALUES ($1, $2, 'Introduction to TypeScript', 'introduction-to-typescript', 0, 'published', 'public')
+   ON CONFLICT (slug) DO NOTHING
+   RETURNING id`,
+  [instructorId, communityId],
+);
+const paidCourseId =
+  courseA.rows[0]?.id ?? (await pool.query(`SELECT id FROM courses WHERE slug='car-course-3'`)).rows[0].id;
+
+// Community members
+for (const uid of [studentId, userIds["vekogep220@murkstar.com"]]) {
   await pool.query(
     `INSERT INTO community_members (community_id, user_id, role, member_role, status)
-     VALUES (9, $1, 'student', 'member', 'active')
+     VALUES ($1, $2, 'student', 'member', 'active')
      ON CONFLICT (community_id, user_id) DO NOTHING`,
-    [userId],
+    [communityId, uid],
   );
 }
 
-// Paid course owned by instructor 5 (price 50000 kobo = ₦500)
-await pool.query(
-  `INSERT INTO courses (id, instructor_id, community_id, title, slug, price, status, visibility) OVERRIDING SYSTEM VALUE
-   VALUES (3, 5, 9, 'Car course', 'car-course-3', 50000, 'published', 'public')
-   ON CONFLICT (id) DO NOTHING`,
-);
-
-// Free course
-await pool.query(
-  `INSERT INTO courses (id, instructor_id, community_id, title, slug, price, status, visibility) OVERRIDING SYSTEM VALUE
-   VALUES (4, 5, 9, 'Introduction to TypeScript', 'introduction-to-typescript', 0, 'published', 'public')
-   ON CONFLICT (id) DO NOTHING`,
-);
-
 await pool.end();
-console.log("✅ dev fixtures seeded (users 5/6/8/10, roles, courses 3/4, community 9).");
+console.log(
+  `✅ fixtures: instructor=${instructorId} student=${studentId} paidCourse=${paidCourseId} community=${communityId}`,
+);
