@@ -36,6 +36,7 @@ export const config = {
 			light: env.LIGHT_LOGO,
 		},
 	},
+	frontendUrl: env.FRONTEND_URL,
 
 	encryption: {
 		key: env.ENCRYPTION_KEY,

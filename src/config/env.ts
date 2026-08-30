@@ -8,6 +8,7 @@ config({ path: envFile, override: true });
 
 const EnvSchema = z.object({
 	PORT: z.coerce.number(),
+	FRONTEND_URL: z.string().default("http://localhost:3000"),
 	POSTGRES_DB_NAME: z.string(),
 	POSTGRES_USER: z.string(),
 	POSTGRES_PASSWORD: z.string(),

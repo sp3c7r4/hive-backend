@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => {
 		insert: () => ({
 			values: (payload: any) => {
 				records.push({ kind: "insert", payload });
-				return thenable;
+				return Object.assign(thenable, { returning: () => thenable });
 			},
 		}),
 		delete: () => ({ where: () => thenable }),
@@ -48,6 +48,13 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/db/postgres.db", () => ({ getDb: () => mocks.db }));
 vi.mock("@/helpers/db.helper", () => ({
 	withTransaction: (fn: any) => fn(mocks.tx),
+}));
+vi.mock("@/services/queues/email.queue.service", () => ({
+	EmailQueueService: {
+		getInstance: () => ({
+			add: () => Promise.resolve({ id: "job-1" }),
+		}),
+	},
 }));
 
 async function loadService() {
@@ -104,6 +111,11 @@ describe("PaystackService.handleChargeSuccess (M1 ledger)", () => {
 			[], // balance select: no row → insert path
 			{ ok: true }, // insert balance
 			{ ok: true }, // insert transaction
+			[], // enrollment dedup: none
+			[{ id: 1 }], // insert enrollment returning
+			{ ok: true }, // update payment enrollmentId
+			[{ email: "stu@t.com", firstName: "Stu" }], // users (email)
+			[{ title: "Course" }], // course title (email)
 		);
 
 		const service = await loadService();
@@ -123,9 +135,11 @@ describe("PaystackService.handleChargeSuccess (M1 ledger)", () => {
 		expect(updatePayment).toBeDefined();
 		expect(updatePayment!.payload.receiptUrl).toBe("https://paystack.com/r");
 
-		const insertTx = mocks.records[mocks.records.length - 1];
-		expect(insertTx.kind).toBe("insert");
-		expect(insertTx.payload).toMatchObject({
+		const insertTx = mocks.records.find(
+			(r) => r.kind === "insert" && (r.payload as any).instructorId === 5 && (r.payload as any).type === "credit",
+		);
+		expect(insertTx).toBeDefined();
+		expect(insertTx!.payload).toMatchObject({
 			instructorId: 5,
 			type: "credit",
 			category: "enrollment",
@@ -165,6 +179,9 @@ describe("PaystackService.handleChargeSuccess (M1 ledger)", () => {
 			[],
 			{ ok: true },
 			{ ok: true },
+			[], // membership dedup: none
+			[{ email: "stu@t.com", firstName: "Stu" }], // users (email)
+			[{ name: "Comm" }], // community name (email)
 		);
 		const service = await loadService();
 		const body = { event: "charge.success", data: { reference: "hive-abc" } };
@@ -173,8 +190,11 @@ describe("PaystackService.handleChargeSuccess (M1 ledger)", () => {
 			body,
 		} as any);
 
-		const last = mocks.records[mocks.records.length - 1];
-		expect(last.payload).toMatchObject({
+		const ledger = mocks.records.find(
+			(r) => r.kind === "insert" && (r.payload as any).instructorId === 8 && (r.payload as any).type === "credit",
+		);
+		expect(ledger).toBeDefined();
+		expect(ledger!.payload).toMatchObject({
 			instructorId: 8,
 			category: "community",
 			amount: 9000,

@@ -1,6 +1,8 @@
 import type { Context } from "hono";
+import { config } from "@/config";
 import { StatusCodes } from "http-status-codes";
 import { v4 as uuidv4 } from "uuid";
+import { serviceLogger } from "@/utils/logger";
 import { and, eq } from "drizzle-orm";
 import {
 	paymentCancelledPage,
@@ -11,10 +13,12 @@ import { throwBadRequestError, throwForbiddenError, throwNotFoundError } from "@
 import { PaymentMessage } from "@/messages";
 import { getDb } from "@/db/postgres.db";
 import { courses } from "@/modules/courses/course.model";
+import { payments } from "./payment.model";
 import { communities } from "@/modules/communities/community.model";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import { PaymentService } from "./payment.service";
+import { PaymentSettlementService } from "./services/payment-settlement.service";
 import { PaystackService } from "./services";
 import { PaymentRepository } from "./payment.repository";
 
@@ -24,6 +28,8 @@ export class PaymentController {
 	private paymentService: PaymentService;
 	private paystackService: PaystackService;
 	private paymentRepo: PaymentRepository;
+	private settlement: PaymentSettlementService;
+	private readonly log: ReturnType<typeof serviceLogger>;
 
 	static getInstance(): PaymentController {
 		if (!this.instance) this.instance = new PaymentController();
@@ -34,6 +40,8 @@ export class PaymentController {
 		this.paystackService = PaystackService.getInstance();
 		this.paymentService = PaymentService.getInstance();
 		this.paymentRepo = PaymentRepository.getInstance();
+		this.settlement = PaymentSettlementService.getInstance();
+		this.log = serviceLogger("PaymentController");
 	}
 
 	initialize = async (c: Context) => {
@@ -103,11 +111,13 @@ export class PaymentController {
 			status: "pending",
 		} as any);
 
-		/** @info - Initialize Paystack transaction */
+		/** @info - Initialize Paystack transaction (redirect flow: the browser
+		 * returns to the payments page with the reference after the charge) */
 		const result = await this.paystackService.initializeTransaction({
 			email: user!.email,
 			amount,
 			reference,
+			callback_url: `${config.frontendUrl}/dashboard/payments?ref=${reference}`,
 			metadata: {
 				paymentType: type,
 				courseId: courseId ?? null,
@@ -132,6 +142,33 @@ export class PaymentController {
 		if (!payment) throwNotFoundError("Payment not found");
 		if (payment!.payerId !== Number(authData.id))
 			throwForbiddenError("This payment belongs to another user");
+
+		/* @info - Verify-settle fallback: when the webhook hasn't arrived (e.g.
+		 * local dev, tunnel down), settle from Paystack's own verification API */
+		if (payment!.status === "pending") {
+			try {
+				const result = (await this.paystackService.verifyTransaction({
+					reference,
+				})) as any;
+				const pStatus = result?.data?.status;
+				if (pStatus === "success") {
+					await this.settlement.settlePayment({
+						reference,
+						receiptUrl: result?.data?.receipt_url,
+					});
+				} else if (pStatus === "failed" || pStatus === "abandoned") {
+					await getDb()
+						.update(payments)
+						.set({ status: "failed" as any })
+						.where(eq(payments.reference, reference));
+				}
+			} catch (e) {
+				this.log.warn("Verify-settle call failed — leaving payment pending", {
+					reference,
+					error: e,
+				});
+			}
+		}
 
 		return sendSuccessResponse(c, {
 			status: payment!.status,
