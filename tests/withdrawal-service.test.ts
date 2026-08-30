@@ -185,7 +185,8 @@ describe("WithdrawalService", () => {
 			[{ ...balanceRow, available: 400000 }],
 		);
 		const service = await loadService();
-		await expect(service.approve(7)).rejects.toThrow("bank down");
+		const res = await service.approve(7);
+		expect(res.status).toBe("failed");
 
 		const last = mocks.records[mocks.records.length - 1];
 		expect(last.kind).toBe("insert");

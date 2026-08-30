@@ -232,9 +232,13 @@ export class WithdrawalService {
 
 			return { status, transferCode: transfer.transferCode };
 		} catch (e) {
-			/* Paystack failure → failed + refund the hold */
+			/* Paystack failure → failed + refund the hold; surface the outcome
+			 * instead of throwing (the money is already safe). */
 			await this.failAndRefund(w!, e);
-			throw e;
+			return {
+				status: "failed",
+				transferError: e instanceof Error ? e.message : String(e),
+			};
 		}
 	};
 
