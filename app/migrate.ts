@@ -68,6 +68,7 @@ for (const file of sqlFiles) {
 				[hash, Date.now()],
 			);
 			skipped++;
+			console.log(`  ~ ${file} (already present — recorded as applied)`);
 		} else {
 			console.error(`  ✗ ${file}: ${e.message}`);
 			throw e;
