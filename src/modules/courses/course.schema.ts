@@ -71,6 +71,8 @@ export const createLessonSchema = z.object({
 	liveMeetingLink: z.string().max(1000).optional(),
 	liveMeetingDate: z.string().max(255).optional(),
 	attachmentUrl: z.string().max(1000).optional(),
+	/** @info - Lesson-type-specific settings (e.g. assignment rubric/due date) */
+	settings: z.record(z.string(), z.any()).optional(),
 });
 
 export const updateCourseSchema = createCourseSchema.partial();
