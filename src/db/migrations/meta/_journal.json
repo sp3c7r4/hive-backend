@@ -29,6 +29,13 @@
       "when": 1786493647092,
       "tag": "0003_add_text_lesson_type",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788102119759,
+      "tag": "0004_low_the_fallen",
+      "breakpoints": true
     }
   ]
 }

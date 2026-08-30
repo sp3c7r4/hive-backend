@@ -111,9 +111,10 @@ export class CommunityService {
 
 		/* @info - Real membership state for the authenticated visitor (join page) */
 		let membership: "active" | "pending" | "none" = "none";
+		let memberRole: string | null = null;
 		if (authData?.id) {
 			const [member] = await db
-				.select({ status: communityMembers.status })
+				.select({ status: communityMembers.status, memberRole: communityMembers.memberRole })
 				.from(communityMembers)
 				.where(
 					and(
@@ -123,6 +124,7 @@ export class CommunityService {
 				)
 				.limit(1);
 			membership = member ? (member.status === "pending" ? "pending" : "active") : "none";
+			memberRole = member?.memberRole ?? null;
 		}
 
 		return {
@@ -134,6 +136,7 @@ export class CommunityService {
 					}
 				: null,
 			membership,
+			memberRole,
 		};
 	};
 

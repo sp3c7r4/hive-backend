@@ -77,7 +77,8 @@ communityRouter.post("/:slug/leave", requireCommunityMember, memberController.le
 /* ── Feed ──────────────────────────────────────────────────── */
 
 communityRouter.get("/:slug/feed", requireCommunityMember, feedController.listPosts);
-communityRouter.post("/:slug/feed", requireCommunityMember, zod.validate.body(createPostSchema), feedController.createPost);
+/* @info - Only owners/admins can create posts + announcements; members comment/like */
+communityRouter.post("/:slug/feed", requireCommunityAdmin, zod.validate.body(createPostSchema), feedController.createPost);
 communityRouter.patch("/:slug/feed/:postId", requireCommunityMember, zod.validate.body(updatePostSchema), feedController.updatePost);
 communityRouter.delete("/:slug/feed/:postId", requireCommunityMember, feedController.deletePost);
 

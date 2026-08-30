@@ -6,7 +6,7 @@ import { config } from "@/config";
 
 const pool = new Pool({ connectionString: config.db.uri });
 
-const users = [
+const users: Array<[string, string, string]> = [
   ["Sarafa", "Satae", "sarafasatar@gmail.com"],
   ["Testing", "User", "vekogep220@murkstar.com"],
   ["Test", "Student", "test-student@gmail.com"],
@@ -80,7 +80,13 @@ const courseB = await pool.query(
 const paidCourseId =
   courseA.rows[0]?.id ?? (await pool.query(`SELECT id FROM courses WHERE slug='car-course-3'`)).rows[0].id;
 
-// Community members
+// Community members — owner first (member_role=owner), then students
+await pool.query(
+  `INSERT INTO community_members (community_id, user_id, role, member_role, status)
+   VALUES ($1, $2, 'instructor', 'owner', 'active')
+   ON CONFLICT (community_id, user_id) DO NOTHING`,
+  [communityId, instructorId],
+);
 for (const uid of [studentId, userIds["vekogep220@murkstar.com"]]) {
   await pool.query(
     `INSERT INTO community_members (community_id, user_id, role, member_role, status)
