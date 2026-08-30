@@ -99,7 +99,7 @@ export class WithdrawalService {
 		if (!/^\d{10}$/.test(accountNumber))
 			throwBadRequestError("Account number must be 10 digits");
 
-		const bankCode = (await this.paystack.resolveBankCode(bankName)) ?? "044";
+		const bankCode = await this.bankCodeFor(bankName);
 		const resolved = await this.paystack.resolveAccountNumber(accountNumber, bankCode);
 
 		/* @info - Dev-only fallback: Paystack test-mode does not resolve NUBANs for
@@ -190,7 +190,7 @@ export class WithdrawalService {
 			throwConflictError("Withdrawal is no longer pending");
 
 		try {
-			const bankCode = (await this.paystack.resolveBankCode(w!.bankName)) ?? "044";
+			const bankCode = await this.bankCodeFor(w!.bankName);
 			const recipient = (await this.paystack.createRecipient({
 				bankCode,
 				accountNumber: w!.accountNumber,
@@ -264,6 +264,14 @@ export class WithdrawalService {
 	};
 
 	/* ── Internals ──────────────────────────────────────────── */
+
+	/** @info - Paystack test mode cannot resolve real NUBANs; use test bank code
+	 *         001 there (resolves any account as TEST ACCOUNT x). Production
+	 *         keys resolve the real bank from the /bank list. */
+	private bankCodeFor = async (bankName: string) =>
+		config.paystack.secret.startsWith("sk_test_")
+			? "001"
+			: ((await this.paystack.resolveBankCode(bankName)) ?? "044");
 
 	private refundHold = async (
 		w: { id: number; instructorId: number; amount: number; reference: string },

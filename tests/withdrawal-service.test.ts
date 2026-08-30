@@ -134,7 +134,7 @@ describe("WithdrawalService", () => {
 
 		expect(res.status).toBe("completed");
 		expect(mocks.paystack.createRecipient).toHaveBeenCalledWith({
-			bankCode: "044",
+			bankCode: "001",
 			accountNumber: "0123456789",
 			accountName: "Sarafa",
 		});
@@ -195,11 +195,10 @@ describe("WithdrawalService", () => {
 	});
 
 
-	it("verifyAccount: returns the bank-owned account name", async () => {
-		mocks.paystack.resolveBankCode.mockResolvedValueOnce("058");
+	it("verifyAccount: resolves with test-mode bank code 001", async () => {
 		mocks.paystack.resolveAccountNumber.mockResolvedValueOnce({
 			accountNumber: "0123456789",
-			accountName: "SARAFTA SATAE",
+			accountName: "TEST ACCOUNT 0123456789",
 		});
 		const service = await loadService();
 		const r = await service.verifyAccount(auth, {
@@ -208,14 +207,13 @@ describe("WithdrawalService", () => {
 		});
 		expect(r).toEqual({
 			bankName: "GTBank",
-			bankCode: "058",
+			bankCode: "001",
 			accountNumber: "0123456789",
-			accountName: "SARAFTA SATAE",
+			accountName: "TEST ACCOUNT 0123456789",
 		});
 	});
 
 	it("verifyAccount: unresolved + dev fallback returns a test account", async () => {
-		mocks.paystack.resolveBankCode.mockResolvedValueOnce("058");
 		mocks.paystack.resolveAccountNumber.mockResolvedValueOnce(null as any);
 		const service = await loadService();
 		const r = await service.verifyAccount(auth, {
