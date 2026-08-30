@@ -8,6 +8,7 @@ import { UserRole } from "@/enums";
 import { CourseMessages, ModuleMessages, LessonMessages } from "./course.message";
 import { courses, modules, lessons } from "./course.model";
 import { communities } from "@/modules/communities/community.model";
+import { users } from "@/modules/user/user.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import {
@@ -94,6 +95,21 @@ export class CourseService {
 		/* @info - Include the community so the UI can label + gate private
 		 * courses without a second lookup */
 		const enriched = { ...course } as Record<string, unknown>;
+		/* @info - Instructor profile for the detail page (name + avatar) */
+		const [instructorUser] = await db
+			.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+			.from(users)
+			.where(eq(users.id, course!.instructorId))
+			.limit(1);
+		enriched.instructor = instructorUser
+			? {
+					id: course!.instructorId,
+					name: `${instructorUser.firstName ?? ""} ${instructorUser.lastName ?? ""}`.trim(),
+					avatarUrl: instructorUser.avatarUrl
+						? withPresignedUrl({ avatar: instructorUser.avatarUrl } as any, "avatar").avatar
+						: null,
+				}
+			: null;
 		if (course!.communityId != null) {
 			const [comm] = await db
 				.select({ name: communities.name, slug: communities.slug })
