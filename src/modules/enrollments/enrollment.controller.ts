@@ -18,8 +18,8 @@ export class EnrollmentController {
 
 	enroll = async (c: Context) => {
 		const authData = c.get("authData");
-		const { courseId } = await c.req.json();
-		const data = await this.service.enroll(authData, courseId);
+		const { courseId, paymentReference } = await c.req.json();
+		const data = await this.service.enroll(authData, courseId, paymentReference);
 		return sendSuccessResponse(c, {
 			message: "Enrollment created successfully",
 			data,

@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const migrationsDir = join(import.meta.dirname, "migrations");
+const migrationsDir = join(import.meta.dirname, "..", "src", "db", "migrations");
 const pool = new Pool({ connectionString: config.db.uri });
 
 // Ensure tracking table exists
@@ -62,7 +62,7 @@ for (const file of sqlFiles) {
 	} catch (e: any) {
 		await pool.query("ROLLBACK");
 		// Duplicate-object errors are safe — already exists in DB
-		if (e?.code === "42710" || e?.code === "42P07" || e?.code === "42P16") {
+		if (e?.code === "42710" || e?.code === "42P07" || e?.code === "42P16" || e?.code === "42701" || e?.code === "42704") {
 			await pool.query(
 				`INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 				[hash, Date.now()],

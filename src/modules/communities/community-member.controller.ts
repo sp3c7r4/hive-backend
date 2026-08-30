@@ -157,8 +157,9 @@ export class CommunityMemberController {
 	joinCommunity = async (c: Context) => {
 		const authData = c.get("authData");
 		const slug = c.req.param("slug") as string;
+		const body = await c.req.json().catch(() => ({}));
 
-		const data = await this.service.joinCommunity(authData, slug);
+		const data = await this.service.joinCommunity(authData, slug, body.paymentReference);
 		return sendSuccessResponse(
 			c,
 			{

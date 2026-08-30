@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { users } from "@/modules/user/user.model";
+import { courses } from "@/modules/courses/course.model";
 import { userRoleEnum } from "@/bases/models/base.user.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { communities } from "@/modules/communities/community.model";
@@ -42,6 +43,9 @@ export const payments = pgTable(
 		payerRole: userRoleEnum("payer_role").notNull(),
 		enrollmentId: integer("enrollment_id")
 			.references(() => enrollments.id, { onDelete: "set null" }),
+		/** @info - Course being purchased (available before enrollment exists) */
+		courseId: integer("course_id")
+			.references(() => courses.id, { onDelete: "set null" }),
 		communityId: integer("community_id")
 			.references(() => communities.id, { onDelete: "set null" }),
 		amount: integer("amount").notNull(),
@@ -60,6 +64,7 @@ export const payments = pgTable(
 		uniqueIndex("uq_payments_reference").on(table.reference),
 		index("idx_payments_payer").on(table.payerId),
 		index("idx_payments_enrollment").on(table.enrollmentId),
+		index("idx_payments_course").on(table.courseId),
 		index("idx_payments_status").on(table.status),
 		index("idx_payments_student").on(table.studentId),
 	],

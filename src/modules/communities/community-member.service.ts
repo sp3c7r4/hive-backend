@@ -10,6 +10,7 @@ import {
 import { withPresignedUrl } from "@/helpers/storage.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { MessagingRepository } from "@/modules/messaging/messaging.repository";
+import { payments } from "@/modules/payment/payment.model";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import { EmailQueueService } from "@/services/queues/email.queue.service";
@@ -469,11 +470,28 @@ export class CommunityMemberService {
 
 	/* ── Join / Leave ────────────────────────────────────────── */
 
-	joinCommunity = async (authData: IAuthData, slug: string) => {
+	joinCommunity = async (authData: IAuthData, slug: string, paymentReference?: string) => {
 		const community = await this._resolveCommunity(slug);
 		const db = getDb();
 		const userId = Number(authData.id);
 
+		/* @info - Paid-community gate: a success payment for THIS community is required */
+		if ((community as any).price && (community as any).price > 0) {
+			if (!paymentReference) throwBadRequestError("Payment required to join this community");
+			const [paid] = await db
+				.select()
+				.from(payments)
+				.where(
+					and(
+						eq(payments.reference, paymentReference!),
+						eq(payments.communityId, community!.id),
+						eq(payments.payerId, userId),
+						eq(payments.status, "success" as any),
+					)!,
+				)
+				.limit(1);
+			if (!paid) throwBadRequestError("Valid payment required to join this community");
+		}
 		/* Already a member? */
 		const [existingMember] = await db
 			.select()

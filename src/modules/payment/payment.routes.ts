@@ -10,11 +10,12 @@ const zod = ZodEngine.getInstance();
 const jwt = JwtService.getInstance();
 const controller = PaymentController.getInstance();
 
+import { user_roles } from "@/modules/user/user-role.model";
+
 const initializeSchema = z.object({
 	type: z.enum(["enrollment", "community"]),
-	enrollmentId: z.number().optional(),
+	courseId: z.number().optional(),
 	communityId: z.number().optional(),
-	studentId: z.number().optional(),
 	amount: z.number().positive(),
 });
 
@@ -24,6 +25,8 @@ paymentRouter.post(
 	zod.validate.body(initializeSchema),
 	controller.initialize,
 );
+
+paymentRouter.get("/verify/:reference", jwt.validateToken, controller.verifyPayment);
 
 paymentRouter.get("/cancel", controller.cancelPayment);
 paymentRouter.get("/callback", controller.callbackThanks);

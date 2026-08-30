@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { and, eq } from "drizzle-orm";
+import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
@@ -14,6 +14,7 @@ import {
 import type { NewEnrollment } from "./enrollment.model";
 import { courses } from "@/modules/courses/course.model";
 import { communities } from "@/modules/communities/community.model";
+import { payments } from "@/modules/payment/payment.model";
 
 export class EnrollmentService {
 	private static instance: EnrollmentService;
@@ -34,14 +35,44 @@ export class EnrollmentService {
 		this.progress = LessonProgressRepository.getInstance();
 	}
 
-	enroll = async (authData: IAuthData, courseId: number) => {
-		/* Dedup: do not enroll twice */
+	enroll = async (authData: IAuthData, courseId: number, paymentReference?: string) => {
+		/* Dedup: do not enroll twice (user + course — not just user) */
 		const existing = await this.enrollments.findOne(
-			eq(this.enrollments.getModel().userId as any, authData.id),
+			and(
+				eq(this.enrollments.getModel().userId as any, authData.id),
+				eq(this.enrollments.getModel().courseId as any, courseId),
+			)!,
 		);
 
 		if (existing) {
 			return existing;
+		}
+
+		const db = getDb();
+		const [courseRow] = await db
+			.select({ title: courses.title, communityId: courses.communityId, price: courses.price })
+			.from(courses)
+			.where(eq(courses.id, courseId))
+			.limit(1);
+		if (!courseRow) throwNotFoundError("Course not found");
+
+		/* @info - Paid-course gate: a success payment for THIS course + user is required */
+		let payment: { id: number } | undefined;
+		if ((courseRow!.price ?? 0) > 0) {
+			if (!paymentReference) throwBadRequestError("Payment required for this course");
+			[payment] = await db
+				.select({ id: payments.id })
+				.from(payments)
+				.where(
+					and(
+						eq(payments.reference, paymentReference!),
+						eq(payments.status, "success" as any),
+						eq(payments.payerId, Number(authData.id)),
+						eq(payments.courseId, courseId),
+					)!,
+				)
+				.limit(1);
+			if (!payment) throwBadRequestError("Valid payment required for this course");
 		}
 
 		const enrollment = await this.enrollments.create({
@@ -49,19 +80,21 @@ export class EnrollmentService {
 			courseId,
 		} as any as NewEnrollment);
 
+		/* @info - Link the paid payment to the created enrollment */
+		if (payment) {
+			await db
+				.update(payments)
+				.set({ enrollmentId: enrollment.id })
+				.where(eq(payments.id, payment!.id));
+		}
+
 		/* Queue enrollment-confirmed email */
-		const db = getDb();
-		const [courseRow] = await db
-			.select({ title: courses.title, communityId: courses.communityId })
-			.from(courses)
-			.where(eq(courses.id, courseId))
-			.limit(1);
 		let communityName = "Hive";
-		if (courseRow?.communityId) {
+		if (courseRow!.communityId) {
 			const [commRow] = await db
 				.select({ name: communities.name })
 				.from(communities)
-				.where(eq(communities.id, courseRow.communityId))
+				.where(eq(communities.id, courseRow!.communityId))
 				.limit(1);
 			communityName = commRow?.name ?? "Hive";
 		}
@@ -69,12 +102,12 @@ export class EnrollmentService {
 		this.emailQueue.add(EmailJobNames.ENROLLMENT_CONFIRMED as any, {
 			message: {
 				to: authData.email!,
-				subject: `You're enrolled in ${courseRow?.title ?? "your course"}!`,
+				subject: `You're enrolled in ${courseRow!.title ?? "your course"}!`,
 			},
 			template: "enrollment-confirmed" as any,
 			locals: {
 				studentName: authData.firstName ?? "there",
-				courseName: courseRow?.title ?? "your course",
+				courseName: courseRow!.title ?? "your course",
 				communityName,
 				enrolledAt: new Date().toLocaleDateString("en-US", {
 					year: "numeric",
