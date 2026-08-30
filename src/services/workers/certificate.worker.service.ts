@@ -106,7 +106,7 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 		);
 
 		/* Already generated? Nothing to do (idempotency) */
-		if (certificate.pdfUrl) {
+		if (certificate.fileUrl) {
 			logger.info(`Certificate ${certificate.code} already generated`, { jobId: job.id });
 			return;
 		}
@@ -134,21 +134,19 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 			quizScore: certificate.quizScorePercent > 0 ? `${certificate.quizScorePercent}%` : undefined,
 		};
 
-		const pdf = await CertificateGenerator.getInstance().generateFile(htmlData, {
-			format: "A4",
-			landscape: true,
-		});
+		/* @info - Certificates are images: render the template to a crisp PNG */
+		const image = await CertificateGenerator.getInstance().generateImage(htmlData);
 
-		const key = `certificates/${certificate.code}.pdf`;
+		const key = `certificates/${certificate.code}.png`;
 		await StorageService.getInstance().upload({
 			key,
-			body: pdf,
-			contentType: "application/pdf",
+			body: image,
+			contentType: "image/png",
 		});
 
 		await db
 			.update(certificates)
-			.set({ pdfUrl: key })
+			.set({ fileUrl: key })
 			.where(eq(certificates.code, certificate.code));
 
 		logger.info(`Certificate ${certificate.code} generated + uploaded`, { jobId: job.id });

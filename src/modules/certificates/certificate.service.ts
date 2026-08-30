@@ -155,7 +155,7 @@ export class CertificateService {
 			studentName: `${student?.firstName ?? ""} ${student?.lastName ?? ""}`.trim(),
 			courseTitle: course?.title ?? "Course",
 			instructorName: `${instructor?.firstName ?? ""} ${instructor?.lastName ?? ""}`.trim(),
-			pdfUrl: cert.pdfUrl ? withPresignedUrl(cert as any, "pdfUrl").pdfUrl : null,
+			fileUrl: cert.fileUrl ? withPresignedUrl(cert as any, "fileUrl").fileUrl : null,
 		};
 	};
 
@@ -174,7 +174,7 @@ export class CertificateService {
 				return {
 					...c,
 					courseTitle: course?.title ?? "Course",
-					pdfUrl: c.pdfUrl ? withPresignedUrl(c, "pdfUrl").pdfUrl : null,
+					fileUrl: c.fileUrl ? withPresignedUrl(c, "fileUrl").fileUrl : null,
 				};
 			}),
 		);

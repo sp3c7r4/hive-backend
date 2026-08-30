@@ -27,7 +27,7 @@ export const certificates = pgTable(
 			.notNull()
 			.references(() => enrollments.id, { onDelete: "cascade" }),
 		code: varchar("code", { length: 100 }).notNull(),
-		pdfUrl: varchar("pdf_url", { length: 500 }),
+		fileUrl: varchar("file_url", { length: 500 }),
 		issuedAt: timestamp("issued_at").defaultNow().notNull(),
 		completionPercent: integer("completion_percent").notNull(),
 		quizScorePercent: integer("quiz_score_percent").notNull(),

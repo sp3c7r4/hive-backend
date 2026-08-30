@@ -170,4 +170,40 @@ export abstract class FileGenerator<T> {
 			await page.close();
 		}
 	}
+
+	/**
+	 * @description Renders the template to a PNG image (certificates are
+	 * images, not PDFs). The page is sized to the template's natural width;
+	 * deviceScaleFactor 2 keeps the image crisp on retina displays.
+	 */
+	async generateImage(
+		options: T,
+		imageOptions?: {
+			width?: number;
+			height?: number;
+			deviceScaleFactor?: number;
+		},
+	): Promise<Buffer> {
+		const html = await this.buildHtml(options);
+		const browser = this.browserEngine.getBrowser();
+
+		const page = await browser.newPage();
+		try {
+			await page.setViewport({
+				width: imageOptions?.width ?? 1123, // A4 landscape @96dpi
+				height: imageOptions?.height ?? 794,
+				deviceScaleFactor: imageOptions?.deviceScaleFactor ?? 2,
+			});
+			await page.setContent(html, { waitUntil: "load" });
+
+			const image = await page.screenshot({
+				fullPage: true,
+				type: "png",
+			});
+
+			return Buffer.from(image);
+		} finally {
+			await page.close();
+		}
+	}
 }
