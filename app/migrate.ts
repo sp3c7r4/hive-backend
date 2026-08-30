@@ -38,6 +38,7 @@ for (const file of sqlFiles) {
 
 	if (rows.length > 0) {
 		skipped++;
+		console.log(`  ~ ${file} (already recorded)`);
 		continue;
 	}
 
@@ -71,6 +72,14 @@ for (const file of sqlFiles) {
 			console.log(`  ~ ${file} (already present — recorded as applied)`);
 		} else {
 			console.error(`  ✗ ${file}: ${e.message}`);
+			if (e?.code === "42P01") {
+				console.error(
+					`
+Hint: the DB looks partially dropped (enums present, tables missing).` +
+					`
+Recovery: npm run migrate:rebuild && npm run migrate && npm run seed:dev`,
+				);
+			}
 			throw e;
 		}
 	}

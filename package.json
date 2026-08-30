@@ -13,6 +13,7 @@
 		"seed": "node --import tsx app/seed-migrations.ts",
 		"seed:dev": "node --import tsx scripts/seed-dev.ts",
 		"migrate": "node --import tsx app/migrate.ts",
+		"migrate:rebuild": "node --import tsx scripts/rebuild-db.ts && npm run migrate",
 		"migrate:create": "npx drizzle-kit generate",
 		"biome:lint": "npx biome lint --write",
 		"biome:format": "npx biome check --write",
