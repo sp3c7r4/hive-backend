@@ -256,6 +256,10 @@ export class MessagingService {
 		const ok = await this.repo.isParticipant(conversation.id, authData.id);
 		if (!ok) throwForbiddenError("You are not a member of this community");
 
+		/* Blocked members cannot post to the community chat */
+		const membershipStatus = await this.repo.getMembershipStatus(body.communityId, authData.id);
+		if (membershipStatus === "blocked") throwForbiddenError("Your membership is blocked");
+
 		const type = (body.attachmentType as MessageType) ?? MessageType.TEXT;
 		const message = await this.repo.insertMessage({
 			conversationId: conversation.id,

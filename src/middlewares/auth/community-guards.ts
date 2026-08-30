@@ -64,6 +64,15 @@ export const requireCommunityMember = async (c: Context, next: Next) => {
 		);
 	}
 
+	/* Blocked members have no access — membership row existence is not enough */
+	if (member.status === "blocked") {
+		return sendErrorResponse(
+			c,
+			{ message: "Your membership is blocked. Contact a community admin." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+
 	c.set("community", community);
 	c.set("communityMember", member);
 
@@ -133,6 +142,15 @@ export const requireCommunityAdmin = async (c: Context, next: Next) => {
 		return sendErrorResponse(
 			c,
 			{ message: "Admin access required." },
+			StatusCodes.FORBIDDEN,
+		);
+	}
+
+	/* A blocked admin cannot manage the community */
+	if (member.status === "blocked") {
+		return sendErrorResponse(
+			c,
+			{ message: "Your membership is blocked. Contact a community admin." },
 			StatusCodes.FORBIDDEN,
 		);
 	}

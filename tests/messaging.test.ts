@@ -34,7 +34,7 @@ describe("messaging routes — auth required", () => {
 	});
 
 	it("POST /messages returns 401 without auth", async () => {
-		const res = await testApp.request("/api/v1/messages/messages", {
+		const res = await testApp.request("/api/v1/messages", {
 			method: "POST",
 			body: JSON.stringify({ recipientId: 5, content: "hi" }),
 			headers: auth,
@@ -43,7 +43,7 @@ describe("messaging routes — auth required", () => {
 	});
 
 	it("DELETE /messages/:id returns 401 without auth", async () => {
-		const res = await testApp.request("/api/v1/messages/messages/1", {
+		const res = await testApp.request("/api/v1/messages/1", {
 			method: "DELETE",
 			headers: auth,
 		});

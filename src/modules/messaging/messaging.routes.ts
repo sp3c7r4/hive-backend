@@ -7,9 +7,9 @@ import {
 	sendMessageSchema,
 } from "./messaging.schema";
 
-/** @info - Mounted at "/" alongside the other top-level route groups:
- *          GET  /conversations, POST /conversations, GET /conversations/:id/messages,
- *          POST /conversations/:id/read, POST /messages, DELETE /messages/:id */
+/** @info - Mounted at "/messages" (see routes/router.ts). Paths are relative:
+ *          GET /conversations, POST /conversations, GET /conversations/:id/messages,
+ *          POST /conversations/:id/read, POST /, DELETE /:id */
 export const messagingRouter = new Hono({ strict: true });
 
 const jwt = JwtService.getInstance();
@@ -28,5 +28,5 @@ messagingRouter.get(
 );
 messagingRouter.post("/conversations/:id/read", controller.markRead);
 messagingRouter.delete("/conversations/:id", controller.leave);
-messagingRouter.post("/messages", zod.validate.body(sendMessageSchema), controller.send);
-messagingRouter.delete("/messages/:id", controller.remove);
+messagingRouter.post("/", zod.validate.body(sendMessageSchema), controller.send);
+messagingRouter.delete("/:id", controller.remove);

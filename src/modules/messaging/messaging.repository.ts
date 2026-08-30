@@ -376,6 +376,22 @@ export class MessagingRepository {
 	};
 
 	/** Community display name + cover (for group chats). */
+	/** @info - Membership status of a user in a community (null = not a member). */
+	getMembershipStatus = async (communityId: number, userId: number) => {
+		const db = getDb();
+		const [row] = await db
+			.select({ status: communityMembers.status })
+			.from(communityMembers)
+			.where(
+				and(
+					eq(communityMembers.communityId, communityId),
+					eq(communityMembers.userId, userId),
+				),
+			)
+			.limit(1);
+		return (row?.status as string | undefined) ?? null;
+	};
+
 	getCommunityInfo = async (communityId: number) => {
 		const db = getDb();
 		const [row] = await db
