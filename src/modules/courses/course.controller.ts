@@ -71,12 +71,20 @@ export class CourseController {
 		const authData = c.get("authData");
 		const id = c.req.param("id");
 
-		// Multipart (FormData) — used when cover image is uploaded
-		const formData = await c.req.formData();
-		const data: Record<string, any> = formDataToObject(formData);
-		const uploadedFile = c.get("uploadedFile");
-		if (uploadedFile?.key) {
-			data.coverImageUrl = uploadedFile.key;
+		/* @info - Accept JSON (settings save without cover) AND multipart
+		 * (cover upload). Parsing a JSON body as FormData silently yielded
+		 * an empty object — updates no-op'd with a 200 response. */
+		const contentType = c.req.header("content-type") ?? "";
+		let data: Record<string, any>;
+		if (contentType.includes("application/json")) {
+			data = await c.req.json();
+		} else {
+			const formData = await c.req.formData();
+			data = formDataToObject(formData);
+			const uploadedFile = c.get("uploadedFile");
+			if (uploadedFile?.key) {
+				data.coverImageUrl = uploadedFile.key;
+			}
 		}
 
 		const result = await this.service.updateCourse(

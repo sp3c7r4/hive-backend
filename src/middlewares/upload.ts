@@ -113,6 +113,12 @@ export class FileUploadMiddleware {
 	 */
 	single = (options: SingleUploadOptions) => {
 		return async (c: Context, next: Next) => {
+			/* @info - JSON bodies carry no files; formData() throws on them */
+			const contentType = c.req.header("content-type") ?? "";
+			if (contentType.includes("application/json")) {
+				await next();
+				return;
+			}
 			const formData = await c.req.formData();
 			const file = formData.get(options.fieldName) as File;
 
