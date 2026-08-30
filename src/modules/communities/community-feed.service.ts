@@ -1,4 +1,5 @@
 import { eq, and, desc, isNull, sql, inArray } from "drizzle-orm";
+import { config } from "@/config";
 import { throwNotFoundError, throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { withPresignedUrl } from "@/helpers/storage.helper";
 import { getDb } from "@/db/postgres.db";
@@ -180,7 +181,7 @@ export class CommunityFeedService {
 		const instructorSet = await this._resolveInstructors(authorIds);
 
 		/* Batch: attachments for these posts */
-		let attachmentMap = new Map<number, { filename: string; s3Key: string }[]>();
+		let attachmentMap = new Map<number, { filename: string; s3Key: string; url: string }[]>();
 		if (postIds.length > 0) {
 			const attachments = await db
 				.select()
@@ -188,7 +189,11 @@ export class CommunityFeedService {
 				.where(inArray(communityPostAttachments.postId, postIds));
 			for (const a of attachments) {
 				const list = attachmentMap.get(a.postId) ?? [];
-				list.push({ filename: a.filename, s3Key: a.s3Key });
+				list.push({
+					filename: a.filename,
+					s3Key: a.s3Key,
+					url: config.aws.s3Url + a.s3Key,
+				});
 				attachmentMap.set(a.postId, list);
 			}
 		}
