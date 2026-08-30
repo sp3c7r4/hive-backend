@@ -6,3 +6,6 @@ export { CommunityFeedService } from "./community-feed.service";
 export { CommunityMemberController } from "./community-member.controller";
 export { memberRouter } from "./community-member.routes";
 export { CommunityMemberService } from "./community-member.service";
+export { CommunityRatingService } from "./community-rating.service";
+export { CommunityRatingController } from "./community-rating.controller";
+export * from "./community-rating.model";

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Context, Next } from "hono";
 import { JwtService, ZodEngine } from "@/services";
 import { FileUploadMiddleware } from "@/middlewares/upload";
@@ -7,6 +8,7 @@ import { ImageMimeType } from "@/enums";
 import { CommunityController } from "./community.controller";
 import { CommunityMemberController } from "./community-member.controller";
 import { CommunityFeedController } from "./community-feed.controller";
+import { CommunityRatingController } from "./community-rating.controller";
 import { createCommunitySchema, createCommunityFormSchema, updateCommunitySchema } from "./community.schema";
 import { updateMemberSchema, inviteMemberSchema } from "./community-member.schema";
 import { createPostSchema, updatePostSchema, createCommentSchema, updateCommentSchema } from "./community-feed.schema";
@@ -20,6 +22,7 @@ const upload = FileUploadMiddleware.getInstance();
 const controller = CommunityController.getInstance();
 const memberController = CommunityMemberController.getInstance();
 const feedController = CommunityFeedController.getInstance();
+const ratingController = CommunityRatingController.getInstance();
 
 /** @info - Public route: community info (needed by join page for unregistered users).
  *          Optional auth: if a valid token is present, the owner can view archived communities. */
@@ -79,6 +82,8 @@ communityRouter.post("/:slug/leave", requireCommunityMember, memberController.le
 communityRouter.get("/:slug/feed", requireCommunityMember, feedController.listPosts);
 /* @info - Only owners/admins can create posts + announcements; members comment/like */
 communityRouter.post("/:slug/feed", requireCommunityAdmin, zod.validate.body(createPostSchema), feedController.createPost);
+communityRouter.get("/:slug/ratings", requireCommunityMember, ratingController.list);
+communityRouter.post("/:slug/ratings", requireCommunityMember, zod.validate.body(z.object({ rating: z.number().int().min(1).max(5) })), ratingController.rate);
 communityRouter.patch("/:slug/feed/:postId", requireCommunityMember, zod.validate.body(updatePostSchema), feedController.updatePost);
 communityRouter.delete("/:slug/feed/:postId", requireCommunityMember, feedController.deletePost);
 

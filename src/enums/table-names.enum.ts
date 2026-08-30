@@ -29,6 +29,7 @@ export enum TableNames {
 	INSTRUCTOR_BALANCES = "instructor_balances",
 	INSTRUCTOR_TRANSACTIONS = "instructor_transactions",
 	REVIEWS = "reviews",
+	COMMUNITY_RATINGS = "community_ratings",
 	INSTRUCTOR_REPLIES = "instructor_replies",
 	CERTIFICATES = "certificates",
 	CONVERSATIONS = "conversations",
