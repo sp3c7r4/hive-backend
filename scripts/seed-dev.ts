@@ -1,10 +1,20 @@
 // Dev fixture seeder — idempotent, email-based. Creates the known dev users
 // (reusing existing rows by email), the instructor profile, a paid + a free
 // course, and a community with members. Prints the resolved ids.
+import { hash } from "@node-rs/argon2";
 import { Pool } from "pg";
 import { config } from "@/config";
+import {
+	MEMORY_COST,
+	PARALLELISM,
+	TIME_COST,
+} from "@/constants";
 
 const pool = new Pool({ connectionString: config.db.uri });
+
+/* Admin account — real password hash, real login via /auth/login */
+export const ADMIN_EMAIL = "admin@hive.ng";
+export const ADMIN_PASSWORD = "Admin@1234";
 
 const users: Array<[string, string, string]> = [
   ["Sarafa", "Satae", "sarafasatar@gmail.com"],
@@ -40,6 +50,40 @@ for (const [email, role] of [
     [userIds[email], role],
   );
 }
+
+// ── Admin account ─────────────────────────────────────────────
+const adminHash = await hash(ADMIN_PASSWORD, {
+  memoryCost: MEMORY_COST,
+  parallelism: PARALLELISM,
+  timeCost: TIME_COST,
+});
+const admin = await pool.query(
+  `INSERT INTO users (first_name, last_name, email, password_hash, onboarded)
+   VALUES ('Platform', 'Admin', $1, $2, true)
+   ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
+   RETURNING id`,
+  [ADMIN_EMAIL, adminHash],
+);
+const adminId = admin.rows[0].id as number;
+for (const role of ["admin", "instructor"] as const) {
+  await pool.query(
+    `INSERT INTO user_roles (user_id, role) VALUES ($1,$2)
+     ON CONFLICT (user_id, role) DO NOTHING`,
+    [adminId, role],
+  );
+}
+// requireAdmin needs an instructor profile with is_admin = true
+// (no unique index on user_id — update, then insert-if-missing)
+await pool.query(
+  `UPDATE instructor_profiles SET is_admin = true WHERE user_id = $1`,
+  [adminId],
+);
+await pool.query(
+  `INSERT INTO instructor_profiles (user_id, is_admin)
+   SELECT $1, true WHERE NOT EXISTS (SELECT 1 FROM instructor_profiles WHERE user_id = $1)`,
+  [adminId],
+);
+console.log(`Admin login → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
 
 // Instructor profile + admin flag
 await pool.query(
