@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, isNull, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
 import { EmailJobNames } from "@/enums";
@@ -69,6 +69,8 @@ export class CommunityMemberService {
 		const conditions: any[] = [
 			eq(communityMembers.communityId, community.id),
 			isNull(users.deletedAt),
+			/* The owner manages the community — not shown as a member */
+			ne(communityMembers.memberRole, "owner"),
 		];
 
 		if (params?.status) {
@@ -133,6 +135,8 @@ export class CommunityMemberService {
 			eq(communities.ownerId, Number(authData.id)),
 			isNull(communities.deletedAt),
 			isNull(users.deletedAt),
+			/* The owner manages the community — not shown as a member */
+			ne(communityMembers.memberRole, "owner"),
 		];
 		if (params?.status)
 			conditions.push(eq(communityMembers.status, params.status as any));
@@ -201,6 +205,7 @@ export class CommunityMemberService {
 						eq(communities.ownerId, Number(authData.id)),
 						isNull(communities.deletedAt),
 						isNull(users.deletedAt),
+						ne(communityMembers.memberRole, "owner"),
 					),
 				)
 				.groupBy(communityMembers.status) as any,
