@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { sendSuccessResponse } from "@/helpers";
+import { formDataToObject } from "@/helpers/middleware";
 import { AssignmentService } from "./submission.service";
 
 export class AssignmentController {
@@ -14,6 +15,29 @@ export class AssignmentController {
 	private constructor() {
 		this.service = AssignmentService.getInstance();
 	}
+
+	/* Student: Submit an assignment */
+
+	submit = async (c: Context) => {
+		const authData = c.get("authData");
+		const { lessonId, text } = formDataToObject(await c.req.formData()) as {
+			lessonId?: number;
+			text?: string;
+		};
+		const uploadedFiles = c.get("uploadedFiles") as Array<{ key: string }> | undefined;
+		const fileUrls = uploadedFiles?.map((f) => f.key) ?? [];
+		const data = await this.service.submit(authData, lessonId!, text, fileUrls);
+		return sendSuccessResponse(c, { message: "Assignment submitted successfully", data });
+	};
+
+	/* Student: Get my submission for a lesson */
+
+	getMySubmission = async (c: Context) => {
+		const authData = c.get("authData");
+		const lessonId = c.req.param("lessonId");
+		const data = await this.service.getByUserAndLesson(authData.id, lessonId as unknown as number);
+		return sendSuccessResponse(c, { message: "Submission fetched", data });
+	};
 
 	/* Instructor: List submissions for a course */
 

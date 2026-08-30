@@ -1,6 +1,6 @@
 import { RelationalRepository } from "@/bases";
 import { assignmentSubmissions } from "./assessment.model";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export class AssignmentSubmissionRepository extends RelationalRepository<
 	typeof assignmentSubmissions
@@ -24,7 +24,7 @@ export class AssignmentSubmissionRepository extends RelationalRepository<
 
 	findByUserAndLesson = async (userId: number, lessonId: number) => {
 		return this.findOne(
-			eq(assignmentSubmissions.userId, userId),
+			and(eq(assignmentSubmissions.userId, userId), eq(assignmentSubmissions.lessonId, lessonId)) as any,
 		);
 	};
 }

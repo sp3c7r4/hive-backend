@@ -114,7 +114,7 @@ export class AuthService {
 		if (!user) throwNotFoundError("Invalid email or password");
 
 		const userAny = user as any;
-		if (userAny.deleted_at) throwNotFoundError("Invalid email or password");
+		if (userAny.deletedAt) throwNotFoundError("Invalid email or password");
 
 		if (!userAny.passwordHash)
 			throwUnauthorizedError(

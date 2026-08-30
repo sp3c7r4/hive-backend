@@ -41,6 +41,30 @@ export class QuizController {
 		});
 	};
 
+	/* Student: fetch quiz questions (answers stripped) */
+
+	getLessonQuestions = async (c: Context) => {
+		const lessonId = c.req.param("lessonId");
+		const data = await this.service.getLessonQuestions(
+			lessonId as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Quiz questions fetched successfully",
+			data,
+		});
+	};
+
+	/* Instructor: quiz results per course */
+
+	listByCourse = async (c: Context) => {
+		const courseId = c.req.param("courseId");
+		const data = await this.service.listByCourse(courseId as unknown as number);
+		return sendSuccessResponse(c, {
+			message: "Quiz results fetched successfully",
+			data,
+		});
+	};
+
 	/* Instructor: Quiz Builder */
 
 	listQuestions = async (c: Context) => {

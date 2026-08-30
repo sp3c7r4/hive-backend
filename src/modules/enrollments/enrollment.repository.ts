@@ -51,15 +51,16 @@ export class LessonProgressRepository extends RelationalRepository<typeof lesson
 		);
 	};
 
-	upsertProgress = async (enrollmentId: number, lessonId: number, userId: number) => {
+	upsertProgress = async (enrollmentId: number, lessonId: number, _userId: number) => {
 		const existing = await this.findByEnrollmentAndLesson(enrollmentId, lessonId);
 		if (existing) {
-			return this.update(existing.id, { completedAt: new Date() } as any);
+			return this.update(existing.id, { completed: true, completedAt: new Date() } as any);
 		}
 		return this.create({
 			enrollmentId,
 			lessonId,
-			userId,
+			completed: true,
+			completedAt: new Date(),
 		} as any);
 	};
 }

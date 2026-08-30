@@ -22,11 +22,26 @@ quizRouter.post(
 	controller.submit,
 );
 
+/* Instructor: quiz results per course (must be before :lessonId) */
+quizRouter.get(
+	"/attempts/course/:courseId",
+	jwt.validateToken,
+	requireInstructor,
+	controller.listByCourse,
+);
+
 /* Student: view attempts */
 quizRouter.get(
 	"/attempts/:lessonId",
 	jwt.validateToken,
 	controller.getAttempts,
+);
+
+/* Student: fetch quiz questions (answers stripped) */
+quizRouter.get(
+	"/lessons/:lessonId/take",
+	jwt.validateToken,
+	controller.getLessonQuestions,
 );
 
 /* Instructor: Quiz Builder */

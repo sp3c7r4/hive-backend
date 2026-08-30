@@ -12,7 +12,8 @@ export const quizSubmissionSchema = z.object({
 });
 
 export const createQuizQuestionSchema = z.object({
-	lessonId: z.number().int(),
+	/** @info - Optional: the controller injects it from the URL param */
+	lessonId: z.number().int().optional(),
 	type: z.enum(Object.values(QuizQuestionType) as [string, ...string[]]).default("multiple"),
 	text: z.string().min(1),
 	options: z.array(z.string()).optional(),

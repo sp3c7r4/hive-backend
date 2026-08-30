@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+export const submitAssignmentSchema = z.object({
+	lessonId: z.coerce.number().int(),
+	text: z.string().optional(),
+});
+
 export const gradeSubmissionSchema = z.object({
 	score: z.number().int().min(0),
 	feedback: z.string().optional(),

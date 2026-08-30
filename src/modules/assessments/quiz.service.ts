@@ -4,6 +4,11 @@ import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { QuizMessages } from "./quiz.message";
 import { QuizQuestionRepository, QuizAttemptRepository } from "./quiz.repository";
 import type { NewQuizQuestion } from "./assessment.model";
+import { getDb } from "@/db/postgres.db";
+import { quizAttempts } from "./assessment.model";
+import { users } from "@/modules/user/user.model";
+import { lessons, modules } from "@/modules/courses/course.model";
+import { eq, and, sql } from "drizzle-orm";
 
 interface QuizSubmission {
 	questionId: number;
@@ -49,6 +54,7 @@ export class QuizService {
 			correctAnswer: string;
 			isCorrect: boolean;
 			points: number;
+			explanation: string | null;
 		}> = [];
 
 		let earnedPoints = 0;
@@ -91,6 +97,7 @@ export class QuizService {
 				correctAnswer: question.correctAnswer,
 				isCorrect,
 				points,
+				explanation: question.explanation,
 			});
 		}
 
@@ -111,6 +118,38 @@ export class QuizService {
 
 	getAttempts = async (authData: IAuthData, lessonId: number) => {
 		return this.attempts.findByUserAndLesson(authData.id, lessonId);
+	};
+
+	/** @info - Student-facing quiz questions: answers & explanations stripped */
+	getLessonQuestions = async (lessonId: number) => {
+		const questions = await this.questions.findByLesson(lessonId);
+		return questions.map(({ correctAnswer: _, explanation: __, ...q }) => q);
+	};
+
+	/* Instructor: aggregated quiz results per course */
+
+	listByCourse = async (courseId: number) => {
+		const db = getDb();
+		const rows = await db
+			.select({
+				userId: quizAttempts.userId,
+				studentName: users.firstName,
+				studentLastName: users.lastName,
+				studentEmail: users.email,
+				lessonId: quizAttempts.lessonId,
+				lessonTitle: lessons.title,
+				totalAttempted: sql<number>`count(${quizAttempts.id})`.mapWith(Number),
+				correctCount: sql<number>`sum(case when ${quizAttempts.isCorrect} then 1 else 0 end)`.mapWith(Number),
+			})
+			.from(quizAttempts)
+			.innerJoin(users, eq(quizAttempts.userId, users.id))
+			.innerJoin(lessons, eq(quizAttempts.lessonId, lessons.id))
+			.innerJoin(modules, eq(lessons.moduleId, modules.id))
+			.where(eq(modules.courseId, courseId))
+			.groupBy(quizAttempts.userId, users.firstName, users.lastName, users.email, quizAttempts.lessonId, lessons.title)
+			.orderBy(users.firstName);
+
+		return rows;
 	};
 
 	/* Instructor: Quiz Builder CRUD */

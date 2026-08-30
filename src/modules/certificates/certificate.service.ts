@@ -1,13 +1,19 @@
 import { eq } from "drizzle-orm";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
+import { config } from "@/config";
+import { getDb } from "@/db/postgres.db";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import { EmailJobNames } from "@/enums";
+import { EmailQueueService } from "@/services/queues/email.queue.service";
 import { CertificateMessages } from "./certificate.message";
 import { CertificateRepository } from "./certificate.repository";
+import { courses } from "@/modules/courses/course.model";
 
 export class CertificateService {
 	private static instance: CertificateService;
 	private repo: CertificateRepository;
+	private readonly emailQueue = EmailQueueService.getInstance();
 
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Certificate");
@@ -71,7 +77,7 @@ export class CertificateService {
 
 		const code = this._generateCode(authData.id, courseId);
 
-		return this.repo.create({
+		const certificate = await this.repo.create({
 			userId: authData.id,
 			courseId,
 			enrollmentId,
@@ -80,6 +86,35 @@ export class CertificateService {
 			quizScorePercent,
 			attendancePercent,
 		} as any);
+
+		/* Queue certificate-issued email */
+		const db = getDb();
+		const [courseRow] = await db
+			.select({ title: courses.title })
+			.from(courses)
+			.where(eq(courses.id, courseId))
+			.limit(1);
+
+		this.emailQueue.add(EmailJobNames.CERTIFICATE_ISSUED as any, {
+			message: {
+				to: authData.email!,
+				subject: `Certificate earned for ${courseRow?.title ?? "your course"}!`,
+			},
+			template: "certificate-issued" as any,
+			locals: {
+				studentName: authData.firstName ?? "there",
+				courseName: courseRow?.title ?? "your course",
+				certificateCode: code,
+				issuedAt: new Date().toLocaleDateString("en-US", {
+					year: "numeric",
+					month: "long",
+					day: "numeric",
+				}),
+				dashboardUrl: `${config.server.rootDomain}/dashboard`,
+			},
+		});
+
+		return certificate;
 	};
 
 	verify = async (code: string) => {

@@ -201,7 +201,8 @@ export class UserService {
 		const newHash = await this.encryptionService.hash(newPassword);
 		await this.userRepo.update(userId, { passwordHash: newHash } as any);
 
-		/* Keep current session alive — no token invalidation on password change */
+		/* Preserve current session, kill all other auth + refresh entries */
+		await this.invalidateOtherTokens(authData);
 	};
 
 	deleteAccount = async (authData: IAuthData) => {

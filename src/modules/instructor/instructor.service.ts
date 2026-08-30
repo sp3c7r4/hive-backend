@@ -52,7 +52,7 @@ export class InstructorService {
 			.where(
 				and(
 					eq(courses.instructorId, instructorId),
-					eq(courses.deleted_at, null as any),
+					eq(courses.deletedAt, null as any),
 				),
 			);
 		const avgRating = Math.round((ratingResult[0]?.avg ?? 0) / 10 * 10) / 10;

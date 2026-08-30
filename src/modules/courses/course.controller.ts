@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
+import { formDataToObject } from "@/helpers/middleware";
 import { CourseService } from "./course.service";
 
 export class CourseController {
@@ -19,26 +20,47 @@ export class CourseController {
 	/* Courses */
 
 	create = async (c: Context) => {
-		const data = await this.service.createCourse(await c.req.json());
+		const authData = c.get("authData");
+
+		/* FormData path — file handled by upload middleware */
+		const formData = await c.req.formData();
+		const data: Record<string, any> = formDataToObject(formData);
+		data.coverImageUrl = c.get("uploadedFile")?.key;
+
+		const result = await this.service.createCourse(authData, data as any);
 		return sendSuccessResponse(c, {
 			message: "Course created successfully",
-			data,
+			data: result,
 		}, StatusCodes.CREATED);
 	};
 
 	list = async (c: Context) => {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const data = await this.service.listCourses({ page, limit });
+		const communityId = c.req.query("communityId");
+		const data = await this.service.listCourses({
+			page,
+			limit,
+			...(communityId ? { communityId: Number(communityId) } : {}),
+		});
 		return sendSuccessResponse(c, {
 			message: "Courses fetched successfully",
 			data,
 		});
 	};
 
+	mine = async (c: Context) => {
+		const authData = c.get("authData");
+		const data = await this.service.listMine(authData);
+		return sendSuccessResponse(c, {
+			message: "My courses fetched successfully",
+			data,
+		});
+	};
+
 	get = async (c: Context) => {
-		const id = c.req.param("id");
-		const data = await this.service.getCourse(id as unknown as number);
+		const idOrSlug = c.req.param("idOrSlug") as string;
+		const data = await this.service.getCourse(idOrSlug);
 		return sendSuccessResponse(c, {
 			message: "Course fetched successfully",
 			data,
@@ -46,14 +68,25 @@ export class CourseController {
 	};
 
 	update = async (c: Context) => {
+		const authData = c.get("authData");
 		const id = c.req.param("id");
-		const data = await this.service.updateCourse(
+
+		// Multipart (FormData) — used when cover image is uploaded
+		const formData = await c.req.formData();
+		const data: Record<string, any> = formDataToObject(formData);
+		const uploadedFile = c.get("uploadedFile");
+		if (uploadedFile?.key) {
+			data.coverImageUrl = uploadedFile.key;
+		}
+
+		const result = await this.service.updateCourse(
+			authData,
 			id as unknown as number,
-			await c.req.json(),
+			data as any,
 		);
 		return sendSuccessResponse(c, {
 			message: "Course updated successfully",
-			data,
+			data: result,
 		});
 	};
 
@@ -136,9 +169,9 @@ export class CourseController {
 	};
 
 	updateLesson = async (c: Context) => {
-		const id = c.req.param("id");
+		const lessonId = c.req.param("lessonId");
 		const data = await this.service.updateLesson(
-			id as unknown as number,
+			lessonId as unknown as number,
 			await c.req.json(),
 		);
 		return sendSuccessResponse(c, {
@@ -148,8 +181,8 @@ export class CourseController {
 	};
 
 	deleteLesson = async (c: Context) => {
-		const id = c.req.param("id");
-		await this.service.deleteLesson(id as unknown as number);
+		const lessonId = c.req.param("lessonId");
+		await this.service.deleteLesson(lessonId as unknown as number);
 		return sendSuccessResponse(c, {
 			message: "Lesson deleted successfully",
 		});
@@ -158,9 +191,11 @@ export class CourseController {
 	/* Live Class Meeting Generation */
 
 	generateMeeting = async (c: Context) => {
+		const authData = c.get("authData");
 		const lessonId = c.req.param("lessonId");
 		const body = await c.req.json();
 		const data = await this.service.generateMeeting(
+			authData,
 			lessonId as unknown as number,
 			body,
 		);

@@ -112,6 +112,7 @@ export const lessons = pgTable(
 		duration: varchar("duration", { length: 100 }),
 		sortOrder: integer("sort_order").default(0).notNull(),
 		freePreview: boolean("free_preview").default(false),
+		randomizeQuestions: boolean("randomize_questions").default(false).notNull(),
 		status: lessonStatusEnum("status").default("draft").notNull(),
 		videoUrl: varchar("video_url", { length: 1000 }),
 		pdfUrl: varchar("pdf_url", { length: 1000 }),
