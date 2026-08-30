@@ -305,7 +305,7 @@ export class CourseService {
 			.select()
 			.from(lessons)
 			.where(eq(lessons.moduleId, moduleId))
-			.orderBy(asc(lessons.sortOrder));
+			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
 	};
 
 	updateLesson = async (id: number, data: Partial<NewLesson>) => {
