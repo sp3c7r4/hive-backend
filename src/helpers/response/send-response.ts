@@ -8,6 +8,7 @@ export const sendSuccessResponse = (
 	data: unknown | unknown[],
 	statusCode: ContentfulStatusCode = StatusCodes.OK,
 ) => {
+  console.log("Response: ", data)
 	return c.json(
 		{
 			timestamp: new Date().toISOString(),

@@ -29,14 +29,14 @@ export class RelationalRepository<T extends AnyPgTable & { id: any }> {
 
 	/** @info - Returns true if this table has a deleted_at column */
 	private get _hasSoftDelete(): boolean {
-		return "deleted_at" in (this._model as any);
+		return "deletedAt" in (this._model as any);
 	}
 
 	/** @info - Adds WHERE deleted_at IS NULL unless includeDeleted is set */
 	private _softDeleteFilter(opts?: RepoOptions): SQL | undefined {
 		if (!this._hasSoftDelete) return undefined;
 		if (opts?.includeDeleted) return undefined;
-		return isNull((this._model as any).deleted_at);
+		return isNull((this._model as any).deletedAt);
 	}
 
 	/** @info - Merges a user where clause with the soft-delete filter */
@@ -212,7 +212,7 @@ export class RelationalRepository<T extends AnyPgTable & { id: any }> {
 			}
 			const [row]: any = await this._db
 				.update(this._model)
-				.set({ deleted_at: new Date() } as any)
+				.set({ deletedAt: new Date() } as any)
 				.where(eq(this._model.id, id))
 				.returning();
 			return row as InferSelectModel<T> | undefined;

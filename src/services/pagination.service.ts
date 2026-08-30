@@ -49,7 +49,7 @@ export class PaginationService<T extends Record<string, any>> {
 			const orderFn = orderBy.direction === "desc" ? desc : asc;
 			dataQuery.orderBy(orderFn(orderBy.column));
 		} else {
-			dataQuery.orderBy(desc((this.model as any).created_at));
+			dataQuery.orderBy(desc((this.model as any).createdAt));
 		}
 
 		const [data, [{ value: total }]]: any = await Promise.all([

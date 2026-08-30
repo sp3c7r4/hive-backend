@@ -5,12 +5,14 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { WebSocketServer } from "ws";
 import { config } from "@/config";
 import { connectPostgresDB, connectRedisDB } from "@/db";
 import { healthCheck } from "@/helpers";
 import { errorHandler, RequestLogger, routeNotFound } from "@/middlewares";
 import { router } from "@/routes";
 import { EmailQueueService } from "@/services";
+import { messagingWsHandler } from "@/modules/messaging/messaging.ws";
 import { logger } from "@/utils";
 
 const app = new Hono({
@@ -18,6 +20,10 @@ const app = new Hono({
 });
 
 let PORT: number = config.server.port;
+
+/** @info - WebSocket endpoint. Registered BEFORE CORS/RequestLogger —
+ *          header-modifying middleware breaks the Hono WS upgrade. */
+app.get("/ws", messagingWsHandler);
 
 /** @info - CORS middleware */
 app.use(
@@ -69,10 +75,12 @@ app.route("/queue", bullMQAdapter.registerPlugin());
 let server: ReturnType<typeof serve>;
 
 function startServer(port: number = PORT) {
+	const wss = new WebSocketServer({ noServer: true });
 	server = serve({
 		fetch: app.fetch,
 		hostname: config.server.hostname,
 		port: port,
+		websocket: { server: wss },
 	});
 
 	/** @info - Displays server started message */
