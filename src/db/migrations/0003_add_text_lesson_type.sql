@@ -1,0 +1,1 @@
+ALTER TYPE "public"."lesson_type" ADD VALUE 'text';

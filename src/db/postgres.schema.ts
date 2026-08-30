@@ -5,6 +5,7 @@ export * from "@/models/user.credential.model";
 export * from "@/modules/assessments/assessment.model";
 export * from "@/modules/certificates/certificate.model";
 export * from "@/modules/communities/community.model";
+export * from "@/modules/communities/community-feed.model";
 export * from "@/modules/courses/course.model";
 export * from "@/modules/enrollments/enrollment.model";
 export * from "@/modules/instructor/instructor.model";

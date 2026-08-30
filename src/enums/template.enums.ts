@@ -4,6 +4,10 @@ export enum EmailTemplates {
 	WELCOME = "welcome",
 	RECEIPT = "receipt",
 	CHILD_LINKED = "child-linked",
+	ENROLLMENT_CONFIRMED = "enrollment-confirmed",
+	CERTIFICATE_ISSUED = "certificate-issued",
+	COMMUNITY_INVITE = "community-invite",
+	ASSIGNMENT_GRADED = "assignment-graded",
 }
 
 export enum Templates {

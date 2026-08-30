@@ -21,6 +21,7 @@ export enum LessonType {
 	LIVE = "live",
 	QUIZ = "quiz",
 	ASSIGNMENT = "assignment",
+	TEXT = "text",
 }
 
 export enum LessonStatus {

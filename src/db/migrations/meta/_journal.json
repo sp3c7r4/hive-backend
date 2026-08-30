@@ -15,6 +15,20 @@
       "when": 1785642712278,
       "tag": "0001_strange_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785665440345,
+      "tag": "0002_shiny_the_captain",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786493647092,
+      "tag": "0003_add_text_lesson_type",
+      "breakpoints": true
     }
   ]
 }

@@ -29,11 +29,13 @@ export const conversations = pgTable(
 		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
 		type: conversationTypeEnum("type").default("direct").notNull(),
 		title: varchar("title", { length: 255 }),
+		communityId: integer("community_id"),
 		lastMessageAt: timestamp("last_message_at"),
 		...timestamps,
 	},
 	(table) => [
 		index("idx_conversations_type").on(table.type),
+		index("idx_conversations_community").on(table.communityId),
 	],
 );
 
@@ -51,6 +53,7 @@ export const conversationParticipants = pgTable(
 		role: userRoleEnum("role").notNull(),
 		joinedAt: timestamp("joined_at").defaultNow().notNull(),
 		leftAt: timestamp("left_at"),
+		lastReadAt: timestamp("last_read_at"),
 	},
 	(table) => [
 		uniqueIndex("uq_conversation_participant").on(table.conversationId, table.userId),
