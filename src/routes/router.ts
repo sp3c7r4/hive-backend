@@ -3,6 +3,7 @@ import { healthCheck } from "@/helpers";
 import { quizRouter, submissionRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
 import { certificateRouter } from "@/modules/certificates";
+import { reviewRouter } from "@/modules/reviews";
 import { communityRouter, memberRouter } from "@/modules/communities";
 import { courseRouter, moduleRouter } from "@/modules/courses";
 import { enrollmentRouter } from "@/modules/enrollments";
@@ -21,6 +22,7 @@ router.get("/", healthCheck);
 
 router.route("/auth", authRouter);
 router.route("/certificates", certificateRouter);
+router.route("/reviews", reviewRouter);
 router.route("/communities", communityRouter);
 router.route("/courses", courseRouter);
 router.route("/enrollments", enrollmentRouter);
