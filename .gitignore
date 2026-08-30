@@ -39,3 +39,8 @@ Thumbs.db
 
 # Git
 *.diff
+
+# Scratch / artifacts
+*.zip
+mint_tokens.tmp.js
+.pi-subagents/
