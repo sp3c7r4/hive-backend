@@ -38,7 +38,7 @@ services:
   edge-endpoint:
     container_name: hive-edge-endpoint
     image: cloudflare/cloudflared:1895-8679787525ed
-    command: tunnel --no-autoupdate --url http://host.docker.internal:5000
+    command: tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:5000
     profiles:
       - dev
 
