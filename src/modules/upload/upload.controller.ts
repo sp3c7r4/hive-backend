@@ -6,6 +6,35 @@ import { StorageService } from "@/services/storage.service";
 import { nanoid } from "nanoid";
 import { generateImageKey } from "@/helpers/id-generators";
 
+const MIME_BY_EXT: Record<string, string> = {
+	mp4: "video/mp4",
+	mov: "video/quicktime",
+	webm: "video/webm",
+	m4v: "video/x-m4v",
+	mpeg: "video/mpeg",
+	pdf: "application/pdf",
+	doc: "application/msword",
+	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	png: "image/png",
+	gif: "image/gif",
+	webp: "image/webp",
+};
+
+/** @info - Browsers sometimes send an empty or octet-stream type for real
+ * files; infer from the extension so valid uploads are never rejected. */
+const inferMime = (file: File) => {
+	if (
+		file.type &&
+		file.type !== "application/octet-stream" &&
+		file.type !== "text/plain"
+	)
+		return file.type;
+	const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+	return MIME_BY_EXT[ext] ?? file.type;
+};
+
 export class UploadController {
 	private static instance: UploadController;
 
@@ -76,10 +105,11 @@ export class UploadController {
 				StatusCodes.BAD_REQUEST,
 			);
 		}
-		if (!allowed.includes(file.type)) {
+		const fileType = inferMime(file);
+		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid file type '${file.type}'. Allowed: PDF, DOC, DOCX, JPEG, PNG, GIF, WebP` },
+				{ message: `Invalid file type '${fileType}'. Allowed: PDF, DOC, DOCX, JPEG, PNG, GIF, WebP` },
 				StatusCodes.BAD_REQUEST,
 			);
 		}
@@ -98,7 +128,7 @@ export class UploadController {
 		await this.storage.upload({
 			key,
 			body: file,
-			contentType: file.type,
+			contentType: fileType,
 		});
 
 		const publicUrl = `${config.aws.s3Url}${key}`;
@@ -142,13 +172,14 @@ export class UploadController {
 			);
 		}
 
-		const ext = file.type.split("/")[1] ?? "bin";
+		const fileType = inferMime(file);
+		const ext = fileType.split("/")[1] ?? "bin";
 		const key = generateImageKey("feed", ext, authData.id.toString());
 
 		await this.storage.upload({
 			key,
 			body: file,
-			contentType: file.type,
+			contentType: fileType,
 		});
 
 		const publicUrl = `${config.aws.s3Url}${key}`;
@@ -186,10 +217,11 @@ export class UploadController {
 				StatusCodes.BAD_REQUEST,
 			);
 		}
-		if (!allowed.includes(file.type)) {
+		const fileType = inferMime(file);
+		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid file type '${file.type}'. Allowed: MP4, MOV, WebM, M4V, MPEG` },
+				{ message: `Invalid file type '${fileType}'. Allowed: MP4, MOV, WebM, M4V, MPEG` },
 				StatusCodes.BAD_REQUEST,
 			);
 		}
@@ -206,7 +238,7 @@ export class UploadController {
 		await this.storage.upload({
 			key,
 			body: file,
-			contentType: file.type,
+			contentType: fileType,
 		});
 
 		const publicUrl = `${config.aws.s3Url}${key}`;
