@@ -133,6 +133,16 @@ export class PaymentController {
 		});
 	};
 
+	/** @info - List the authenticated user's payments, newest first */
+	listPayments = async (c: Context) => {
+		const authData = c.get("authData");
+		const rows = await this.paymentRepo.listByPayer(Number(authData.id));
+		return sendSuccessResponse(c, {
+			message: "Payments fetched successfully",
+			data: rows,
+		});
+	};
+
 	/** @info - Payment status for the checkout/confirmation page (owner-scoped) */
 	verifyPayment = async (c: Context) => {
 		const authData = c.get("authData");

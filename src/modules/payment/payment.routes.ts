@@ -26,6 +26,7 @@ paymentRouter.post(
 	controller.initialize,
 );
 
+paymentRouter.get("/", jwt.validateToken, controller.listPayments);
 paymentRouter.get("/verify/:reference", jwt.validateToken, controller.verifyPayment);
 
 paymentRouter.get("/cancel", controller.cancelPayment);
