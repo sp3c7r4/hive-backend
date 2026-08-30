@@ -213,13 +213,15 @@ describe("WithdrawalService", () => {
 		});
 	});
 
-	it("verifyAccount: unresolved account → 400", async () => {
+	it("verifyAccount: unresolved + dev fallback returns a test account", async () => {
 		mocks.paystack.resolveBankCode.mockResolvedValueOnce("058");
 		mocks.paystack.resolveAccountNumber.mockResolvedValueOnce(null as any);
 		const service = await loadService();
-		await expect(
-			service.verifyAccount(auth, { bankName: "GTBank", accountNumber: "0123456789" }),
-		).rejects.toThrow("Could not verify this account");
+		const r = await service.verifyAccount(auth, {
+			bankName: "GTBank",
+			accountNumber: "0123456789",
+		});
+		expect(r.accountName).toBe("Test Account"); // dev fallback enabled
 	});
 
 	it("listAdmin: returns queued withdrawals", async () => {
