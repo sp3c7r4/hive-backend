@@ -194,6 +194,10 @@ export class FileUploadMiddleware {
 			const files = formData.getAll(options.fieldName);
 
 			if (!files.length) {
+				if (options.optional) {
+					c.set("uploadedFiles", []);
+					return next();
+				}
 				return sendErrorResponse(
 					c,
 					{ message: `No files provided for field '${options.fieldName}'` },

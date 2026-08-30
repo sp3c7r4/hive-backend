@@ -4,6 +4,7 @@ import {
 	ForbiddenError,
 	InternalServerError,
 	NotFoundError,
+	RateLimitError,
 	UnauthorizedError,
 } from "@/errors";
 
@@ -29,4 +30,8 @@ export const throwInternalServerError = (message: string): never => {
 
 export const throwConflictError = (message: string): never => {
 	throw new ConflictError(message);
+};
+
+export const throwRateLimitError = (message: string): never => {
+	throw new RateLimitError(message);
 };
