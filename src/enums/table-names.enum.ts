@@ -26,6 +26,8 @@ export enum TableNames {
 	LESSON_PROGRESS = "lesson_progress",
 	PAYMENTS = "payments",
 	WITHDRAWALS = "withdrawals",
+	INSTRUCTOR_BALANCES = "instructor_balances",
+	INSTRUCTOR_TRANSACTIONS = "instructor_transactions",
 	REVIEWS = "reviews",
 	INSTRUCTOR_REPLIES = "instructor_replies",
 	CERTIFICATES = "certificates",

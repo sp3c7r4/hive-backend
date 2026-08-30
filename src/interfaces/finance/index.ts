@@ -16,6 +16,8 @@ export interface VerifyTransactionOptions {
 export interface HandleWebhookOptions {
 	paystack_signature: string;
 	body: Record<string, any>;
+	/** @info - Raw request body — used for HMAC verification (Paystack signs the raw bytes) */
+	rawBody?: string;
 }
 
 export interface InitializeTransactionResult {

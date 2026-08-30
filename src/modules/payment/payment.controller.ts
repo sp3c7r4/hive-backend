@@ -161,11 +161,13 @@ export class PaymentController {
 
 	private handleWebhook = async (c: Context) => {
 		const paystack_signature = c.req.header("x-paystack-signature");
-		const body = await c.req.json();
+		const rawBody = await c.req.text();
+		const body = JSON.parse(rawBody);
 
 		await this.paystackService.handleWebhook({
 			paystack_signature: paystack_signature as unknown as string,
 			body,
+			rawBody,
 		});
 
 		return sendSuccessResponse(c, {

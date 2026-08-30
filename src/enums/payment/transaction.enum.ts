@@ -22,4 +22,19 @@ export enum WithdrawalStatus {
 	PROCESSING = "processing",
 	COMPLETED = "completed",
 	FAILED = "failed",
+	REJECTED = "rejected",
+}
+
+/** @info - Instructor ledger (M1): append-only transaction types */
+export enum LedgerTransactionType {
+	CREDIT = "credit",
+	DEBIT = "debit",
+}
+
+/** @info - Instructor ledger categories (source of each row) */
+export enum LedgerTransactionCategory {
+	ENROLLMENT = "enrollment",
+	COMMUNITY = "community",
+	WITHDRAWAL = "withdrawal",
+	WITHDRAWAL_REFUND = "withdrawal_refund",
 }
