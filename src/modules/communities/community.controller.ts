@@ -36,7 +36,7 @@ export class CommunityController {
 		const authData = c.get("authData");
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
-		const scope = c.req.query("scope") as "mine" | undefined;
+		const scope = c.req.query("scope") as "mine" | "owned" | undefined;
 		const data = await this.service.list({ page, limit, userId: authData?.id, scope });
 		return sendSuccessResponse(c, {
 			message: "Communities fetched successfully",

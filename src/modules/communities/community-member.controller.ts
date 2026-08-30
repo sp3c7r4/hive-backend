@@ -24,7 +24,36 @@ export class CommunityMemberController {
 		const search = c.req.query("search");
 		const status = c.req.query("status");
 
-		const data = await this.service.listMembers(authData, slug, { search, status });
+		const data = await this.service.listMembers(authData, slug, {
+			search,
+			status,
+		});
+		return sendSuccessResponse(c, {
+			message: "Members fetched successfully",
+			data,
+		});
+	};
+
+	/** @info - Instructor dashboard aggregate: members across owned communities */
+	listMine = async (c: Context) => {
+		const authData = c.get("authData");
+		const search = c.req.query("search");
+		const status = c.req.query("status");
+		const communityId = c.req.query("communityId")
+			? Number(c.req.query("communityId"))
+			: undefined;
+		const page = c.req.query("page") ? Number(c.req.query("page")) : undefined;
+		const limit = c.req.query("limit")
+			? Number(c.req.query("limit"))
+			: undefined;
+
+		const data = await this.service.listMine(authData, {
+			search,
+			status,
+			communityId,
+			page,
+			limit,
+		});
 		return sendSuccessResponse(c, {
 			message: "Members fetched successfully",
 			data,
@@ -37,7 +66,12 @@ export class CommunityMemberController {
 		const targetUserId = Number(c.req.param("userId"));
 		const body = await c.req.json();
 
-		const data = await this.service.updateMember(authData, slug, targetUserId, body);
+		const data = await this.service.updateMember(
+			authData,
+			slug,
+			targetUserId,
+			body,
+		);
 		return sendSuccessResponse(c, {
 			message: "Member updated successfully",
 			data,
@@ -97,10 +131,14 @@ export class CommunityMemberController {
 		const body = await c.req.json();
 
 		const data = await this.service.createInvite(authData, slug, body);
-		return sendSuccessResponse(c, {
-			message: "Invite sent successfully",
-			data,
-		}, StatusCodes.CREATED);
+		return sendSuccessResponse(
+			c,
+			{
+				message: "Invite sent successfully",
+				data,
+			},
+			StatusCodes.CREATED,
+		);
 	};
 
 	cancelInvite = async (c: Context) => {
@@ -121,12 +159,17 @@ export class CommunityMemberController {
 		const slug = c.req.param("slug") as string;
 
 		const data = await this.service.joinCommunity(authData, slug);
-		return sendSuccessResponse(c, {
-			message: (data as any).status === "pending"
-				? "Join request submitted for approval"
-				: "Joined community successfully",
-			data,
-		}, StatusCodes.CREATED);
+		return sendSuccessResponse(
+			c,
+			{
+				message:
+					(data as any).status === "pending"
+						? "Join request submitted for approval"
+						: "Joined community successfully",
+				data,
+			},
+			StatusCodes.CREATED,
+		);
 	};
 
 	leaveCommunity = async (c: Context) => {

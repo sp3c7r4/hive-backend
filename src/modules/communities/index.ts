@@ -1,7 +1,8 @@
 export * from "./community.model";
-export * from "./community-feed.model";
 export { communityRouter } from "./community.routes";
-export { CommunityMemberController } from "./community-member.controller";
-export { CommunityMemberService } from "./community-member.service";
 export { CommunityFeedController } from "./community-feed.controller";
+export * from "./community-feed.model";
 export { CommunityFeedService } from "./community-feed.service";
+export { CommunityMemberController } from "./community-member.controller";
+export { memberRouter } from "./community-member.routes";
+export { CommunityMemberService } from "./community-member.service";

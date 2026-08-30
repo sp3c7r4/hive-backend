@@ -1,16 +1,24 @@
-import { eq, and, isNull, ilike, or, count } from "drizzle-orm";
-import { throwNotFoundError, throwBadRequestError, throwForbiddenError } from "@/helpers/errors/throw-errors";
-import { withPresignedUrl } from "@/helpers/storage.helper";
+import { and, count, desc, eq, ilike, isNull, or } from "drizzle-orm";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
-import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { EmailJobNames } from "@/enums";
-import { EmailQueueService } from "@/services/queues/email.queue.service";
-import { CommunityRepository } from "./community.repository";
+import {
+	throwBadRequestError,
+	throwForbiddenError,
+	throwNotFoundError,
+} from "@/helpers/errors/throw-errors";
+import { withPresignedUrl } from "@/helpers/storage.helper";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { MessagingRepository } from "@/modules/messaging/messaging.repository";
-import { communities, communityMembers, communityInvites } from "./community.model";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
+import { EmailQueueService } from "@/services/queues/email.queue.service";
+import {
+	communities,
+	communityInvites,
+	communityMembers,
+} from "./community.model";
+import { CommunityRepository } from "./community.repository";
 
 export class CommunityMemberService {
 	private static instance: CommunityMemberService;
@@ -101,6 +109,119 @@ export class CommunityMemberService {
 		return rows.map((row) => withPresignedUrl(row, "avatarUrl"));
 	};
 
+	/**
+	 * @info - Aggregate members across ALL communities the instructor owns.
+	 *         Used by the instructor dashboard Members section. Joined with
+	 *         communities + users; paginated; `counts` reflect the owned set.
+	 */
+	listMine = async (
+		authData: IAuthData,
+		params?: {
+			search?: string;
+			status?: string;
+			communityId?: number;
+			page?: number;
+			limit?: number;
+		},
+	) => {
+		const db = getDb();
+		const page = Math.max(1, Number(params?.page) || 1);
+		const limit = Math.max(1, Math.min(Number(params?.limit) || 30, 100));
+		const offset = (page - 1) * limit;
+
+		const conditions: any[] = [
+			eq(communities.ownerId, Number(authData.id)),
+			isNull(communities.deletedAt),
+			isNull(users.deletedAt),
+		];
+		if (params?.status)
+			conditions.push(eq(communityMembers.status, params.status as any));
+		if (params?.communityId)
+			conditions.push(
+				eq(communityMembers.communityId, Number(params.communityId)),
+			);
+		if (params?.search) {
+			const term = `%${params.search}%`;
+			conditions.push(
+				or(
+					ilike(users.firstName, term),
+					ilike(users.lastName, term),
+					ilike(users.email, term),
+				) as any,
+			);
+		}
+
+		const selectShape = {
+			id: communityMembers.id,
+			userId: communityMembers.userId,
+			communityId: communityMembers.communityId,
+			communityName: communities.name,
+			communitySlug: communities.slug,
+			memberRole: communityMembers.memberRole,
+			status: communityMembers.status,
+			joinedAt: communityMembers.joinedAt,
+			firstName: users.firstName,
+			lastName: users.lastName,
+			email: users.email,
+			avatarUrl: users.avatarUrl,
+		};
+
+		const [rows, [{ value: total }], countsRows] = await Promise.all([
+			db
+				.select(selectShape)
+				.from(communityMembers)
+				.innerJoin(
+					communities,
+					eq(communityMembers.communityId, communities.id),
+				)
+				.innerJoin(users, eq(communityMembers.userId, users.id))
+				.where(and(...conditions))
+				.orderBy(desc(communityMembers.joinedAt), desc(communityMembers.id))
+				.limit(limit)
+				.offset(offset) as any,
+			db
+				.select({ value: count() })
+				.from(communityMembers)
+				.innerJoin(
+					communities,
+					eq(communityMembers.communityId, communities.id),
+				)
+				.innerJoin(users, eq(communityMembers.userId, users.id))
+				.where(and(...conditions)) as any,
+			db
+				.select({ status: communityMembers.status, value: count() })
+				.from(communityMembers)
+				.innerJoin(
+					communities,
+					eq(communityMembers.communityId, communities.id),
+				)
+				.innerJoin(users, eq(communityMembers.userId, users.id))
+				.where(
+					and(
+						eq(communities.ownerId, Number(authData.id)),
+						isNull(communities.deletedAt),
+						isNull(users.deletedAt),
+					),
+				)
+				.groupBy(communityMembers.status) as any,
+		]);
+
+		const items = (rows as any[]).map((row) =>
+			withPresignedUrl(row, "avatarUrl"),
+		);
+		const counts = { active: 0, pending: 0, blocked: 0 };
+		for (const row of countsRows as any[]) {
+			counts[row.status as keyof typeof counts] = Number(row.value);
+		}
+
+		const totalPages = Math.ceil(Number(total) / limit);
+		return {
+			items,
+			meta: { total: Number(total), page, limit, totalPages },
+			counts,
+		};
+	};
+
 	updateMember = async (
 		authData: IAuthData,
 		slug: string,
@@ -122,6 +243,10 @@ export class CommunityMemberService {
 			.limit(1);
 
 		if (!member) throwNotFoundError("Member not found");
+
+		/* Owner guard — the owner cannot be blocked, demoted or status-changed */
+		if (member!.memberRole === "owner")
+			throwForbiddenError("The owner cannot be modified");
 
 		const updates: Record<string, any> = {};
 		if (data.memberRole !== undefined) updates.memberRole = data.memberRole;
@@ -157,7 +282,13 @@ export class CommunityMemberService {
 
 		if (!member) throwNotFoundError("Member not found");
 
-		await db.delete(communityMembers).where(eq(communityMembers.id, member!.id));
+		/* Owner guard — the owner cannot be removed */
+		if (member!.memberRole === "owner")
+			throwForbiddenError("The owner cannot be removed");
+
+		await db
+			.delete(communityMembers)
+			.where(eq(communityMembers.id, member!.id));
 	};
 
 	approveMember = async (
@@ -188,7 +319,9 @@ export class CommunityMemberService {
 			.where(eq(communityMembers.id, member!.id))
 			.returning();
 
-		this.notifyCommunityChat(community.id, community.name, targetUserId).catch(() => {});
+		this.notifyCommunityChat(community.id, community.name, targetUserId).catch(
+			() => {},
+		);
 
 		return updated;
 	};
@@ -215,7 +348,9 @@ export class CommunityMemberService {
 
 		if (!member) throwNotFoundError("Pending member not found");
 
-		await db.delete(communityMembers).where(eq(communityMembers.id, member!.id));
+		await db
+			.delete(communityMembers)
+			.where(eq(communityMembers.id, member!.id));
 	};
 
 	/* ── Invites ─────────────────────────────────────────────── */
@@ -273,7 +408,8 @@ export class CommunityMemberService {
 			)
 			.limit(1);
 
-		if (existingInvite) throwBadRequestError("Invite already sent to this email");
+		if (existingInvite)
+			throwBadRequestError("Invite already sent to this email");
 
 		const [invite] = await db
 			.insert(communityInvites)
@@ -345,7 +481,8 @@ export class CommunityMemberService {
 			)
 			.limit(1);
 
-		if (existingMember) throwBadRequestError("Already a member of this community");
+		if (existingMember)
+			throwBadRequestError("Already a member of this community");
 
 		/* Accept pending invite if one exists */
 		const [pendingInvite] = await db
@@ -391,7 +528,9 @@ export class CommunityMemberService {
 
 		/* Invited users skip approval (the invite IS the approval) */
 		const status =
-			pendingInvite || !(community as any).requiresApproval ? "active" : "pending";
+			pendingInvite || !(community as any).requiresApproval
+				? "active"
+				: "pending";
 
 		const [member] = await db
 			.insert(communityMembers)
@@ -406,18 +545,31 @@ export class CommunityMemberService {
 
 		/* Auto-provision the community chat + a "joined" system message (best-effort) */
 		if (status === "active") {
-			this.notifyCommunityChat(community.id, community.name, userId).catch(() => {});
+			this.notifyCommunityChat(community.id, community.name, userId).catch(
+				() => {},
+			);
 		}
 
 		return member;
 	};
 
 	/** @info - Fire-and-forget: ensure the group chat and insert a join system message. */
-	private notifyCommunityChat = async (communityId: number, name: string, userId: number) => {
+	private notifyCommunityChat = async (
+		communityId: number,
+		name: string,
+		userId: number,
+	) => {
 		const repo = MessagingRepository.getInstance();
-		const conversation = await repo.ensureCommunityConversation(communityId, name);
+		const conversation = await repo.ensureCommunityConversation(
+			communityId,
+			name,
+		);
 		if (!conversation) return;
-		await repo.insertSystemMessage(conversation.id, userId, "joined the community");
+		await repo.insertSystemMessage(
+			conversation.id,
+			userId,
+			"joined the community",
+		);
 	};
 
 	leaveCommunity = async (authData: IAuthData, slug: string) => {
@@ -439,9 +591,13 @@ export class CommunityMemberService {
 		if (!member) throwNotFoundError("You are not a member of this community");
 
 		if (member!.memberRole === "owner") {
-			throwBadRequestError("Community owner cannot leave. Transfer ownership first.");
+			throwBadRequestError(
+				"Community owner cannot leave. Transfer ownership first.",
+			);
 		}
 
-		await db.delete(communityMembers).where(eq(communityMembers.id, member!.id));
+		await db
+			.delete(communityMembers)
+			.where(eq(communityMembers.id, member!.id));
 	};
 }

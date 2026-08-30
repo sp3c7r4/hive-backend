@@ -104,11 +104,14 @@ export class CommunityService {
 		return withPresignedUrl(community!, "coverImageUrl");
 	};
 
-	list = async (params?: { page?: number; limit?: number; userId?: number; scope?: "mine" }) => {
+	list = async (params?: { page?: number; limit?: number; userId?: number; scope?: "mine" | "owned" }) => {
 		const db = getDb();
 
 		let where: any;
-		if (params?.scope === "mine" && params.userId) {
+		if (params?.scope === "owned" && params.userId) {
+			/* Owned only — used by the instructor Members filter dropdown (excludes joined-only) */
+			where = and(eq(communities.ownerId, params.userId), isNull(communities.deletedAt));
+		} else if (params?.scope === "mine" && params.userId) {
 			/* My Communities: owned OR actively a member of. Owner's archived ones included. */
 			const memberIds = db
 				.select({ communityId: communityMembers.communityId })
