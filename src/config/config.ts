@@ -88,6 +88,7 @@ export const config = {
 
 	paystack: {
 		secret: env.PAYSTACK_SECRET_KEY,
+		devResolveFallback: env.PAYSTACK_DEV_RESOLVE_FALLBACK === "true",
 	},
 
 	ai: {

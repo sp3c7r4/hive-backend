@@ -23,4 +23,8 @@ export interface PaystackPaths {
 	VERIFY_URL: `/transaction/verify/${string}`;
 	INITIALIZE_TRANSACTION: "/transaction/initialize";
 	CREATE_CHARGE: "/charge";
+	TRANSFER_RECIPIENT: "/transferrecipient";
+	TRANSFER: "/transfer";
+	BANKS: "/bank";
+	BANK_RESOLVE: "/bank/resolve";
 }

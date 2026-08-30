@@ -25,4 +25,24 @@ export abstract class PaymentGatewayService {
 	) => Promise<VerifyTransactionResult | unknown>;
 
 	abstract handleWebhook: (options: HandleWebhookOptions) => Promise<boolean>;
+
+	/* @info - M3 payouts: bank recipient + transfer */
+	abstract resolveBankCode: (bankName: string) => Promise<string | null>;
+
+	abstract resolveAccountNumber: (
+		accountNumber: string,
+		bankCode: string,
+	) => Promise<{ accountNumber: string; accountName: string } | null>;
+
+	abstract createRecipient: (options: {
+		bankCode: string;
+		accountNumber: string;
+		accountName: string;
+	}) => Promise<{ recipientCode: string } | unknown>;
+
+	abstract transfer: (options: {
+		recipientCode: string;
+		amount: number;
+		reference: string;
+	}) => Promise<{ status: string; transferCode: string } | unknown>;
 }

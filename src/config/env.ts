@@ -60,6 +60,8 @@ const EnvSchema = z.object({
 	TELEGRAM_API_HASH: z.string(),
 
 	PAYSTACK_SECRET_KEY: z.string(),
+	/** @info - Dev-only: fake account resolution when Paystack test-mode cannot resolve */
+	PAYSTACK_DEV_RESOLVE_FALLBACK: z.string().optional(),
 
 	OPENAI_API_KEY: z.string(),
 

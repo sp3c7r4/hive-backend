@@ -20,6 +20,18 @@ export interface HandleWebhookOptions {
 	rawBody?: string;
 }
 
+export interface TransferRecipientOptions {
+	bankCode: string;
+	accountNumber: string;
+	accountName: string;
+}
+
+export interface TransferOptions {
+	recipientCode: string;
+	amount: number;
+	reference: string;
+}
+
 export interface InitializeTransactionResult {
 	data: {
 		authorization_url: string;

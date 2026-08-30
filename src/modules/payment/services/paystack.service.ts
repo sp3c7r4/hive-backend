@@ -18,6 +18,8 @@ import type {
 	HandleWebhookOptions,
 	InitializeTransactionOptions,
 	InitializeTransactionResult,
+	TransferOptions,
+	TransferRecipientOptions,
 	VerifyTransactionOptions,
 	VerifyTransactionResult,
 } from "@/interfaces";
@@ -112,6 +114,95 @@ export class PaystackService extends PaymentGatewayService {
 
 		this.log.info("Finished executing handle webhook");
 		return true;
+	};
+
+	/* ── M3 payouts ─────────────────────────────────────────── */
+
+	override resolveBankCode = async (bankName: string): Promise<string | null> => {
+		try {
+			const res = await this.api.get<{ data: { code: string; name: string }[] }>(
+				"/bank",
+				{ params: { perPage: 100 } },
+			);
+			const bank = (res.data?.data ?? []).find((b: any) =>
+				String(b.name ?? "").toLowerCase().includes(bankName.toLowerCase()),
+			);
+			return bank?.code ?? null;
+		} catch (e) {
+			this.log.error("Could not resolve bank code", { error: e, bankName });
+			return null;
+		}
+	};
+
+	/** @info - M3 withdrawal: verify an account number via /bank/resolve (free endpoint). */
+	override resolveAccountNumber = async (
+		accountNumber: string,
+		bankCode: string,
+	): Promise<{ accountNumber: string; accountName: string } | null> => {
+		try {
+			const res = await this.api.get<{
+				data: { account_number: string; account_name: string };
+			}>("/bank/resolve", {
+				params: { account_number: accountNumber, bank_code: bankCode },
+			});
+			const d = res.data?.data;
+			if (!d?.account_number) return null;
+			return { accountNumber: d.account_number, accountName: d.account_name };
+		} catch (e) {
+			this.log.error("Could not resolve account number", { error: e });
+			return null;
+		}
+	};
+
+	override createRecipient = async ({
+		bankCode,
+		accountNumber,
+		accountName,
+	}: TransferRecipientOptions): Promise<{ recipientCode: string } | unknown> => {
+		try {
+			const res = await this.api.post<{ data: { recipient_code: string } }>(
+				"/transferrecipient",
+				{
+					type: "nuban",
+					name: accountName,
+					account_number: accountNumber,
+					bank_code: bankCode,
+					currency: "NGN",
+				},
+			);
+			return { recipientCode: res.data?.data?.recipient_code };
+		} catch (e) {
+			this.log.error("Could not create payout recipient", { error: e });
+			throwBadRequestError("Could not create payout recipient");
+		}
+	};
+
+	override transfer = async ({
+		recipientCode,
+		amount,
+		reference,
+	}: TransferOptions): Promise<{ status: string; transferCode: string } | unknown> => {
+		try {
+			const res = await this.api.post<{
+				data: { transfer_code: string; status: string };
+			}>(
+				"/transfer",
+				{
+					source: "balance",
+					amount,
+					recipient: recipientCode,
+					reference,
+					currency: "NGN",
+				},
+			);
+			return {
+				status: res.data?.data?.status,
+				transferCode: res.data?.data?.transfer_code,
+			};
+		} catch (e) {
+			this.log.error("Could not initiate transfer", { error: e, reference });
+			throwBadRequestError("Could not initiate transfer");
+		}
 	};
 
 	/**
