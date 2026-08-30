@@ -159,4 +159,61 @@ export class UploadController {
 			StatusCodes.CREATED,
 		);
 	};
+
+	/** @info - Lesson video upload (MP4/MOV/WebM/M4V, up to 200 MB). */
+	uploadVideo = async (c: Context) => {
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File | null;
+
+		const allowed = [
+			"video/mp4",
+			"video/quicktime",
+			"video/webm",
+			"video/x-m4v",
+			"video/mpeg",
+		];
+		if (!file || !(file instanceof File)) {
+			return sendErrorResponse(
+				c,
+				{ message: "Missing or invalid file for field 'file'" },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
+		if (file.size > 200 * 1024 * 1024) {
+			return sendErrorResponse(
+				c,
+				{ message: "File exceeds size limit of 200 MB" },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
+		if (!allowed.includes(file.type)) {
+			return sendErrorResponse(
+				c,
+				{ message: `Invalid file type '${file.type}'. Allowed: MP4, MOV, WebM, M4V, MPEG` },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
+
+		const ext = file.name.split(".").pop() ?? file.type.split("/")[1] ?? "mp4";
+		const safeName =
+			file.name
+				.replace(/\.[^.]+$/, "")
+				.replace(/[^a-zA-Z0-9._-]+/g, "-")
+				.replace(/^-+|-+$/g, "")
+				.slice(0, 60) || "lesson";
+		const key = `images/files/general/${Date.now()}-${nanoid(6)}-${safeName}.${ext}`;
+
+		await this.storage.upload({
+			key,
+			body: file,
+			contentType: file.type,
+		});
+
+		const publicUrl = `${config.aws.s3Url}${key}`;
+		return sendSuccessResponse(
+			c,
+			{ url: publicUrl, key, name: file.name },
+			StatusCodes.CREATED,
+		);
+	};
 }

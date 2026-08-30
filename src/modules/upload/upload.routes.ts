@@ -30,4 +30,7 @@ uploadRouter.post("/feed-image", controller.uploadFeedImage);
 /** Direct upload for chat/message attachments (PDF, DOC/DOCX, images) */
 uploadRouter.post("/attachment", controller.uploadAttachment);
 
+/** Direct upload for lesson videos (MP4/MOV/WebM) */
+uploadRouter.post("/video", controller.uploadVideo);
+
 uploadRouter.get("/files/:key/download", controller.presignedDownload);
