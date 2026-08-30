@@ -1,5 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { testApp } from "./setup";
+
+/* The public getBySlug route is DB-backed — the shared testApp captured the
+ * real getDb binding at import time, so these tests build a fresh app with a
+ * mocked getDb (no database connection needed). */
+vi.mock("@/db/postgres.db", () => ({
+	getDb: () => ({
+		select: () => ({
+			from: () => ({
+				where: () => ({ limit: async () => [] }),
+			}),
+		}),
+	}),
+}));
 
 describe("POST /api/v1/communities", () => {
 	it("returns 401 without auth", async () => {
@@ -27,11 +40,14 @@ describe("GET /api/v1/communities", () => {
 });
 
 describe("GET /api/v1/communities/:slug", () => {
-	it("returns 401 without auth", async () => {
-		const res = await testApp.request("/api/v1/communities/test-slug", {
-			headers: { "Content-Type": "application/json" },
-		});
-		expect(res.status).toBe(401);
+	it("is public — returns 404 for unknown slug without auth", async () => {
+		vi.resetModules();
+		const { createTestApp } = await import("./setup");
+		const res = await createTestApp().request(
+			"/api/v1/communities/definitely-not-a-slug",
+			{ headers: { "Content-Type": "application/json" } },
+		);
+		expect(res.status).toBe(404);
 	});
 });
 
