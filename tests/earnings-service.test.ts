@@ -82,6 +82,18 @@ describe("EarningsService", () => {
 	});
 
 	it("dashboard: summary + zero-filled enrollment series + active students", async () => {
+		/* @info - Bucket keys are computed from "now" (PG Monday week start),
+		 * so build the expected periods the same way for date-robustness. */
+		const now = new Date();
+		const dayKey = (i: number) =>
+			new Date(now.getTime() - i * 86_400_000).toISOString().slice(0, 10);
+		const weekKey = (i: number) => {
+			const d = new Date(now.getTime() - i * 7 * 86_400_000);
+			const start = new Date(d);
+			start.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+			return start.toISOString().slice(0, 10);
+		};
+
 		/* dashboard() queue:
 		 * 1 total sum, 2 this-month sum, 3 balance, 4 sales count,
 		 * 5 daily series rows, 6 weekly series rows, 7 active students */
@@ -90,8 +102,8 @@ describe("EarningsService", () => {
 			[{ value: 90000 }],
 			[balanceRow],
 			[{ value: 4 }],
-			[{ period: "2026-08-30", total: 2 }],
-			[{ period: "2026-08-16", total: 1 }, { period: "2026-08-23", total: 3 }],
+			[{ period: dayKey(1), total: 2 }],
+			[{ period: weekKey(1), total: 1 }, { period: weekKey(2), total: 3 }],
 			[{ total: 2 }],
 		);
 		const service = await loadService();
