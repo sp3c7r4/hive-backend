@@ -10,6 +10,7 @@ const jwt = JwtService.getInstance();
 const controller = EarningsController.getInstance();
 
 earningsRouter.use("*", jwt.validateToken);
+earningsRouter.get("/dashboard", controller.dashboard);
 earningsRouter.get("/summary", controller.summary);
 earningsRouter.get("/courses", controller.courses);
 earningsRouter.get("/transactions", controller.transactions);

@@ -3,6 +3,7 @@ import { getDb } from "@/db/postgres.db";
 import { instructorBalance, instructorTransaction } from "@/modules/payment/ledger.model";
 import { payments, withdrawals } from "@/modules/payment/payment.model";
 import { courses } from "@/modules/courses/course.model";
+import { enrollments, lessonProgress } from "@/modules/enrollments/enrollment.model";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 
 const EARNING_CATEGORIES = ["enrollment", "community"] as const;
@@ -74,6 +75,113 @@ export class EarningsService {
 			pendingWithdrawal: Number(pending?.value ?? 0),
 			withdrawn: Number(balance?.withdrawn ?? 0),
 			counts: { sales: Number(sales?.value ?? 0) },
+		};
+	};
+
+	/** @info - One round trip for the instructor dashboard: real earnings
+	 * summary + enrollment series (daily 7 / weekly 4, zero-filled) +
+	 * distinct active students in the last 7 days. */
+	dashboard = async (authData: IAuthData) => {
+		const db = getDb();
+		const userId = Number(authData.id);
+
+		const monthStart = new Date();
+		monthStart.setDate(1);
+		monthStart.setHours(0, 0, 0, 0);
+
+		const creditBase = [
+			eq(instructorTransaction.instructorId, userId),
+			eq(instructorTransaction.type, "credit"),
+			inArray(instructorTransaction.category, [...EARNING_CATEGORIES] as any),
+		];
+
+		const [totalRow, thisMonthRow, balanceRow, salesRow] = await Promise.all([
+			db
+				.select({ value: sum(instructorTransaction.amount) })
+				.from(instructorTransaction)
+				.where(and(...creditBase)) as any,
+			db
+				.select({ value: sum(instructorTransaction.amount) })
+				.from(instructorTransaction)
+				.where(and(...creditBase, gte(instructorTransaction.createdAt, monthStart))) as any,
+			db
+				.select()
+				.from(instructorBalance)
+				.where(eq(instructorBalance.instructorId, userId))
+				.limit(1) as any,
+			db
+				.select({ value: count() })
+				.from(instructorTransaction)
+				.where(and(...creditBase)) as any,
+		]);
+
+		/* Enrollment series — daily (7 days) + weekly (4 weeks), zero-filled */
+		const now = new Date();
+		const daySql = sql<string>`to_char(date_trunc('day', ${enrollments.createdAt}), 'YYYY-MM-DD')`;
+		const weekSql = sql<string>`to_char(date_trunc('week', ${enrollments.createdAt}), 'YYYY-MM-DD')`;
+
+		const [dailyRows, weeklyRows, activeRow] = await Promise.all([
+			db
+				.select({ period: daySql, total: count() })
+				.from(enrollments)
+				.innerJoin(courses, eq(courses.id, enrollments.courseId))
+				.where(and(
+					eq(courses.instructorId, userId),
+					gte(enrollments.createdAt, new Date(now.getTime() - 7 * 86_400_000)),
+				))
+				.groupBy(daySql) as any,
+			db
+				.select({ period: weekSql, total: count() })
+				.from(enrollments)
+				.innerJoin(courses, eq(courses.id, enrollments.courseId))
+				.where(and(
+					eq(courses.instructorId, userId),
+					gte(enrollments.createdAt, new Date(now.getTime() - 4 * 7 * 86_400_000)),
+				))
+				.groupBy(weekSql) as any,
+			db
+				.select({ total: count() })
+				.from(lessonProgress)
+				.innerJoin(enrollments, eq(enrollments.id, lessonProgress.enrollmentId))
+				.innerJoin(courses, eq(courses.id, enrollments.courseId))
+				.where(and(
+					eq(courses.instructorId, userId),
+					gte(lessonProgress.updatedAt, new Date(now.getTime() - 7 * 86_400_000)),
+				)) as any,
+		]);
+
+		/* Zero-fill: build the full 7-day / 4-week windows */
+		const fmt = (d: Date) => d.toISOString().slice(0, 10);
+		const dailyMap = new Map((dailyRows as any[]).map((r) => [r.period, Number(r.total)]));
+		const weeklyMap = new Map((weeklyRows as any[]).map((r) => [r.period, Number(r.total)]));
+
+		const daily: { period: string; count: number }[] = [];
+		for (let i = 6; i >= 0; i--) {
+			const d = new Date(now.getTime() - i * 86_400_000);
+			const key = fmt(d);
+			daily.push({ period: key, count: dailyMap.get(key) ?? 0 });
+		}
+
+		const weekly: { period: string; count: number }[] = [];
+		for (let i = 3; i >= 0; i--) {
+			const d = new Date(now.getTime() - i * 7 * 86_400_000);
+			const start = new Date(d);
+			/* @info - Match Postgres date_trunc('week'): weeks start on MONDAY */
+			start.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+			const key = fmt(start);
+			weekly.push({ period: key, count: weeklyMap.get(key) ?? 0 });
+		}
+
+		return {
+			summary: {
+				totalEarned: Number(totalRow?.[0]?.value ?? 0),
+				thisMonth: Number(thisMonthRow?.[0]?.value ?? 0),
+				available: Number(balanceRow?.[0]?.available ?? 0),
+				withdrawn: Number(balanceRow?.[0]?.withdrawn ?? 0),
+				sales: Number(salesRow?.[0]?.value ?? 0),
+			},
+			enrollmentSeries: { daily, weekly },
+			activeStudents7d: Number(activeRow?.[0]?.total ?? 0),
 		};
 	};
 

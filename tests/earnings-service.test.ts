@@ -81,6 +81,50 @@ describe("EarningsService", () => {
 		expect(c[0]).toMatchObject({ courseId: 3, title: "Car course", gross: 100000, net: 90000 });
 	});
 
+	it("dashboard: summary + zero-filled enrollment series + active students", async () => {
+		/* dashboard() queue:
+		 * 1 total sum, 2 this-month sum, 3 balance, 4 sales count,
+		 * 5 daily series rows, 6 weekly series rows, 7 active students */
+		mocks.results.push(
+			[{ value: 90000 }],
+			[{ value: 90000 }],
+			[balanceRow],
+			[{ value: 4 }],
+			[{ period: "2026-08-30", total: 2 }],
+			[{ period: "2026-08-16", total: 1 }, { period: "2026-08-23", total: 3 }],
+			[{ total: 2 }],
+		);
+		const service = await loadService();
+		const d = await service.dashboard(auth);
+
+		expect(d.summary).toEqual({
+			totalEarned: 90000,
+			thisMonth: 90000,
+			available: 45000,
+			withdrawn: 10000,
+			sales: 4,
+		});
+		expect(d.activeStudents7d).toBe(2);
+		expect(d.enrollmentSeries.daily).toHaveLength(7);
+		expect(d.enrollmentSeries.weekly).toHaveLength(4);
+		/* zero-filling: only the matching bucket is non-zero */
+		const dailyCounts = d.enrollmentSeries.daily.map((p) => p.count);
+		expect(dailyCounts.filter((c) => c > 0).length).toBeGreaterThanOrEqual(1);
+		const weeklyCounts = d.enrollmentSeries.weekly.map((p) => p.count);
+		expect(weeklyCounts).toEqual(expect.arrayContaining([0, 1, 3]));
+	});
+
+	it("dashboard: empty data → zeros and empty series", async () => {
+		mocks.results.push([], [], [], [], [], [], []);
+		const service = await loadService();
+		const d = await service.dashboard(auth);
+		expect(d.summary.totalEarned).toBe(0);
+		expect(d.activeStudents7d).toBe(0);
+		expect(d.enrollmentSeries.daily).toHaveLength(7);
+		expect(d.enrollmentSeries.weekly).toHaveLength(4);
+		expect(d.enrollmentSeries.daily.every((p) => p.count === 0)).toBe(true);
+	});
+
 	it("reconciliation: orphans + stuck pending", async () => {
 		mocks.results.push(
 			[{ id: 1, reference: "hive-a", status: "success" }],

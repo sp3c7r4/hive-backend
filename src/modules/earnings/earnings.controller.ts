@@ -36,6 +36,12 @@ export class EarningsController {
 		return sendSuccessResponse(c, { message: "Ledger fetched", data });
 	};
 
+	dashboard = async (c: Context) => {
+		const authData = c.get("authData");
+		const data = await this.service.dashboard(authData);
+		return sendSuccessResponse(c, { message: "Dashboard data fetched", data });
+	};
+
 	trend = async (c: Context) => {
 		const authData = c.get("authData");
 		const data = await this.service.trend(authData, c.req.query("period") ?? undefined);
