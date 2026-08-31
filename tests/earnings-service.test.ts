@@ -96,12 +96,17 @@ describe("EarningsService", () => {
 
 		/* dashboard() queue:
 		 * 1 total sum, 2 this-month sum, 3 balance, 4 sales count,
-		 * 5 daily series rows, 6 weekly series rows, 7 active students */
+		 * 5-8 recent activity (enroll, pay, sub, review rows),
+		 * 9 daily series rows, 10 weekly series rows, 11 active students */
 		mocks.results.push(
 			[{ value: 90000 }],
 			[{ value: 90000 }],
 			[balanceRow],
 			[{ value: 4 }],
+			[{ id: 1, firstName: "Ada", title: "TS", time: new Date("2026-08-30T10:00:00Z") }],
+			[{ id: 2, firstName: "Ben", title: "TS", amount: 100000, time: new Date("2026-08-30T09:00:00Z") }],
+			[{ id: 3, firstName: "Cyril", title: "Quiz 1", time: new Date("2026-08-29T10:00:00Z") }],
+			[{ id: 4, firstName: "Ada", title: "TS", rating: 5, time: new Date("2026-08-28T10:00:00Z") }],
 			[{ period: dayKey(1), total: 2 }],
 			[{ period: weekKey(1), total: 1 }, { period: weekKey(2), total: 3 }],
 			[{ total: 2 }],
@@ -117,6 +122,10 @@ describe("EarningsService", () => {
 			sales: 4,
 		});
 		expect(d.activeStudents7d).toBe(2);
+		expect(d.recentActivity).toHaveLength(4);
+		expect(d.recentActivity[0]).toMatchObject({ type: "enrollment" });
+		expect(d.recentActivity[1].type).toBe("payment");
+		expect(d.recentActivity[1].text).toContain("paid ₦1,000");
 		expect(d.enrollmentSeries.daily).toHaveLength(7);
 		expect(d.enrollmentSeries.weekly).toHaveLength(4);
 		/* zero-filling: only the matching bucket is non-zero */
@@ -127,7 +136,7 @@ describe("EarningsService", () => {
 	});
 
 	it("dashboard: empty data → zeros and empty series", async () => {
-		mocks.results.push([], [], [], [], [], [], []);
+		mocks.results.push([], [], [], [], [], [], [], [], [], [], []);
 		const service = await loadService();
 		const d = await service.dashboard(auth);
 		expect(d.summary.totalEarned).toBe(0);

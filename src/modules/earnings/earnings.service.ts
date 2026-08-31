@@ -4,6 +4,10 @@ import { instructorBalance, instructorTransaction } from "@/modules/payment/ledg
 import { payments, withdrawals } from "@/modules/payment/payment.model";
 import { courses } from "@/modules/courses/course.model";
 import { enrollments, lessonProgress } from "@/modules/enrollments/enrollment.model";
+import { users } from "@/modules/user/user.model";
+import { lessons, modules } from "@/modules/courses/course.model";
+import { assignmentSubmissions } from "@/modules/assessments/assessment.model";
+import { reviews } from "@/modules/reviews/review.model";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 
 const EARNING_CATEGORIES = ["enrollment", "community"] as const;
@@ -120,6 +124,101 @@ export class EarningsService {
 		const daySql = sql<string>`to_char(date_trunc('day', ${enrollments.createdAt}), 'YYYY-MM-DD')`;
 		const weekSql = sql<string>`to_char(date_trunc('week', ${enrollments.createdAt}), 'YYYY-MM-DD')`;
 
+		/* @info - Recent activity: enrollments + payments + submissions +
+		 * reviews for the instructor's courses, newest first (10 max) */
+		const naira = (kobo: number) =>
+			`₦${Math.round(kobo / 100).toLocaleString("en-US")}`;
+		const [enrollRows, payRows, subRows, reviewRows] = await Promise.all([
+			db
+				.select({
+					id: enrollments.id,
+					firstName: users.firstName,
+					title: courses.title,
+					time: enrollments.createdAt,
+				})
+				.from(enrollments)
+				.innerJoin(courses, eq(courses.id, enrollments.courseId))
+				.innerJoin(users, eq(users.id, enrollments.userId))
+				.where(eq(courses.instructorId, userId))
+				.orderBy(desc(enrollments.createdAt))
+				.limit(10) as any,
+			db
+				.select({
+					id: payments.id,
+					firstName: users.firstName,
+					title: courses.title,
+					amount: payments.amount,
+					time: payments.createdAt,
+				})
+				.from(payments)
+				.innerJoin(courses, eq(courses.id, payments.courseId))
+				.innerJoin(users, eq(users.id, payments.payerId))
+				.where(and(eq(courses.instructorId, userId), eq(payments.status, "success" as any)))
+				.orderBy(desc(payments.createdAt))
+				.limit(10) as any,
+			db
+				.select({
+					id: assignmentSubmissions.id,
+					firstName: users.firstName,
+					title: lessons.title,
+					time: assignmentSubmissions.submittedAt,
+				})
+				.from(assignmentSubmissions)
+				.innerJoin(users, eq(users.id, assignmentSubmissions.userId))
+				.innerJoin(lessons, eq(lessons.id, assignmentSubmissions.lessonId))
+				.innerJoin(modules, eq(modules.id, lessons.moduleId))
+				.innerJoin(courses, eq(courses.id, modules.courseId))
+				.where(eq(courses.instructorId, userId))
+				.orderBy(desc(assignmentSubmissions.submittedAt))
+				.limit(10) as any,
+			db
+				.select({
+					id: reviews.id,
+					firstName: users.firstName,
+					title: courses.title,
+					rating: reviews.rating,
+					time: reviews.createdAt,
+				})
+				.from(reviews)
+				.innerJoin(courses, eq(courses.id, reviews.courseId))
+				.innerJoin(users, eq(users.id, reviews.userId))
+				.where(eq(courses.instructorId, userId))
+				.orderBy(desc(reviews.createdAt))
+				.limit(10) as any,
+		]);
+
+		const raw: { type: string; text: string; time: Date | null }[] = [
+			...(enrollRows as any[]).map((r) => ({
+				type: "enrollment",
+				text: `${r.firstName ?? "A student"} enrolled in ${r.title ?? "a course"}`,
+				time: r.time,
+			})),
+			...(payRows as any[]).map((r) => ({
+				type: "payment",
+				text: `${r.firstName ?? "A student"} paid ${naira(r.amount ?? 0)} for ${r.title ?? "a course"}`,
+				time: r.time,
+			})),
+			...(subRows as any[]).map((r) => ({
+				type: "submission",
+				text: `${r.firstName ?? "A student"} submitted ${r.title ?? "an assignment"}`,
+				time: r.time,
+			})),
+			...(reviewRows as any[]).map((r) => ({
+				type: "review",
+				text: `${r.firstName ?? "A student"} rated ${r.title ?? "a course"} ${r.rating ?? ""}★`,
+				time: r.time,
+			})),
+		]
+			.filter((r) => r.time)
+			.sort((a, b) => new Date(b.time!).getTime() - new Date(a.time!).getTime())
+			.slice(0, 10)
+			.map((r, i) => ({
+				id: i,
+				type: r.type,
+				text: r.text,
+				time: r.time!.toISOString(),
+			}));
+
 		const [dailyRows, weeklyRows, activeRow] = await Promise.all([
 			db
 				.select({ period: daySql, total: count() })
@@ -182,6 +281,7 @@ export class EarningsService {
 			},
 			enrollmentSeries: { daily, weekly },
 			activeStudents7d: Number(activeRow?.[0]?.total ?? 0),
+			recentActivity: raw,
 		};
 	};
 
