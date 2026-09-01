@@ -59,7 +59,7 @@ const adminHash = await hash(ADMIN_PASSWORD, {
 });
 const admin = await pool.query(
   `INSERT INTO users (first_name, last_name, email, password_hash, onboarded)
-   VALUES ('Platform', 'Admin', $1, $2, true)
+   VALUES ('Admin', 'Admin', $1, $2, true)
    ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
    RETURNING id`,
   [ADMIN_EMAIL, adminHash],
