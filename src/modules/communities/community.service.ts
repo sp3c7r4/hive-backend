@@ -1,5 +1,5 @@
 import { eq, and, or, isNull, inArray, count, sql } from "drizzle-orm";
-import { throwNotFoundError, throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { throwNotFoundError, throwBadRequestError, throwForbiddenError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
@@ -83,6 +83,15 @@ export class CommunityService {
 
 
 		return toCommunityDto(withPresignedUrl(createdCommunity, "coverImageUrl"));
+	};
+
+	/** @info - Any community mutation requires the owner or a platform admin. */
+	private assertOwnerOrAdmin = (community: any, authData?: IAuthData) => {
+		const isOwner = Number(community.ownerId) === Number(authData?.id);
+		const isAdmin = Array.isArray(authData?.roles) && (authData as any).roles.includes("admin");
+		if (!isOwner && !isAdmin) {
+			throwForbiddenError("You don't have permission to modify this community.");
+		}
 	};
 
 	getById = async (id: number) => {
@@ -179,16 +188,32 @@ export class CommunityService {
 		return { ...result, data: result.data.map((c) => toCommunityDto(withPresignedUrl(c, "coverImageUrl"))) };
 	};
 
-	update = async (id: number, data: Partial<NewCommunity>) => {
-		const community = await this.repo.update(id, data as any);
+	update = async (
+		id: number,
+		data: Partial<NewCommunity>,
+		authData?: IAuthData,
+	) => {
+		const community = await this.repo.findById(id);
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
-		return toCommunityDto(withPresignedUrl(community!, "coverImageUrl"));
+		this.assertOwnerOrAdmin(community as any, authData);
+		const updated = await this.repo.update(id, data as any);
+		if (!updated) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		return toCommunityDto(withPresignedUrl(updated!, "coverImageUrl"));
 	};
 
-	delete = async (id: number, permanent = false): Promise<void> => {
+	delete = async (
+		id: number,
+		permanent = false,
+		authData?: IAuthData,
+	): Promise<void> => {
+		/* @info - Guard BEFORE mutating: a blocked caller must not soft-delete */
+		const community = await this.repo.findById(id, { includeDeleted: true });
+		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		this.assertOwnerOrAdmin(community as any, authData);
+
 		if (!permanent) {
-			const community = await this.repo.softDelete(id);
-			if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+			const soft = await this.repo.softDelete(id);
+			if (!soft) throwNotFoundError(CommunityMessages.NOT_FOUND);
 			this.log.info(`Community ${id} soft-deleted`);
 			return;
 		}
@@ -196,8 +221,6 @@ export class CommunityService {
 		/* Permanent delete — DB cascades members/invites/feed, but courses and
 		 * payments reference the community with restrict/no-action. */
 		const db = getDb();
-		const community = await this.repo.findById(id, { includeDeleted: true });
-		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
 
 		const [courseRows] = await db
 			.select({ value: count() })
@@ -223,9 +246,12 @@ export class CommunityService {
 		this.log.info(`Community ${id} permanently deleted`);
 	};
 
-	restore = async (id: number) => {
-		const community = await this.repo.update(id, { deletedAt: null } as any, { includeDeleted: true });
+	restore = async (id: number, authData?: IAuthData) => {
+		const community = await this.repo.findById(id, { includeDeleted: true });
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
+		this.assertOwnerOrAdmin(community as any, authData);
+		const updated = await this.repo.update(id, { deletedAt: null } as any, { includeDeleted: true });
+		if (!updated) throwNotFoundError(CommunityMessages.NOT_FOUND);
 		this.log.info(`Community ${id} unarchived`);
 		return toCommunityDto(withPresignedUrl(community!, "coverImageUrl"));
 	};

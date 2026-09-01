@@ -12,4 +12,8 @@ const controller = AdminController.getInstance();
 adminRouter.use("*", jwt.validateToken, requireAdmin);
 adminRouter.get("/dashboard", controller.dashboard);
 adminRouter.get("/users", controller.users);
+adminRouter.get("/users/:id", controller.userDetail);
+adminRouter.get("/payments", controller.payments);
+adminRouter.get("/communities", controller.communities);
+adminRouter.get("/activity-logs", controller.activityLogs);
 adminRouter.patch("/users/:id/action", controller.userAction);

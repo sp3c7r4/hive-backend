@@ -59,6 +59,7 @@ export class CommunityController {
 		const data = await this.service.update(
 			id as unknown as number,
 			await c.req.json(),
+			c.get("authData"),
 		);
 		return sendSuccessResponse(c, {
 			message: "Community updated successfully",
@@ -69,7 +70,7 @@ export class CommunityController {
 	delete = async (c: Context) => {
 		const id = c.req.param("id");
 		const permanent = c.req.query("permanent") === "true";
-		await this.service.delete(id as unknown as number, permanent);
+		await this.service.delete(id as unknown as number, permanent, c.get("authData"));
 		return sendSuccessResponse(c, {
 			message: permanent ? "Community permanently deleted" : "Community deleted successfully",
 		});
@@ -77,7 +78,7 @@ export class CommunityController {
 
 	restore = async (c: Context) => {
 		const id = c.req.param("id");
-		const data = await this.service.restore(id as unknown as number);
+		const data = await this.service.restore(id as unknown as number, c.get("authData"));
 		return sendSuccessResponse(c, {
 			message: "Community unarchived successfully",
 			data,

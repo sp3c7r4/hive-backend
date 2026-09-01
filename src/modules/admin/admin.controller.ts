@@ -31,6 +31,28 @@ export class AdminController {
 		return sendSuccessResponse(c, { message: `User ${action} handled`, data });
 	};
 
+	activityLogs = async (c: Context) => {
+		const data = await this.service.activityLogs({ search: c.req.query("search") });
+		return sendSuccessResponse(c, data);
+	};
+
+	userDetail = async (c: Context) => {
+		const id = Number(c.req.param("id"));
+		const data = await this.service.userDetail(id);
+		return sendSuccessResponse(c, data);
+	};
+
+	communities = async (c: Context) => {
+		const data = await this.service.communities({ search: c.req.query("search") });
+		return sendSuccessResponse(c, data);
+	};
+
+	payments = async (c: Context) => {
+		const status = c.req.query("status");
+		const data = await this.service.payments({ status });
+		return sendSuccessResponse(c, data);
+	};
+
 	users = async (c: Context) => {
 		const data = await this.service.users({
 			search: c.req.query("search"),
