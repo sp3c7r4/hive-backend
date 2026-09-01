@@ -1,15 +1,12 @@
 # ------------------------------------------------------------------
-# Hive Backend — deploy to EC2 (small-instance friendly)
+# Hive Backend — deploy to EC2 via SSM (no SSH, no port 22)
 #
-# Build in CI → ship a small artifact → rsync onto the server → restart.
-# No releases/ folders, no `current` symlinks: the app lives at a fixed
-# path (~/hive-backend) and each deploy cleanly replaces it (rsync --delete).
+# Build in CI -> upload tarball + env to S3 -> aws ssm send-command
+# runs the install script on the box (agent already provisioned).
 #
 # Secrets required:
-#   EC2_HOST        e.g. 3.210.0.0 (or api.hive.ng)
-#   EC2_USER        e.g. ubuntu / ec2-user
-#   EC2_SSH_KEY     private key (PEM) for the deploy user
-#   BACKEND_ENV     full .env.production contents (written once on first deploy)
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   (hive-ci user — same as infra)
+#   BACKEND_ENV        full .env.production contents
 # ------------------------------------------------------------------
 name: Deploy Hive Backend
 
@@ -27,8 +24,9 @@ on:
   workflow_dispatch: {}
 
 env:
-  APP_DIR: /home/ec2-user/hive-backend   # fixed app path — no symlinks
-  TMP_DIR: /home/ec2-user/hive-backend.tmp
+  S3_BUCKET: hive-backups-prod
+  S3_PREFIX: deploy/hive-backend
+  INSTANCE_TAG: hive-backend
 
 jobs:
   deploy:
@@ -44,68 +42,81 @@ jobs:
           cache: "npm"
           cache-dependency-path: "package-lock.json"
 
+      - name: Configure AWS credentials (hive-ci)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Build (esbuild → dist/)
+      - name: Build (esbuild -> dist/)
         run: npm run build
 
       - name: Package artifact
         run: |
-          tar -czf release.tar.gz \
-            dist \
-            package.json \
-            package-lock.json \
-            ecosystem.config.cjs
+          tar -czf release.tar.gz dist package.json package-lock.json ecosystem.config.cjs
           ls -lh release.tar.gz
+          # env shipped with the artifact (written fresh every deploy — no
+          # write-once logic on the box)
+          printf '%s\n' "${{ secrets.BACKEND_ENV }}" > env.production
+          chmod 600 env.production
 
-      - name: Copy artifact to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "release.tar.gz"
-          target: "/home/${{ secrets.EC2_USER }}/"
+      - name: Upload artifact to S3
+        run: |
+          STAMP=$(date +%Y%m%d%H%M%S)
+          aws s3 cp release.tar.gz "s3://${S3_BUCKET}/${S3_PREFIX}/${STAMP}.tar.gz" >/dev/null
+          aws s3 cp env.production "s3://${S3_BUCKET}/${S3_PREFIX}/${STAMP}.env" >/dev/null
+          echo "ARTIFACT_KEY=${S3_PREFIX}/${STAMP}.tar.gz" >> "$GITHUB_ENV"
+          echo "ENV_KEY=${S3_PREFIX}/${STAMP}.env" >> "$GITHUB_ENV"
 
-      - name: Deploy on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            cd ~
-            # 1) Unpack into a temp dir, then rsync --delete into the live dir.
-            #    This gives a clean swap (no stale files) WITHOUT symlinks.
-            rm -rf hive-backend.tmp
-            mkdir -p hive-backend.tmp
-            tar -xzf release.tar.gz -C hive-backend.tmp
-            rm -f release.tar.gz
+      - name: Deploy via SSM
+        run: |
+          INSTANCE_ID=$(aws ssm describe-instance-information \
+            --filters "Key=tag:Name,Values=${INSTANCE_TAG}" \
+            --query "InstanceInformationList[0].InstanceId" --output text)
+          [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ] || { echo "instance ${INSTANCE_TAG} not registered with SSM"; exit 1; }
 
-            sudo dnf install -y rsync >/dev/null 2>&1 || true
-            mkdir -p "$APP_DIR"
-            rsync -a --delete hive-backend.tmp/ "$APP_DIR"/
-            rm -rf hive-backend.tmp
+          SCRIPT='#!/bin/bash
+          set -e
+          cd /home/ec2-user
+          aws s3 cp s3://${S3_BUCKET}/${ARTIFACT_KEY} /tmp/release.tar.gz
+          aws s3 cp s3://${S3_BUCKET}/${ENV_KEY} /tmp/env.production
+          rm -rf hive-backend.tmp && mkdir -p hive-backend.tmp
+          tar -xzf /tmp/release.tar.gz -C hive-backend.tmp
+          rm -f /tmp/release.tar.gz
+          rsync -a --delete hive-backend.tmp/ /home/ec2-user/hive-backend/
+          rm -rf hive-backend.tmp
+          cp /tmp/env.production /home/ec2-user/hive-backend/.env.production
+          chmod 600 /home/ec2-user/hive-backend/.env.production
+          rm -f /tmp/env.production
+          cd /home/ec2-user/hive-backend
+          npm ci --omit=dev --ignore-scripts
+          NODE_ENV=production node ./dist/migrate.js
+          export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
+          pm2 startOrReload ecosystem.config.cjs || pm2 start ecosystem.config.cjs
+          pm2 save >/dev/null 2>&1 || true
+          sleep 3
+          pm2 status'
 
-            cd "$APP_DIR"
-            # 2) Production deps only — replaces node_modules each deploy.
-            npm ci --omit=dev --ignore-scripts
+          B64=$(printf '%s' "$SCRIPT" | base64 -w0)
+          CMD_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "{\"commands\":[\"S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash -c \\\"echo ${B64} | base64 -d > /tmp/hive-deploy.sh && bash /tmp/hive-deploy.sh\\\"\"]}" \
+            --query "Command.CommandId" --output text)
 
-            # 3) Env: written ONCE from the secret; server keeps it between
-            #    deploys. Update = edit ~/hive-backend/.env.production + pm2 restart.
-            if [ ! -f .env.production ]; then
-              printf '%s\n' "${{ secrets.BACKEND_ENV }}" > .env.production
-              chmod 600 .env.production
-            fi
-
-            # 4) Migrations BEFORE restart — fail fast if they break.
-            NODE_ENV=production node ./dist/migrate.js
-
-            # 5) Start or reload PM2 (startOrReload = no delete/start dance).
-            export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
-            pm2 startOrReload ecosystem.config.cjs
-            pm2 save >/dev/null 2>&1 || true
-            sleep 3
-            pm2 status
+          echo "SSM command: $CMD_ID"
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+            case "$STATUS" in
+              Success) echo "Deploy OK"; exit 0 ;;
+              Failed|TimedOut|Cancelled)
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+                  --query "StandardErrorContent" --output text | tail -40
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Deploy timed out"; exit 1
