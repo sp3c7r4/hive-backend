@@ -3,7 +3,7 @@
 // __drizzle_migrations for already-applied hashes, and runs only new ones.
 import { Pool } from "pg";
 import { config } from "@/config";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
