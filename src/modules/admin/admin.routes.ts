@@ -11,3 +11,4 @@ const controller = AdminController.getInstance();
 
 adminRouter.use("*", jwt.validateToken, requireAdmin);
 adminRouter.get("/dashboard", controller.dashboard);
+adminRouter.get("/users", controller.users);

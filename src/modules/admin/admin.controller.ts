@@ -16,6 +16,14 @@ export class AdminController {
 		this.service = AdminDashboardService.getInstance();
 	}
 
+	users = async (c: Context) => {
+		const data = await this.service.users({
+			search: c.req.query("search"),
+			role: c.req.query("role"),
+		});
+		return sendSuccessResponse(c, { message: "Users fetched", data });
+	};
+
 	dashboard = async (c: Context) => {
 		const data = await this.service.dashboard();
 		return sendSuccessResponse(c, { message: "Admin dashboard data fetched", data });

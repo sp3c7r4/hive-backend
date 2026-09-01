@@ -1,10 +1,11 @@
-import { and, count, desc, eq, gte, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, like, or, sql, sum } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import { users } from "@/modules/user/user.model";
 import { communities } from "@/modules/communities/community.model";
 import { courses } from "@/modules/courses/course.model";
 import { payments, withdrawals } from "@/modules/payment/payment.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { user_roles } from "@/modules/user/user-role.model";
 
 /** @info - One round trip for the admin dashboard: platform counts,
  * money stats (revenue / fees / pending withdrawals), the withdrawal
@@ -18,6 +19,69 @@ export class AdminDashboardService {
 	}
 
 	private constructor() {}
+
+	/** @info - Admin user list: search by name/email, optional role filter,
+	 * with role badges + enrollment counts (no pagination UI yet — 100 cap). */
+	users = async (params?: { search?: string; role?: string }) => {
+		const db = getDb();
+
+		const conditions: any[] = [];
+		if (params?.search?.trim()) {
+			const q = `%${params.search.trim()}%`;
+			conditions.push(or(like(users.firstName, q), like(users.lastName, q), like(users.email, q)));
+		}
+
+		const rows = (await db
+			.select({
+				id: users.id,
+				firstName: users.firstName,
+				lastName: users.lastName,
+				email: users.email,
+				createdAt: users.createdAt,
+			})
+			.from(users)
+			.where(conditions.length ? and(...conditions) : undefined)
+			.orderBy(desc(users.createdAt))
+			.limit(100)) as any[];
+
+		const ids = rows.map((r) => r.id);
+		const [roleRows, enrollRows] = await Promise.all([
+			ids.length
+				? (db
+						.select({ userId: user_roles.userId, role: user_roles.role })
+						.from(user_roles)
+						.where(inArray(user_roles.userId, ids))) as any
+				: [],
+			ids.length
+				? (db
+						.select({ userId: enrollments.userId, total: count() })
+						.from(enrollments)
+						.where(inArray(enrollments.userId, ids))
+						.groupBy(enrollments.userId)) as any
+				: [],
+		]);
+
+		const roleMap = new Map<number, string[]>();
+		for (const r of roleRows) {
+			roleMap.set(Number(r.userId), [...(roleMap.get(Number(r.userId)) ?? []), r.role]);
+		}
+		const enrollMap = new Map((enrollRows as any[]).map((r) => [Number(r.userId), Number(r.total)]));
+
+		let result = rows.map((u) => ({
+			id: u.id,
+			name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "—",
+			email: u.email,
+			roles: roleMap.get(u.id) ?? [],
+			enrollmentCount: enrollMap.get(u.id) ?? 0,
+			joinedAt: u.createdAt,
+		}));
+
+		if (params?.role && params.role !== "all") {
+			result = result.filter((u) => u.roles.includes(params.role!));
+		}
+
+		return result;
+	};
 
 	dashboard = async () => {
 		const db = getDb();
