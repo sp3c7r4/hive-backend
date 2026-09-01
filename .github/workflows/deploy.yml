@@ -1,0 +1,111 @@
+# ------------------------------------------------------------------
+# Hive Backend — deploy to EC2 (small-instance friendly)
+#
+# Build in CI → ship a small artifact → rsync onto the server → restart.
+# No releases/ folders, no `current` symlinks: the app lives at a fixed
+# path (~/hive-backend) and each deploy cleanly replaces it (rsync --delete).
+#
+# Secrets required:
+#   EC2_HOST        e.g. 3.210.0.0 (or api.hive.ng)
+#   EC2_USER        e.g. ubuntu / ec2-user
+#   EC2_SSH_KEY     private key (PEM) for the deploy user
+#   BACKEND_ENV     full .env.production contents (written once on first deploy)
+# ------------------------------------------------------------------
+name: Deploy Hive Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - "build.ts"
+      - "ecosystem.config.cjs"
+  workflow_dispatch: {}
+
+env:
+  APP_DIR: /home/ec2-user/hive-backend   # fixed app path — no symlinks
+  TMP_DIR: /home/ec2-user/hive-backend.tmp
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+          cache-dependency-path: "package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (esbuild → dist/)
+        run: npm run build
+
+      - name: Package artifact
+        run: |
+          tar -czf release.tar.gz \
+            dist \
+            package.json \
+            package-lock.json \
+            ecosystem.config.cjs
+          ls -lh release.tar.gz
+
+      - name: Copy artifact to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "release.tar.gz"
+          target: "/home/${{ secrets.EC2_USER }}/"
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~
+            # 1) Unpack into a temp dir, then rsync --delete into the live dir.
+            #    This gives a clean swap (no stale files) WITHOUT symlinks.
+            rm -rf hive-backend.tmp
+            mkdir -p hive-backend.tmp
+            tar -xzf release.tar.gz -C hive-backend.tmp
+            rm -f release.tar.gz
+
+            sudo dnf install -y rsync >/dev/null 2>&1 || true
+            mkdir -p "$APP_DIR"
+            rsync -a --delete hive-backend.tmp/ "$APP_DIR"/
+            rm -rf hive-backend.tmp
+
+            cd "$APP_DIR"
+            # 2) Production deps only — replaces node_modules each deploy.
+            npm ci --omit=dev --ignore-scripts
+
+            # 3) Env: written ONCE from the secret; server keeps it between
+            #    deploys. Update = edit ~/hive-backend/.env.production + pm2 restart.
+            if [ ! -f .env.production ]; then
+              printf '%s\n' "${{ secrets.BACKEND_ENV }}" > .env.production
+              chmod 600 .env.production
+            fi
+
+            # 4) Migrations BEFORE restart — fail fast if they break.
+            NODE_ENV=production node ./dist/migrate.js
+
+            # 5) Start or reload PM2 (startOrReload = no delete/start dance).
+            export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
+            pm2 startOrReload ecosystem.config.cjs
+            pm2 save >/dev/null 2>&1 || true
+            sleep 3
+            pm2 status

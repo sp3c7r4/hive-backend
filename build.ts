@@ -147,6 +147,10 @@ async function build() {
 	await cp("./src/emails", "./dist/emails", { recursive: true });
 	await mkdir("./dist/migrations", { recursive: true });
 	await cp("./src/db/migrations", "./dist/migrations", { recursive: true });
+	/* @info - Certificate + receipt Handlebars templates — the generators
+	 * resolve from dist/templates first (bundled), then src/templates. */
+	await mkdir("./dist/templates", { recursive: true });
+	await cp("./src/templates", "./dist/templates", { recursive: true });
 
 	const shim =
 		`import{createRequire as __cr}from"node:module";const require=__cr(import.meta.url);\n`;
