@@ -78,7 +78,7 @@ jobs:
         run: |
           CMD_ID=$(aws ssm send-command --targets "Key=tag:Name,Values=${INSTANCE_TAG}" \
             --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash /home/ec2-user/hive-backend/scripts/remote-deploy.sh\"]}" \
+            --parameters "{\"commands\":[\"cd /tmp && aws s3 cp s3://${S3_BUCKET}/${ARTIFACT_KEY} /tmp/release.tar.gz && tar -xzf /tmp/release.tar.gz scripts/remote-deploy.sh && S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash scripts/remote-deploy.sh\"]}" \
             --query "Command.CommandId" --output text)
 
           echo "SSM command: $CMD_ID"
