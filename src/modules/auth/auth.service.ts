@@ -168,7 +168,18 @@ export class AuthService {
 		if (!refreshId) throwUnauthorizedError("Invalid refresh token.");
 
 		const exists = await this.cacheService.redis.exists(refreshId);
-		if (!exists) throwBadRequestError("Refresh token expired.");
+		if (!exists) {
+			/* @info - Suspended users' tokens are revoked; tell them apart
+			 * from a plain expired session so the client can show the notice. */
+			const userId = grabUserIdFromAuthId(refreshId);
+			if (userId) {
+				const marker = await this.cacheService.redis.get(`suspended:${userId}`);
+				if (marker) {
+					throwUnauthorizedError("This account is suspended. Contact support.");
+				}
+			}
+			throwBadRequestError("Refresh token expired.");
+		}
 
 		await this.cacheService.delete(refreshId);
 

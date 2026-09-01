@@ -226,8 +226,20 @@ export class UserService {
 			throwBadRequestError("Unknown action");
 		}
 
-		if (action === "suspend" || action === "delete") {
+		if (action === "suspend") {
 			await this.invalidateAllTokens(userId);
+			/* @info - Marker lets the auth middleware tell a suspended user
+			 * apart from a logged-out one (their session is already dead). */
+			await this.cacheService.redis.set(
+				`suspended:${userId}`,
+				"1",
+				"EX",
+				7 * 24 * 60 * 60,
+			);
+		} else if (action === "delete") {
+			await this.invalidateAllTokens(userId);
+		} else if (action === "unsuspend" || action === "restore") {
+			await this.cacheService.redis.del(`suspended:${userId}`);
 		}
 
 		return this.userRepo.findById(userId);

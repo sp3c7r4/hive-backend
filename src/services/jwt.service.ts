@@ -7,6 +7,7 @@ import { config } from "@/config";
 import { TTL } from "@/constants";
 import { JwtAction } from "@/enums";
 import { throwUnauthorizedError } from "@/helpers/errors";
+import { grabUserIdFromAuthId } from "@/helpers/id-generators";
 import { sendWsErrorResponse } from "@/helpers/response";
 import type { IAuthData, IJwtPayload } from "@/interfaces";
 import { CacheService } from "./cache.service";
@@ -81,7 +82,20 @@ export class JwtService {
 
 			const data = await this.cacheService.get<IAuthData>(decoded.authId);
 
-			if (!data) return throwUnauthorizedError("Unauthorized");
+			if (!data) {
+				/* @info - Session revoked. If a suspension marker exists for this
+				 * user, tell them (and the client) it's a suspension, not a logout. */
+				const userId = grabUserIdFromAuthId(decoded.authId);
+				if (userId) {
+					const marker = await this.cacheService.redis.get(`suspended:${userId}`);
+					if (marker) {
+						return throwUnauthorizedError(
+							"This account is suspended. Contact support.",
+						);
+					}
+				}
+				return throwUnauthorizedError("Unauthorized");
+			}
 
 			if (
 				data.action &&
