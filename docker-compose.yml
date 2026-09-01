@@ -1,47 +1,51 @@
-name: hive
+# ------------------------------------------------------------------
+# Hive backend infra containers (managed by the deploy pipeline)
+#
+# THIS FILE IS OWNED BY THE REPO — edit it, push, and the deploy
+# workflow applies it with `docker compose up -d` on the backend box.
+# Only Postgres 18 + Redis 8 for now; add services freely.
+#
+# Secrets: ${POSTGRES_PASSWORD} is interpolated from /opt/hive-db/.env,
+# which the deploy script writes from the shipped .env.production.
+# Both services bind to 127.0.0.1 ONLY — never reachable externally.
+# ------------------------------------------------------------------
 services:
-  database:
-    container_name: hive-db
+  postgres:
     image: postgres:18-alpine
-    ports:
-      - "5436:5432"
+    container_name: hive-postgres
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=hive
-      - POSTGRES_PASSWORD=spectra
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
-      - hive-db:/var/lib/postgresql
-      - ./postgresql.conf:/etc/postgresql/postgresql.conf
-    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+      # @info - postgres:18+ requires the mount at /var/lib/postgresql
+      # (major-version subdirs); mounting /var/lib/postgresql/data makes
+      # the container exit(1) with "unused mount/volume" (2026-09-01).
+      - hive-pg:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hive"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
 
-  cache:
-    container_name: hive-cache
-    image: redis:8.4-alpine
+  redis:
+    image: redis:8-alpine
+    container_name: hive-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6382:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
-      - hive-cache:/data
+      - hive-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-
-  # @info - This is for developemnt only to expose our backend to the web
-  edge-endpoint:
-    container_name: hive-edge-endpoint
-    image: cloudflare/cloudflared:1895-8679787525ed
-    command: tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:5000
-    profiles:
-      - dev
 
 volumes:
-  hive-db:
-  hive-cache:
+  hive-pg:
+  hive-redis:
