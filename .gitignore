@@ -44,3 +44,6 @@ Thumbs.db
 *.zip
 mint_tokens.tmp.js
 .pi-subagents/
+
+# any env file, anywhere
+.env
