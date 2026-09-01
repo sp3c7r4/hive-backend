@@ -37,6 +37,19 @@ chmod 600 /opt/hive-db/.env
 cd /opt/hive-db
 sudo dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
 docker compose up -d 2>/dev/null || docker-compose up -d
+
+# @info - DB password CONVERGENCE: compose only sets the password at volume
+# init. If the shipped env changed it, sync it to the running Postgres so
+# the app never breaks on a password rotation. The check runs from the HOST
+# (through docker-proxy = real scram auth; in-container 127.0.0.1 is trust).
+# ALTER uses the in-container socket (passwordless). POSTGRES_USER/DB are
+# structural and still require a manual migration.
+sudo dnf install -y postgresql16 >/dev/null 2>&1 || sudo dnf install -y postgresql15 >/dev/null 2>&1 || true
+PG_PW_ESC=${PG_PW//\'/''}
+if ! PGPASSWORD="$PG_PW" psql -h 127.0.0.1 -U postgres -d hive -t -A -c "SELECT 1" >/dev/null 2>&1; then
+  docker exec hive-postgres psql -U postgres -d hive -c "ALTER USER postgres PASSWORD '$PG_PW_ESC';" >/dev/null 2>&1 || true
+  echo "postgres password synced to the shipped env"
+fi
 cd /home/ec2-user/hive-backend
 
 NODE_ENV=production node ./dist/migrate.js

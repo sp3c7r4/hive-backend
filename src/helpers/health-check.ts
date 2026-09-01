@@ -3,7 +3,7 @@ import type { Context, Next } from "hono";
 export const healthCheck = (c: Context) => {
 	return c.json({
 		success: true,
-		message: "Hello! bloom backend active!👋",
+		message: "Hello! hive backend active!👋",
 		author: "sp3c7r4 <sp3c7r40x00@gmail.com> ⚡",
 		version: "1.0.0",
 	});
