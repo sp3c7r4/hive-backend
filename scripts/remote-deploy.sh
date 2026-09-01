@@ -6,6 +6,8 @@
 set -euo pipefail
 
 sudo dnf install -y rsync >/dev/null 2>&1 || true
+# self-heal: a corrupted box once lost /usr/bin/cp (rpm -V missing)
+command -v cp >/dev/null 2>&1 || sudo dnf reinstall -y coreutils >/dev/null 2>&1 || true
 
 cd /home/ec2-user
 aws s3 cp "s3://${S3_BUCKET}/${ARTIFACT_KEY}" /tmp/release.tar.gz
