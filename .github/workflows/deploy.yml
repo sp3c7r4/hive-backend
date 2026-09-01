@@ -27,6 +27,8 @@ env:
   S3_BUCKET: hive-backups-prod
   S3_PREFIX: deploy/hive-backend
   INSTANCE_TAG: hive-backend
+  # @info - multi-line secrets via env context, NOT inline in run scripts
+  BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
 
 jobs:
   deploy:
@@ -61,7 +63,7 @@ jobs:
           ls -lh release.tar.gz
           # env shipped with the artifact (written fresh every deploy — no
           # write-once logic on the box)
-          printf '%s\n' "${{ secrets.BACKEND_ENV }}" > env.production
+          printf '%s\n' "$BACKEND_ENV" > env.production
           chmod 600 env.production
 
       - name: Upload artifact to S3
