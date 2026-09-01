@@ -78,6 +78,7 @@ jobs:
         run: |
           SCRIPT='#!/bin/bash
           set -e
+          sudo dnf install -y rsync >/dev/null 2>&1 || true
           cd /home/ec2-user
           aws s3 cp s3://${S3_BUCKET}/${ARTIFACT_KEY} /tmp/release.tar.gz
           aws s3 cp s3://${S3_BUCKET}/${ENV_KEY} /tmp/env.production
