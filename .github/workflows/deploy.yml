@@ -76,11 +76,6 @@ jobs:
 
       - name: Deploy via SSM
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=${INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
-            --query "Reservations[0].Instances[0].InstanceId" --output text)
-          [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ] || { echo "instance ${INSTANCE_TAG} not registered with SSM"; exit 1; }
-
           SCRIPT='#!/bin/bash
           set -e
           cd /home/ec2-user
@@ -116,18 +111,27 @@ jobs:
           pm2 status'
 
           B64=$(printf '%s' "$SCRIPT" | base64 -w0)
-          CMD_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+          CMD_ID=$(aws ssm send-command --targets "Key=tag:Name,Values=${INSTANCE_TAG}" \
             --document-name "AWS-RunShellScript" \
             --parameters "{\"commands\":[\"S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash -c \\\"echo ${B64} | base64 -d > /tmp/hive-deploy.sh && bash /tmp/hive-deploy.sh\\\"\"]}" \
             --query "Command.CommandId" --output text)
 
           echo "SSM command: $CMD_ID"
+          TARGET_ID=""
+          for i in $(seq 1 30); do
+            TARGET_ID=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+              --query "CommandInvocations[0].InstanceId" --output text 2>/dev/null)
+            [ -n "$TARGET_ID" ] && [ "$TARGET_ID" != "None" ] && break
+            sleep 2
+          done
+          [ -n "$TARGET_ID" ] && [ "$TARGET_ID" != "None" ] || { echo "no instance matched tag ${INSTANCE_TAG}"; exit 1; }
+
           for i in $(seq 1 60); do
-            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query "Status" --output text)
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$TARGET_ID" --query "Status" --output text)
             case "$STATUS" in
               Success) echo "Deploy OK"; exit 0 ;;
               Failed|TimedOut|Cancelled)
-                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$TARGET_ID" \
                   --query "StandardErrorContent" --output text | tail -40
                 exit 1 ;;
             esac
