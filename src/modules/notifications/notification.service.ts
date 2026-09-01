@@ -3,6 +3,7 @@ import { getDb } from "@/db/postgres.db";
 import { notifications, type NewNotification } from "./notification.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import { serviceLogger } from "@/utils";
+import { ChatPubSubService } from "@/services/engine/chat-pubsub.service";
 import { NotificationType } from "@/enums";
 
 /** @info - User notifications: created by other modules (messaging, feed,
@@ -43,7 +44,32 @@ export class NotificationService {
 				message,
 				metadata: (metadata ?? {}) as any,
 			};
-			await db.insert(notifications).values(data as any);
+			const [row] = (await db
+				.insert(notifications)
+				.values(data as any)
+				.returning()) as any[];
+
+			/* @info - Realtime push: same Redis channel + envelope as chat,
+			 * so any open socket delivers it instantly (30s poll is the fallback). */
+			if (row) {
+				await ChatPubSubService.getInstance().publishUser(userId, {
+					timestamp: new Date().toISOString(),
+					status: 200,
+					success: true,
+					data: {
+						type: "notification:new",
+						payload: {
+							id: row.id,
+							type: row.type,
+							title: row.title,
+							message: row.message,
+							metadata: row.metadata ?? {},
+							read: false,
+							createdAt: row.createdAt,
+						},
+					},
+				});
+			}
 		} catch (error) {
 			this.log.error(`Failed to notify user ${userId}: ${(error as Error).message}`);
 		}
