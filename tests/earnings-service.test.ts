@@ -123,9 +123,9 @@ describe("EarningsService", () => {
 		});
 		expect(d.activeStudents7d).toBe(2);
 		expect(d.recentActivity).toHaveLength(4);
-		expect(d.recentActivity[0]).toMatchObject({ type: "enrollment" });
-		expect(d.recentActivity[1].type).toBe("payment");
-		expect(d.recentActivity[1].text).toContain("paid ₦1,000");
+		expect(d.recentActivity[0]!).toMatchObject({ type: "enrollment" });
+		expect(d.recentActivity[1]!.type).toBe("payment");
+		expect(d.recentActivity[1]!.text).toContain("paid ₦1,000");
 		expect(d.enrollmentSeries.daily).toHaveLength(7);
 		expect(d.enrollmentSeries.weekly).toHaveLength(4);
 		/* zero-filling: only the matching bucket is non-zero */
