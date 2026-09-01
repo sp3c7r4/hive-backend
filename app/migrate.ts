@@ -7,7 +7,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const migrationsDir = join(import.meta.dirname, "..", "src", "db", "migrations");
+/* @info - Bundled first (dist/migrations in prod), source fallback (dev). */
+const bundledMigrations = join(import.meta.dirname, "migrations");
+const sourceMigrations = join(import.meta.dirname, "..", "src", "db", "migrations");
+const migrationsDir = existsSync(bundledMigrations) ? bundledMigrations : sourceMigrations;
 const pool = new Pool({ connectionString: config.db.uri });
 
 // Ensure tracking table exists
