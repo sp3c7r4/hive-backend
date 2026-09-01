@@ -12,7 +12,7 @@ import { CommunityRatingController } from "./community-rating.controller";
 import { createCommunitySchema, createCommunityFormSchema, updateCommunitySchema } from "./community.schema";
 import { updateMemberSchema, inviteMemberSchema } from "./community-member.schema";
 import { createPostSchema, updatePostSchema, createCommentSchema, updateCommentSchema } from "./community-feed.schema";
-import { requireCommunityMember, requireCommunityAdmin } from "@/middlewares/auth/community-guards";
+import { requireCommunityMember, requireCommunityMemberOrAdmin, requireCommunityAdmin } from "@/middlewares/auth/community-guards";
 
 export const communityRouter = new Hono({ strict: true });
 
@@ -60,7 +60,7 @@ communityRouter.post("/:id/restore", controller.restore);
 
 /* ── Members ───────────────────────────────────────────────── */
 
-communityRouter.get("/:slug/members", requireCommunityMember, memberController.listMembers);
+communityRouter.get("/:slug/members", requireCommunityMemberOrAdmin, memberController.listMembers);
 communityRouter.patch("/:slug/members/:userId", requireCommunityAdmin, zod.validate.body(updateMemberSchema), memberController.updateMember);
 communityRouter.delete("/:slug/members/:userId", requireCommunityAdmin, memberController.removeMember);
 communityRouter.post("/:slug/members/:userId/approve", requireCommunityAdmin, memberController.approveMember);
@@ -79,17 +79,17 @@ communityRouter.post("/:slug/leave", requireCommunityMember, memberController.le
 
 /* ── Feed ──────────────────────────────────────────────────── */
 
-communityRouter.get("/:slug/feed", requireCommunityMember, feedController.listPosts);
+communityRouter.get("/:slug/feed", requireCommunityMemberOrAdmin, feedController.listPosts);
 /* @info - Only owners/admins can create posts + announcements; members comment/like */
 communityRouter.post("/:slug/feed", requireCommunityAdmin, zod.validate.body(createPostSchema), feedController.createPost);
-communityRouter.get("/:slug/ratings", requireCommunityMember, ratingController.list);
+communityRouter.get("/:slug/ratings", requireCommunityMemberOrAdmin, ratingController.list);
 communityRouter.post("/:slug/ratings", requireCommunityMember, zod.validate.body(z.object({ rating: z.number().int().min(1).max(5) })), ratingController.rate);
 communityRouter.patch("/:slug/feed/:postId", requireCommunityMember, zod.validate.body(updatePostSchema), feedController.updatePost);
 communityRouter.delete("/:slug/feed/:postId", requireCommunityMember, feedController.deletePost);
 
 communityRouter.post("/:slug/feed/:postId/like", requireCommunityMember, feedController.toggleLike);
 
-communityRouter.get("/:slug/feed/:postId/comments", requireCommunityMember, feedController.listComments);
+communityRouter.get("/:slug/feed/:postId/comments", requireCommunityMemberOrAdmin, feedController.listComments);
 communityRouter.post("/:slug/feed/:postId/comments", requireCommunityMember, zod.validate.body(createCommentSchema), feedController.createComment);
 communityRouter.patch("/:slug/feed/:postId/comments/:commentId", requireCommunityMember, zod.validate.body(updateCommentSchema), feedController.updateComment);
 communityRouter.delete("/:slug/feed/:postId/comments/:commentId", requireCommunityMember, feedController.deleteComment);
