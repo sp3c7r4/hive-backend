@@ -6,7 +6,6 @@ import open from "open";
 import { config } from "@/config";
 import type { EmailOptions } from "@/interfaces";
 import { logger } from "@/utils";
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import nodemailer from "nodemailer";
 
 export class EmailService {
@@ -14,7 +13,6 @@ export class EmailService {
 
 	private readonly domain: string = config.mail.domain;
 
-	private readonly ses: SESv2Client;
 	private readonly transporter: nodemailer.Transporter;
 
 	private log = logger;
@@ -29,18 +27,15 @@ export class EmailService {
 	}
 
 	private constructor() {
-		this.ses = new SESv2Client({
-			region: config.aws.region,
-			credentials: {
-				accessKeyId: config.aws.ses.user!,
-				secretAccessKey: config.aws.ses.password!,
-			},
-		});
+		/* @info - Resend SMTP (smtp.resend.com). Same nodemailer contract the
+		 * SES transport had; only the endpoint/creds changed. */
 		this.transporter = nodemailer.createTransport({
-			//@ts-ignore
-			SES: {
-				sesClient: this.ses,
-				SendEmailCommand,
+			host: "smtp.resend.com",
+			port: 465,
+			secure: true,
+			auth: {
+				user: "resend",
+				pass: config.aws.resend.apiKey,
 			},
 		});
 	}

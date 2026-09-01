@@ -45,10 +45,8 @@ const EnvSchema = z.object({
 	AWS_BEDROCK_API_KEY: z.string(),
 	AWS_S3_BUCKET: z.string(),
 	AWS_S3_ENDPOINT: z.string().optional(),
-	AWS_SES_SMTP_USER_NAME: z.string(),
-	AWS_SES_SMTP_PASSWORD: z.string(),
-	AWS_SES_SMTP_ENDPOINT: z.string(),
-	AWS_SES_SMTP_PORT: z.string(),
+	/* @info - Email via Resend (SMTP). No SES policy needed. */
+	RESEND_API_KEY: z.string(),
 
 	FACEBOOK_CLIENT_ID: z.string(),
 	FACEBOOK_CLIENT_SECRET: z.string(),

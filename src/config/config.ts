@@ -50,11 +50,8 @@ export const config = {
 		s3Bucket: env.AWS_S3_BUCKET,
 		s3Url: `https://${env.AWS_S3_BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/`,
 		s3Endpoint: env.AWS_S3_ENDPOINT,
-		ses: {
-			user: env.AWS_SES_SMTP_USER_NAME,
-			password: env.AWS_SES_SMTP_PASSWORD,
-			endpoint: env.AWS_S3_ENDPOINT,
-			port: env.AWS_SES_SMTP_PORT,
+		resend: {
+			apiKey: env.RESEND_API_KEY,
 		},
 	},
 
