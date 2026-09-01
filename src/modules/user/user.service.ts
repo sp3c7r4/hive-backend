@@ -205,6 +205,34 @@ export class UserService {
 		await this.invalidateOtherTokens(authData);
 	};
 
+	/** @info - Admin user actions: suspend / unsuspend / delete / restore.
+	 * Suspension + deletion invalidate the user's sessions immediately. */
+	adminAction = async (userId: number, action: string) => {
+		/* @info - includeDeleted: restore must see soft-deleted users */
+		const user = await this.userRepo.findById(userId, { includeDeleted: true });
+		if (!user) throwNotFoundError("User not found.");
+
+		if (action === "suspend") {
+			await this.userRepo.update(userId, { suspendedAt: new Date() } as any);
+		} else if (action === "unsuspend") {
+			await this.userRepo.update(userId, { suspendedAt: null } as any);
+		} else if (action === "delete") {
+			await this.userRepo.update(userId, { deletedAt: new Date() } as any);
+		} else if (action === "restore") {
+			await this.userRepo.update(userId, { deletedAt: null, suspendedAt: null } as any, {
+				includeDeleted: true,
+			});
+		} else {
+			throwBadRequestError("Unknown action");
+		}
+
+		if (action === "suspend" || action === "delete") {
+			await this.invalidateAllTokens(userId);
+		}
+
+		return this.userRepo.findById(userId);
+	};
+
 	deleteAccount = async (authData: IAuthData) => {
 		const userId = Number(authData.id);
 		const updated = await this.userRepo.update(userId, {

@@ -115,6 +115,8 @@ export class AuthService {
 
 		const userAny = user as any;
 		if (userAny.deletedAt) throwNotFoundError("Invalid email or password");
+		if (userAny.suspendedAt)
+			throwUnauthorizedError("This account is suspended. Contact support.");
 
 		if (!userAny.passwordHash)
 			throwUnauthorizedError(

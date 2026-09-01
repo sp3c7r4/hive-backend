@@ -45,6 +45,7 @@ export const users = pgTable(
 					push: true,
 				},
 			}),
+		suspendedAt: timestamp("suspended_at"),
 		...softDelete,
 		...timestamps,
 	},

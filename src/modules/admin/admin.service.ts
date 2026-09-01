@@ -38,6 +38,8 @@ export class AdminDashboardService {
 				lastName: users.lastName,
 				email: users.email,
 				createdAt: users.createdAt,
+				suspendedAt: users.suspendedAt,
+				deletedAt: users.deletedAt,
 			})
 			.from(users)
 			.where(conditions.length ? and(...conditions) : undefined)
@@ -74,6 +76,7 @@ export class AdminDashboardService {
 			roles: roleMap.get(u.id) ?? [],
 			enrollmentCount: enrollMap.get(u.id) ?? 0,
 			joinedAt: u.createdAt,
+			status: u.deletedAt ? "deleted" : u.suspendedAt ? "suspended" : "active",
 		}));
 
 		if (params?.role && params.role !== "all") {
