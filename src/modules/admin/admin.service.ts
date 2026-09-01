@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, inArray, like, or, sql, sum } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
+import { withPresignedUrl } from "@/helpers";
 import { users } from "@/modules/user/user.model";
 import { communities, communityMembers } from "@/modules/communities/community.model";
 import { courses } from "@/modules/courses/course.model";
@@ -34,6 +35,7 @@ export class AdminDashboardService {
 				firstName: users.firstName,
 				lastName: users.lastName,
 				email: users.email,
+				avatarUrl: users.avatarUrl,
 				createdAt: users.createdAt,
 				suspendedAt: users.suspendedAt,
 				deletedAt: users.deletedAt,
@@ -129,6 +131,9 @@ export class AdminDashboardService {
 				id: user.id,
 				name: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "—",
 				email: user.email,
+				avatarUrl: user.avatarUrl
+					? withPresignedUrl({ avatarUrl: user.avatarUrl }, "avatarUrl").avatarUrl
+					: null,
 				roles: (roleRows as any[]).map((r) => r.role),
 				joinedAt: user.createdAt,
 				status: user.deletedAt ? "deleted" : user.suspendedAt ? "suspended" : "active",
@@ -276,6 +281,7 @@ export class AdminDashboardService {
 				firstName: users.firstName,
 				lastName: users.lastName,
 				email: users.email,
+				avatarUrl: users.avatarUrl,
 				createdAt: users.createdAt,
 				suspendedAt: users.suspendedAt,
 				deletedAt: users.deletedAt,
@@ -312,6 +318,9 @@ export class AdminDashboardService {
 			id: u.id,
 			name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "—",
 			email: u.email,
+			avatarUrl: u.avatarUrl
+				? withPresignedUrl({ avatarUrl: u.avatarUrl }, "avatarUrl").avatarUrl
+				: null,
 			roles: roleMap.get(u.id) ?? [],
 			enrollmentCount: enrollMap.get(u.id) ?? 0,
 			joinedAt: u.createdAt,
