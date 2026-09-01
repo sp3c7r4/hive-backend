@@ -34,7 +34,9 @@ cp docker-compose.yml /opt/hive-db/docker-compose.yml
 PG_PW=$(grep -oP '^POSTGRES_PASSWORD=\K.*' .env.production | head -1)
 echo "POSTGRES_PASSWORD=${PG_PW}" > /opt/hive-db/.env
 chmod 600 /opt/hive-db/.env
-cd /opt/hive-db && docker compose up -d
+cd /opt/hive-db
+sudo dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
+docker compose up -d 2>/dev/null || docker-compose up -d
 cd /home/ec2-user/hive-backend
 
 NODE_ENV=production node ./dist/migrate.js
