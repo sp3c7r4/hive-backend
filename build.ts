@@ -126,6 +126,15 @@ async function build() {
 		target: `node${nodeMajor}`,
 		splitting: false,
 		format: "esm",
+		/* @info - Bundled CJS (bull-board ui, open) references __dirname/require.
+		 * ESM has neither — provide them at the top of the bundle. */
+		banner: {
+			/* esbuild already injects `require`; only __dirname/__filename are missing */
+			js: `import { fileURLToPath as __hiveFileURLToPath } from "node:url";
+import __hivePath from "node:path";
+const __filename = __hiveFileURLToPath(import.meta.url);
+const __dirname = __hivePath.dirname(__filename);`,
+		},
 		external: externals,
 		plugins: [
 			{
