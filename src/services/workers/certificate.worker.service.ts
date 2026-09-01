@@ -10,6 +10,8 @@ import { courses } from "@/modules/courses/course.model";
 import { communities } from "@/modules/communities/community.model";
 import { certificates } from "@/modules/certificates/certificate.model";
 import { CertificateService } from "@/modules/certificates/certificate.service";
+import { NotificationService } from "@/modules/notifications";
+import { NotificationType } from "@/enums";
 import { CertificateGenerator, type CertificateTemplateData } from "../certificate.generator.service";
 import { StorageService } from "../storage.service";
 
@@ -148,6 +150,15 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 			.update(certificates)
 			.set({ fileUrl: key })
 			.where(eq(certificates.code, certificate.code));
+
+		/* @info - Tell the student their certificate is ready */
+		NotificationService.getInstance().notify(
+			userId,
+			NotificationType.CERTIFICATE,
+			"Certificate ready",
+			`Your certificate for ${course.title ?? "the course"} is ready to view`,
+			{ certificateCode: certificate.code, courseId },
+		);
 
 		logger.info(`Certificate ${certificate.code} generated + uploaded`, { jobId: job.id });
 	}

@@ -14,6 +14,8 @@ import { instructorBalance, instructorTransaction } from "./ledger.model";
 import { withdrawals } from "./payment.model";
 import { users } from "@/modules/user/user.model";
 import { PaystackService } from "./services";
+import { NotificationService } from "@/modules/notifications";
+import { NotificationType } from "@/enums";
 
 /** @info - Minimum withdrawal: ₦1,000 (kobo). */
 export const MIN_WITHDRAWAL_KOBO = 100_000;
@@ -230,6 +232,14 @@ export class WithdrawalService {
 				}
 			});
 
+			NotificationService.getInstance().notify(
+				w!.instructorId,
+				NotificationType.PAYMENT,
+				"Withdrawal approved",
+				`Your withdrawal of ₦${Math.round(Number(w!.amount ?? 0) / 100).toLocaleString("en-US")} was sent to ${w!.bankName}`,
+				{ withdrawalId: w!.id },
+			);
+
 			return { status, transferCode: transfer.transferCode };
 		} catch (e) {
 			/* Paystack failure → failed + refund the hold; surface the outcome
@@ -260,6 +270,14 @@ export class WithdrawalService {
 			.where(eq(withdrawals.id, id));
 
 		await this.refundHold(w!, "rejected");
+
+		NotificationService.getInstance().notify(
+			w!.instructorId,
+			NotificationType.PAYMENT,
+			"Withdrawal rejected",
+			`Your withdrawal of ₦${Math.round(Number(w!.amount ?? 0) / 100).toLocaleString("en-US")} was declined. The funds are back in your balance.`,
+			{ withdrawalId: w!.id },
+		);
 		return { status: "rejected" };
 	};
 

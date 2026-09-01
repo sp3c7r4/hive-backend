@@ -1,12 +1,13 @@
 import { throwBadRequestError, throwForbiddenError, throwNotFoundError, throwRateLimitError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
+import { NotificationService } from "@/modules/notifications";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { users } from "@/modules/user/user.model";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import { CacheService } from "@/services/cache.service";
 import { withPresignedUrl } from "@/helpers/storage.helper";
-import { MessageType } from "@/enums";
+import { MessageType, NotificationType } from "@/enums";
 import { ChatPubSubService } from "@/services/engine/chat-pubsub.service";
 import { MessagingRepository } from "./messaging.repository";
 import { MessagingMessages as MSG } from "./messaging.message";
@@ -137,6 +138,17 @@ export class MessagingService {
 			content: sanitizeContent(body.content) || null,
 			attachmentUrl: body.attachmentUrl ?? null,
 		});
+
+		/* @info - Notify the recipient of the new message */
+		const notifier = NotificationService.getInstance();
+		const preview = sanitizeContent(body.content)?.slice(0, 80) ?? "Sent you a message";
+		notifier.notify(
+			recipientId,
+			NotificationType.MESSAGE,
+			"New message",
+			preview,
+			{ conversationId: conversation!.id, messageId: message!.id },
+		);
 
 		this.log.info(`Message ${message!.id} sent in conversation ${conversation!.id}`);
 

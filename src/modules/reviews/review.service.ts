@@ -11,6 +11,8 @@ import { courses } from "@/modules/courses/course.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { users } from "@/modules/user/user.model";
 import { reviews } from "./review.model";
+import { NotificationService } from "@/modules/notifications";
+import { NotificationType } from "@/enums";
 
 /** @info - Course reviews: enrolled-student-only 1-5 stars, one per user
  * (upsert), with cached aggregates on the courses row. */
@@ -54,7 +56,7 @@ export class ReviewService {
 
 		const db = getDb();
 		const [course] = await db
-			.select({ id: courses.id })
+			.select({ id: courses.id, instructorId: courses.instructorId })
 			.from(courses)
 			.where(eq(courses.id, courseId))
 			.limit(1);
@@ -108,6 +110,16 @@ export class ReviewService {
 		});
 
 		await this.refreshAggregate(courseId);
+
+		/* @info - Notify the instructor of their new review */
+		NotificationService.getInstance().notify(
+			Number(course!.instructorId),
+			NotificationType.REVIEW,
+			"New course review",
+			`${rating}/5 - ${comment.slice(0, 100)}${comment.length > 100 ? "…" : ""}`,
+			{ courseId, reviewId: savedId! },
+		);
+
 		const [saved] = await db
 			.select()
 			.from(reviews)

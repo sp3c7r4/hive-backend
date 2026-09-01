@@ -15,6 +15,8 @@ import {
 import { communityMembers } from "./community.model";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
+import { NotificationService } from "@/modules/notifications";
+import { NotificationType } from "@/enums";
 
 const POSTS_PER_PAGE = 20;
 const COMMENTS_PER_PAGE = 50;
@@ -402,7 +404,7 @@ export class CommunityFeedService {
 		const userId = Number(authData.id);
 
 		const [post] = await db
-			.select({ id: communityPosts.id, likeCount: communityPosts.likeCount })
+			.select({ id: communityPosts.id, likeCount: communityPosts.likeCount, authorId: communityPosts.authorId })
 			.from(communityPosts)
 			.where(and(
 				eq(communityPosts.id, postId),
@@ -444,6 +446,18 @@ export class CommunityFeedService {
 			.update(communityPosts)
 			.set({ likeCount: newCount })
 			.where(eq(communityPosts.id, postId));
+
+		/* @info - Notify the post author (not yourself) */
+		if (Number(safePost.authorId) !== userId) {
+			const notifier = NotificationService.getInstance();
+			notifier.notify(
+				Number(safePost.authorId),
+				NotificationType.COMMUNITY,
+				"New like on your post",
+				`Someone liked your community post`,
+				{ postId },
+			);
+		}
 		return { liked: true, likeCount: newCount };
 	};
 
@@ -518,7 +532,7 @@ export class CommunityFeedService {
 		const userId = Number(authData.id);
 
 		const [post] = await db
-			.select({ id: communityPosts.id })
+			.select({ id: communityPosts.id, authorId: communityPosts.authorId })
 			.from(communityPosts)
 			.where(and(
 				eq(communityPosts.id, postId),
@@ -569,6 +583,18 @@ export class CommunityFeedService {
 			.update(communityPosts)
 			.set({ commentCount: sql`${communityPosts.commentCount} + 1` })
 			.where(eq(communityPosts.id, postId));
+
+		/* @info - Notify the post author (not yourself) */
+		if (Number(post!.authorId) !== userId) {
+			const notifier = NotificationService.getInstance();
+			notifier.notify(
+				Number(post!.authorId),
+				NotificationType.COMMUNITY,
+				"New comment on your post",
+				`${data.content.slice(0, 80)}${data.content.length > 80 ? "…" : ""}`,
+				{ postId, commentId: (comment as any).id },
+			);
+		}
 
 		/* Fetch author info */
 		const [user] = await db
