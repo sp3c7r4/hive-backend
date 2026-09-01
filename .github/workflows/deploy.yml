@@ -76,9 +76,9 @@ jobs:
 
       - name: Deploy via SSM
         run: |
-          INSTANCE_ID=$(aws ssm describe-instance-information \
-            --filters "Key=tag:Name,Values=${INSTANCE_TAG}" \
-            --query "InstanceInformationList[0].InstanceId" --output text)
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
           [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ] || { echo "instance ${INSTANCE_TAG} not registered with SSM"; exit 1; }
 
           SCRIPT='#!/bin/bash
