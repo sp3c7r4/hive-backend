@@ -25,6 +25,7 @@ chmod 600 /home/ec2-user/hive-backend/.env.production
 rm -f /tmp/env.production
 
 cd /home/ec2-user/hive-backend
+rm -rf node_modules   # npm ci ENOTEMPTY on stale dirs otherwise
 npm ci --omit=dev --ignore-scripts
 
 # Apply the repo-owned docker-compose.yml (Postgres + Redis + anything you add)
