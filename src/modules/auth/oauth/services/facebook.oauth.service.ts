@@ -166,11 +166,18 @@ export class FacebookOAuthService {
 		const params = new URLSearchParams({
 			client_id: this.clientId,
 			redirect_uri: this.buildRedirectUrl(),
-			config_id: this.configId,
+			/* @info - Classic OAuth dialog: scope declares the permissions, no config needed */
+			scope: "email,public_profile",
 			response_type: "code",
 			state: generateBase64(userType),
 			auth_type: "rerequest",
 		});
+
+		/* @info - Optional: when a Login for Business config exists it can
+		 * override the permission screen; not required for the dialog. */
+		if (this.configId) {
+			params.set("config_id", this.configId);
+		}
 
 		return `https://www.facebook.com/${this.graphApiVersion}/dialog/oauth?${params.toString()}`;
 	};

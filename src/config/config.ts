@@ -85,7 +85,7 @@ export const config = {
 	facebook: {
 		clientId: env.FACEBOOK_CLIENT_ID,
 		clientSecret: env.FACEBOOK_CLIENT_SECRET,
-		configId: env.FACEBOOK_CONFIG_ID,
+		configId: env.FACEBOOK_CONFIG_ID?.trim() || undefined,
 	},
 
 	paystack: {
