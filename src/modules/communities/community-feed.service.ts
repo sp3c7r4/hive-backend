@@ -194,7 +194,7 @@ export class CommunityFeedService {
 				list.push({
 					filename: a.filename,
 					s3Key: a.s3Key,
-					url: config.aws.s3Url + a.s3Key,
+					url: config.cdn.url + a.s3Key,
 				});
 				attachmentMap.set(a.postId, list);
 			}

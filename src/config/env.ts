@@ -44,6 +44,8 @@ const EnvSchema = z.object({
 	AWS_SECRET_ACCESS_KEY: z.string(),
 	AWS_BEDROCK_API_KEY: z.string(),
 	AWS_S3_BUCKET: z.string(),
+	/* @info - Public media base (CloudFront in prod, public S3 in dev) */
+	CDN_URL: z.string(),
 	AWS_S3_ENDPOINT: z.string().optional(),
 	/* @info - Email via Resend (SMTP). No SES policy needed. */
 	RESEND_API_KEY: z.string(),

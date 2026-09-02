@@ -18,14 +18,14 @@ export function withPresignedUrl<T extends Record<string, any>>(
 	if (Array.isArray(s3Key)) {
 		const urls = s3Key
 			.filter((k) => typeof k === "string" && k.length > 0)
-			.map((k) => (urlRegex.test(k) ? k : `${config.aws.s3Url}${k}`));
+			.map((k) => (urlRegex.test(k) ? k : `${config.cdn.url}${k}`));
 		return { ...doc, [field]: urls };
 	}
 
 	// Handle single string key
 	if (!s3Key || urlRegex.test(s3Key)) return doc;
 
-	const url = `${config.aws.s3Url}${s3Key}`;
+	const url = `${config.cdn.url}${s3Key}`;
 	return { ...doc, [field]: url };
 }
 

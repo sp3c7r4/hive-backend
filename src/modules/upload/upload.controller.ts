@@ -64,7 +64,7 @@ export class UploadController {
 
 		return sendSuccessResponse(
 			c,
-			{ ...result, s3Url: `${config.aws.s3Url}${key}` },
+			{ ...result, s3Url: `${config.cdn.url}${key}` },
 			StatusCodes.CREATED,
 		);
 	};
@@ -131,7 +131,7 @@ export class UploadController {
 			contentType: fileType,
 		});
 
-		const publicUrl = `${config.aws.s3Url}${key}`;
+		const publicUrl = `${config.cdn.url}${key}`;
 		return sendSuccessResponse(
 			c,
 			{ url: publicUrl, key, name: file.name },
@@ -182,7 +182,7 @@ export class UploadController {
 			contentType: fileType,
 		});
 
-		const publicUrl = `${config.aws.s3Url}${key}`;
+		const publicUrl = `${config.cdn.url}${key}`;
 
 		return sendSuccessResponse(
 			c,
@@ -241,7 +241,7 @@ export class UploadController {
 			contentType: fileType,
 		});
 
-		const publicUrl = `${config.aws.s3Url}${key}`;
+		const publicUrl = `${config.cdn.url}${key}`;
 		return sendSuccessResponse(
 			c,
 			{ url: publicUrl, key, name: file.name },

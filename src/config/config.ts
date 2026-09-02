@@ -55,6 +55,9 @@ export const config = {
 			domain: env.RESEND_DOMAIN,
 		},
 	},
+	cdn: {
+		url: env.CDN_URL,
+	},
 
 	google: {
 		clientId: env.GOOGLE_CLIENT_ID,
