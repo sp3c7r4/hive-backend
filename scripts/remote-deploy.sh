@@ -22,6 +22,8 @@ rm -rf hive-backend.tmp
 
 cp /tmp/env.production /home/ec2-user/hive-backend/.env.production
 chmod 600 /home/ec2-user/hive-backend/.env.production
+# pm2 runs the apps as ec2-user - the env file must be readable by it
+chown ec2-user:ec2-user /home/ec2-user/hive-backend/.env.production
 rm -f /tmp/env.production
 
 cd /home/ec2-user/hive-backend
@@ -56,8 +58,11 @@ NODE_ENV=production node ./dist/migrate.js
 
 export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
 pm2 startup systemd -u ec2-user --hp /home/ec2-user >/dev/null 2>&1 || true
-pm2 delete hive-backend hive-workers 2>/dev/null || true
-pm2 start ecosystem.config.cjs
-pm2 save >/dev/null 2>&1 || true
+# @info - pm2 MUST run as ec2-user (not root): the systemd unit targets
+# ec2-user, so root-owned processes would vanish on reboot and ec2-user's
+# `pm2 list` would show an empty daemon while root runs the apps.
+runuser -u ec2-user -- bash -lc "pm2 delete hive-backend hive-workers 2>/dev/null || true"
+runuser -u ec2-user -- bash -lc "cd /home/ec2-user/hive-backend && pm2 start ecosystem.config.cjs"
+runuser -u ec2-user -- bash -lc "pm2 save >/dev/null 2>&1 || true"
 sleep 3
-pm2 status
+runuser -u ec2-user -- bash -lc "pm2 status"
