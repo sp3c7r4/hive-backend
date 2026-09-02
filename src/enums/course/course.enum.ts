@@ -22,6 +22,7 @@ export enum LessonType {
 	QUIZ = "quiz",
 	ASSIGNMENT = "assignment",
 	TEXT = "text",
+	GOOGLE_DRIVE = "google_drive",
 }
 
 export enum LessonStatus {

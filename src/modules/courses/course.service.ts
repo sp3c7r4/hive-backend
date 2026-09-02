@@ -1,10 +1,11 @@
 import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
 import { eq, and, isNull, asc, desc, sql } from "drizzle-orm";
-import { throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { throwNotFoundError, throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { UserRole } from "@/enums";
+import { UserRole, LessonType } from "@/enums";
+import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import { CourseMessages, ModuleMessages, LessonMessages } from "./course.message";
 import { courses, modules, lessons } from "./course.model";
 import { communities } from "@/modules/communities/community.model";
@@ -324,7 +325,15 @@ export class CourseService {
 
 	/* Lessons */
 
+	/** @info - A google_drive lesson must carry a valid share link (both sides of an update) */
+	private assertDriveLink(type: string | undefined, driveUrl: string | null | undefined) {
+		if (type === LessonType.GOOGLE_DRIVE && (!driveUrl || !isGoogleDriveLink(driveUrl))) {
+			throwBadRequestError("A valid Google Drive share link is required for Google Drive lessons.");
+		}
+	}
+
 	createLesson = async (moduleId: number, data: NewLesson) => {
+		this.assertDriveLink(data.type, data.driveUrl);
 		return this.lessonsRepo.create({ ...data, moduleId } as any);
 	};
 
@@ -338,6 +347,11 @@ export class CourseService {
 	};
 
 	updateLesson = async (id: number, data: Partial<NewLesson>) => {
+		const db = getDb();
+		const [existing] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
+		if (!existing) throwNotFoundError(LessonMessages.NOT_FOUND);
+		/* @info - validate the merged state so clearing a link is impossible without changing type */
+		this.assertDriveLink(data.type ?? existing!.type, data.driveUrl ?? existing!.driveUrl);
 		const lesson = await this.lessonsRepo.update(id, data as any);
 		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
 	};

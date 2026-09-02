@@ -68,6 +68,7 @@ export const createLessonSchema = z.object({
 	randomizeQuestions: z.boolean().optional(),
 	videoUrl: z.string().max(1000).optional(),
 	pdfUrl: z.string().max(1000).optional(),
+	driveUrl: z.string().max(1000).optional(),
 	liveMeetingLink: z.string().max(1000).optional(),
 	liveMeetingDate: z.string().max(255).optional(),
 	attachmentUrl: z.string().max(1000).optional(),

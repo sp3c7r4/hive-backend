@@ -119,6 +119,7 @@ export const lessons = pgTable(
 		liveMeetingLink: varchar("live_meeting_link", { length: 1000 }),
 		liveMeetingDate: varchar("live_meeting_date", { length: 255 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
+		driveUrl: varchar("drive_url", { length: 1000 }),
 		settings: jsonb("settings"),
 		...timestamps,
 	},
