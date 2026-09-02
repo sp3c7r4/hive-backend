@@ -1,4 +1,5 @@
 import { access, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Handlebars from "handlebars";
@@ -41,7 +42,10 @@ export class EmailService {
 	}
 
 	private async getTemplate(template: string): Promise<string> {
-		const templatesDir = path.join(process.cwd(), "src", "emails");
+		/* @info - dist/emails on prod (src isn't shipped), src/emails in dev */
+		const distDir = path.join(process.cwd(), "dist", "emails");
+		const srcDir = path.join(process.cwd(), "src", "emails");
+		const templatesDir = existsSync(distDir) ? distDir : srcDir;
 		const pathName = path.join(templatesDir, template, "html.hbs");
 
 		if (!pathName.startsWith(templatesDir + path.sep)) {
