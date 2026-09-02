@@ -362,6 +362,8 @@ export class AuthService {
 		}
 
 		let user: any = null;
+		/* @info - Real roles for OTP/AUTHENTICATE logins (drives the dashboard redirect + JWT claim) */
+		let userRoles: Array<{ role: string }> = [];
 
 		if (action === JwtAction.VERIFY_EMAIL) {
 			const { firstName, lastName, email } = rest;
@@ -411,6 +413,9 @@ export class AuthService {
 						`This account uses ${provider} to sign in. Please continue with that button instead.`,
 					);
 				}
+				userRoles = await this.userRoleRepo.findMany(
+					eq(user_roles.userId, user.id),
+				);
 				user = await this.userRepo.update(user.id, {
 					lastLoginAt: new Date(),
 				});
@@ -471,11 +476,21 @@ export class AuthService {
 
 		const tokens = await generateAuthTokens(
 			newAuthId,
-			(rest as any).role ?? "",
+			action === JwtAction.AUTHENTICATE
+				? (userRoles[0]?.role ?? "")
+				: ((rest as any).role ?? ""),
 		);
 
 		return {
-			user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"),
+			user: await withPresignedUrl<any>(
+				{
+					...authenticatedUser,
+					...(action === JwtAction.AUTHENTICATE && {
+						roles: userRoles.map((r) => r.role),
+					}),
+				},
+				"avatarUrl",
+			),
 			...tokens,
 		};
 	};
