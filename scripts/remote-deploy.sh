@@ -56,6 +56,13 @@ cd /home/ec2-user/hive-backend
 
 NODE_ENV=production node ./dist/migrate.js
 
+# @info - Headless Chrome for the browser engine (certificates/receipts).
+# Puppeteer-core ships no binary: install the pinned version + its system
+# libs, or the workers crash at boot (BrowserEngine.start) and the queues
+# sit unprocessed (hard-won 2026-09-02: every email job waited forever).
+sudo dnf install -y atk at-spi2-atk cups-libs libXcomposite libXdamage libXrandr libgbm libxkbcommon nss alsa-lib pango cairo libX11 libXcursor libXext libXi libXinerama libXScrnSaver libXtst mesa-libGL >/dev/null 2>&1 || true
+runuser -u ec2-user -- bash -lc "cd /home/ec2-user/hive-backend && npx puppeteer browsers install chrome >/dev/null 2>&1 || true"
+
 export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
 pm2 startup systemd -u ec2-user --hp /home/ec2-user >/dev/null 2>&1 || true
 # @info - pm2 MUST run as ec2-user (not root): the systemd unit targets
