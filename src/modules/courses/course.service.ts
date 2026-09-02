@@ -325,9 +325,13 @@ export class CourseService {
 
 	/* Lessons */
 
-	/** @info - A google_drive lesson must carry a valid share link (both sides of an update) */
+	/**
+	 * @info - A google_drive lesson may be created as a draft without its link
+	 * (the two-step add-lesson flow). Only an INVALID link is rejected; a
+	 * missing link is fine and gets filled in from the editor drawer.
+	 */
 	private assertDriveLink(type: string | undefined, driveUrl: string | null | undefined) {
-		if (type === LessonType.GOOGLE_DRIVE && (!driveUrl || !isGoogleDriveLink(driveUrl))) {
+		if (type === LessonType.GOOGLE_DRIVE && driveUrl && !isGoogleDriveLink(driveUrl)) {
 			throwBadRequestError("A valid Google Drive share link is required for Google Drive lessons.");
 		}
 	}
