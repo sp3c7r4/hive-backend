@@ -34,7 +34,7 @@ export class FacebookOAuthService {
 
 	private clientId: string;
 	private clientSecret: string;
-	private configId: string;
+	private configId: string | undefined;
 	private graphApiVersion: string;
 
 	private provider: AuthMethods = AuthMethods.FACEBOOK;
