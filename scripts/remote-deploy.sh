@@ -56,7 +56,8 @@ NODE_ENV=production node ./dist/migrate.js
 
 export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
 pm2 startup systemd -u ec2-user --hp /home/ec2-user >/dev/null 2>&1 || true
-pm2 startOrReload ecosystem.config.cjs || pm2 start ecosystem.config.cjs
+pm2 delete hive-backend hive-workers 2>/dev/null || true
+pm2 start ecosystem.config.cjs
 pm2 save >/dev/null 2>&1 || true
 sleep 3
 pm2 status
