@@ -65,6 +65,11 @@ runuser -u ec2-user -- bash -lc "cd /home/ec2-user/hive-backend && npx puppeteer
 
 export PATH="$PATH:$(npm config get prefix 2>/dev/null)/bin"
 pm2 startup systemd -u ec2-user --hp /home/ec2-user >/dev/null 2>&1 || true
+# @info - rsync -a copies the temp dir's ROOT ownership over the app dir,
+# which is why logs/errors EACCES kept resurrecting after deploys: the
+# ec2-user processes cannot create log files. chown the whole app dir
+# (npm ci above also runs as root).
+chown -R ec2-user:ec2-user /home/ec2-user/hive-backend
 # @info - pm2 MUST run as ec2-user (not root): the systemd unit targets
 # ec2-user, so root-owned processes would vanish on reboot and ec2-user's
 # `pm2 list` would show an empty daemon while root runs the apps.
