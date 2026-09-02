@@ -25,7 +25,8 @@ export class EmailQueueService extends BaseQueueService<
 		super({
 			queueName: QueueNames.EMAIL,
 			alias: "EmailQueue",
-      args: { priority: 1 },
+      // no priority - prioritized jobs were never drained to wait in prod
+      args: {},
 
 		});
 	}

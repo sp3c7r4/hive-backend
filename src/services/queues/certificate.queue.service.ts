@@ -18,7 +18,7 @@ export class CertificateQueueService extends BaseQueueService<CertificateJobData
 		super({
 			queueName: QueueNames.CERTIFICATE,
 			alias: "Certificate",
-			args: { priority: 2 },
+			args: {}, // no priority - prioritized jobs stuck in prod
 		});
 	}
 

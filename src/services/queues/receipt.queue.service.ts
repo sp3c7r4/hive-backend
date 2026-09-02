@@ -12,7 +12,7 @@ export class ReceiptQueueService extends BaseQueueService<ReceiptJobData> {
 		super({
 			queueName: QueueNames.RECEIPT,
 			alias: "ReceiptQueue",
-			args: { priority: 1 },
+			args: {}, // no priority - prioritized jobs stuck in prod
 		});
 	}
 
