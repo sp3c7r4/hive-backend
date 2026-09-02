@@ -18,7 +18,10 @@ export class EmailService {
 
 	private log = logger;
 
-	private sender: string = `no-reply@${this.domain}`;
+	private sender: { name: string; address: string } = {
+		name: "Hive",
+		address: `no-reply@${this.domain}`,
+	};
 
 	static getInstance(): EmailService {
 		if (!this.instance) {
@@ -67,7 +70,7 @@ export class EmailService {
 
 		const params: Record<string, any> = {
 			from: options.identifier
-				? `${options.identifier}@${this.domain}`
+				? { name: "Hive", address: `${options.identifier}@${this.domain}` }
 				: this.sender,
 			to: options.message.to,
 			subject: options.message.subject,
