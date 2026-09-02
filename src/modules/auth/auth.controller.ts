@@ -89,6 +89,15 @@ export class AuthController {
 		});
 	};
 
+	resendOtp = async (c: Context) => {
+		const data = c.get("authData");
+		const result = await this.authService.resendOtp(data);
+		return sendSuccessResponse(c, {
+			message: "A new code has been sent.",
+			...result,
+		});
+	};
+
 	forgotPassword = async (c: Context) => {
 		const { email } = await c.req.json();
 		const clientMetadata = c.get("clientMetadata");

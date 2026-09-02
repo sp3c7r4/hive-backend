@@ -235,6 +235,41 @@ export class AuthService {
 		}
 	};
 
+	/** @info - Real resend: fresh OTP + fresh Redis entries + a new email job.
+	 * The old OTP is invalidated by swapping the otpId the auth cache points at. */
+	resendOtp = async (data: IAuthData) => {
+		const otpId = generateOTPId();
+		const otp = generateOTP();
+
+		await Promise.all([
+			this.cacheService.set(data.authId, { ...data, otpId }, TTL.IN_30_MINUTES),
+			this.cacheService.set(
+				otpId,
+				{ otp: this.encryptionService.encrypt(otp) },
+				TTL.IN_30_MINUTES,
+			),
+		]);
+
+		this.emailQueueService.add(EmailJobNames.VERIFY_OTP as any, {
+			message: {
+				to: data.email!,
+				subject: "Verify your email",
+			},
+			template: "verify-otp" as any,
+			locals: {
+				otp,
+				name: data.firstName ?? "",
+				expiryMinutes: TTL.IN_30_MINUTES / 60,
+				timestamp: new Date().toISOString(),
+				ipAddress: "resend",
+				location: "Unknown Location",
+				device: "web",
+			},
+		});
+
+		return { token: this.jwtService.generateToken(data.authId) };
+	};
+
 	verifyEmail = async (data: IAuthData, otpCode: string) => {
 		const { authId, otpId, action, ...rest } = data;
 

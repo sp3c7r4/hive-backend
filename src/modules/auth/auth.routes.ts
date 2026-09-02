@@ -64,6 +64,8 @@ authRouter.post(
 	authController.verifyEmail,
 );
 
+authRouter.post("/resend-otp", authController.resendOtp);
+
 authRouter.post(
 	"/reset-password",
 	zodEngine.validate.body(resetPasswordSchema),
