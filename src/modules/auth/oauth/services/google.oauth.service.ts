@@ -3,7 +3,12 @@ import { type GoogleApis, google } from "googleapis";
 import { RelationalRepository } from "@/bases";
 import { config } from "@/config";
 import { TTL } from "@/constants";
-import { AuthMethods, EmailJobNames, EmailTemplates, UserRole } from "@/enums";
+import {
+	AuthMethods,
+	EmailJobNames,
+	EmailTemplates,
+	type UserRole,
+} from "@/enums";
 import {
 	decodeBase64,
 	generateAuthenticatedData,
@@ -82,19 +87,27 @@ export class GoogleOAuthService {
 		return {
 			accessToken: tokens.access_token,
 			refreshToken: tokens.refresh_token,
-			expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : undefined,
+			expiryDate: tokens.expiry_date
+				? new Date(tokens.expiry_date).toISOString()
+				: undefined,
 			scope: tokens.scope,
 			tokenType: tokens.token_type,
 			idToken: tokens.id_token,
 		};
 	}
 
-	private async finaliseSession(userData: Record<string, any>, userType: string) {
+	private async finaliseSession(
+		userData: Record<string, any>,
+		userType: string,
+	) {
 		const authenticatedUser = generateAuthenticatedData(userData);
 		const authId = generateAuthId(userData.id.toString());
 		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
-		return { user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"), gen_tokens };
+		return {
+			user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"),
+			gen_tokens,
+		};
 	}
 
 	getUserInfoFromAccessToken = async (accessToken: string) => {
@@ -156,14 +169,42 @@ export class GoogleOAuthService {
 				eq(users.email, userInfo.email),
 			);
 			if (existingUser) {
-				return oauthResponsePage({
-					title: "Account Not Linked",
-					message: `An account with this email already exists. Please login using your email and password, then link your Google account from settings.`,
-					status: "error",
-					payload: { type: "oauth_error", code: "ACCOUNT_NOT_LINKED" },
-				});
-			}
+				/* @info - Origin-locked: a password/OTP account can never sign in via OAuth */
+				const hasOAuth = await credentialRepo.findOne(
+					eq(userCredentials.userId, existingUser.id),
+				);
+				if (!hasOAuth) {
+					return oauthResponsePage({
+						title: "Sign in with Email",
+						message:
+							"This account was created with email and password. Please sign in using your email.",
+						status: "error",
+						payload: { type: "oauth_error", code: "WRONG_LOGIN_METHOD" },
+					});
+				}
 
+				/* OAuth account: upsert this provider's credential and log in */
+				const existingProvider = await credentialRepo.findOne(
+					and(
+						eq(userCredentials.provider, this.provider),
+						eq(userCredentials.userId, existingUser.id),
+					)!,
+				);
+				if (existingProvider) {
+					await credentialRepo.update(existingProvider.id, {
+						tokens: this.buildGoogleCredentials(tokens),
+					});
+				} else {
+					await credentialRepo.create({
+						userId: existingUser.id,
+						role: userType,
+						provider: this.provider,
+						providerAccountId: userInfo.id!,
+						tokens: this.buildGoogleCredentials(tokens),
+					} as any);
+				}
+				user = existingUser;
+			}
 			try {
 				user = await withTransaction(async (tx) => {
 					const uRepo = new RelationalRepository(users, tx);
@@ -197,10 +238,7 @@ export class GoogleOAuthService {
 				});
 				isNewUser = true;
 			} catch (e) {
-				this.log.error(
-					"Error creating user during Google OAuth callback",
-					e,
-				);
+				this.log.error("Error creating user during Google OAuth callback", e);
 				return oauthResponsePage({
 					title: "User Creation Error",
 					message:
@@ -220,13 +258,16 @@ export class GoogleOAuthService {
 			}
 		}
 
-		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user, userType);
+		const { user: sessionUser, gen_tokens } = await this.finaliseSession(
+			user,
+			userType,
+		);
 
 		if (isNewUser) {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {
 				message: {
 					to: sessionUser.email,
-					subject: "Welcome to Bloom Community! 🌸",
+					subject: "Welcome to Hive Community! 🌸",
 				},
 				locals: {
 					name: sessionUser.firstName,
@@ -237,7 +278,7 @@ export class GoogleOAuthService {
 		}
 
 		return oauthResponsePage({
-			title: isNewUser ? "Welcome to Bloom 😊" : "Welcome Back",
+			title: isNewUser ? "Welcome to Hive 😊" : "Welcome Back",
 			message: `Signed in as ${sessionUser.email}`,
 			status: "success",
 			autoClose: true,

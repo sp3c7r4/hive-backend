@@ -17,6 +17,14 @@ import {
 	withPresignedUrl,
 } from "@/helpers";
 import type { IAuthData } from "@/interfaces";
+import { userCredentials } from "@/models/user.credential.model";
+import { instructorProfiles } from "@/modules/instructor/instructor.model";
+import { parentProfiles } from "@/modules/parent/parent.model";
+import { studentProfiles } from "@/modules/student/student.model";
+import { users } from "@/modules/user/user.model";
+import { UserRepository } from "@/modules/user/user.repository";
+import { user_roles } from "@/modules/user/user-role.model";
+import { UserRoleRepository } from "@/modules/user/user-role.repository";
 import {
 	CacheService,
 	EmailQueueService,
@@ -24,13 +32,6 @@ import {
 	JwtService,
 } from "@/services";
 import type { ILoginDataWithMetadata, ISignupDataWithMetadata } from "@/shared";
-import { users } from "@/modules/user/user.model";
-import { UserRepository } from "@/modules/user/user.repository";
-import { user_roles } from "@/modules/user/user-role.model";
-import { UserRoleRepository } from "@/modules/user/user-role.repository";
-import { instructorProfiles } from "@/modules/instructor/instructor.model";
-import { studentProfiles } from "@/modules/student/student.model";
-import { parentProfiles } from "@/modules/parent/parent.model";
 
 export class AuthService {
 	private static instance: AuthService;
@@ -107,6 +108,19 @@ export class AuthService {
 		return { token };
 	};
 
+	/**
+	 * @info - Origin-locked accounts: an OAuth-created user must sign in with
+	 * the provider, never email/password or OTP. Names the provider in the
+	 * error so the user knows which button to press.
+	 */
+	private async oauthProviderName(userId: number): Promise<string | null> {
+		const cred = await new RelationalRepository(userCredentials).findOne(
+			eq(userCredentials.userId, userId),
+		);
+		if (!cred) return null;
+		return cred.provider === "facebook" ? "Facebook" : "Google";
+	}
+
 	login = async (data: ILoginDataWithMetadata) => {
 		const { email, password } = data;
 
@@ -118,10 +132,14 @@ export class AuthService {
 		if (userAny.suspendedAt)
 			throwUnauthorizedError("This account is suspended. Contact support.");
 
-		if (!userAny.passwordHash)
+		if (!userAny.passwordHash) {
+			const provider = await this.oauthProviderName(user!.id);
 			throwUnauthorizedError(
-				"This account uses OAuth. Please sign in with Google or Facebook.",
+				provider
+					? `This account uses ${provider} to sign in. Please continue with that button instead.`
+					: "This account uses OAuth. Please sign in with Google or Facebook.",
 			);
+		}
 
 		const isPasswordValid = await this.encryptionService.compare(
 			password,
@@ -137,7 +155,12 @@ export class AuthService {
 		);
 		const primaryRole = userRoles[0]?.role ?? "";
 
-		const { passwordHash: _, deleted_at: __, hash: ___, ...sanitized } = userAny;
+		const {
+			passwordHash: _,
+			deleted_at: __,
+			hash: ___,
+			...sanitized
+		} = userAny;
 
 		await this.cacheService.set(
 			authId,
@@ -154,10 +177,13 @@ export class AuthService {
 
 		return {
 			message: "Login successful",
-			user: await withPresignedUrl<any>({
-				...authenticatedUser,
-				roles: userRoles.map((r) => r.role),
-			}, "avatarUrl"),
+			user: await withPresignedUrl<any>(
+				{
+					...authenticatedUser,
+					roles: userRoles.map((r) => r.role),
+				},
+				"avatarUrl",
+			),
 			...tokens,
 		};
 	};
@@ -291,9 +317,8 @@ export class AuthService {
 			const decryptedPassword = this.encryptionService.decrypt(
 				(rest as any).password!,
 			);
-			const hashedPassword = await this.encryptionService.hash(
-				decryptedPassword,
-			);
+			const hashedPassword =
+				await this.encryptionService.hash(decryptedPassword);
 
 			/* Create user + assign their chosen role */
 			user = await this.userRepo.create({
@@ -312,17 +337,28 @@ export class AuthService {
 
 			/* Seed the profile row for the chosen role */
 			if (role === "instructor") {
-				await new RelationalRepository(instructorProfiles).create({ userId: user.id } as any);
+				await new RelationalRepository(instructorProfiles).create({
+					userId: user.id,
+				} as any);
 			} else if (role === "student") {
-				await new RelationalRepository(studentProfiles).create({ userId: user.id } as any);
+				await new RelationalRepository(studentProfiles).create({
+					userId: user.id,
+				} as any);
 			} else if (role === "parent") {
-				await new RelationalRepository(parentProfiles).create({ userId: user.id } as any);
+				await new RelationalRepository(parentProfiles).create({
+					userId: user.id,
+				} as any);
 			}
 		} else if (action === JwtAction.AUTHENTICATE) {
-			user = await this.userRepo.findOne(
-				eq(users.email, (rest as any).email),
-			);
+			user = await this.userRepo.findOne(eq(users.email, (rest as any).email));
 			if (user) {
+				/* @info - OTP login on an OAuth-created account is blocked (origin-locked) */
+				const provider = await this.oauthProviderName(user.id);
+				if (provider) {
+					throwBadRequestError(
+						`This account uses ${provider} to sign in. Please continue with that button instead.`,
+					);
+				}
 				user = await this.userRepo.update(user.id, {
 					lastLoginAt: new Date(),
 				});
@@ -381,7 +417,10 @@ export class AuthService {
 			TTL.IN_30_MINUTES,
 		);
 
-		const tokens = await generateAuthTokens(newAuthId, (rest as any).role ?? "");
+		const tokens = await generateAuthTokens(
+			newAuthId,
+			(rest as any).role ?? "",
+		);
 
 		return {
 			user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"),
@@ -466,7 +505,9 @@ export class AuthService {
 
 		/* Create profile row for the role */
 		if (role === "instructor") {
-			await new RelationalRepository(instructorProfiles).create({ userId } as any);
+			await new RelationalRepository(instructorProfiles).create({
+				userId,
+			} as any);
 		} else if (role === "student") {
 			await new RelationalRepository(studentProfiles).create({ userId } as any);
 		} else if (role === "parent") {
@@ -527,9 +568,12 @@ export class AuthService {
 
 		const { passwordHash: _, deleted_at: __, ...sanitized } = user! as any;
 
-		return withPresignedUrl<any>({
-			...sanitized,
-			roles: roles.map((r) => r.role),
-		}, "avatarUrl");
+		return withPresignedUrl<any>(
+			{
+				...sanitized,
+				roles: roles.map((r) => r.role),
+			},
+			"avatarUrl",
+		);
 	};
 }

@@ -3,7 +3,12 @@ import { and, eq } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { config } from "@/config";
 import { TTL } from "@/constants";
-import { AuthMethods, EmailJobNames, EmailTemplates, UserRole } from "@/enums";
+import {
+	AuthMethods,
+	EmailJobNames,
+	EmailTemplates,
+	type UserRole,
+} from "@/enums";
 import {
 	decodeBase64,
 	generateAuthenticatedData,
@@ -82,12 +87,18 @@ export class FacebookOAuthService {
 		return { tokens, userInfo };
 	}
 
-	private async finaliseSession(userData: Record<string, any>, userType: string) {
+	private async finaliseSession(
+		userData: Record<string, any>,
+		userType: string,
+	) {
 		const authenticatedUser = generateAuthenticatedData(userData);
 		const authId = generateAuthId(userData.id.toString());
 		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
-		return { user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"), gen_tokens };
+		return {
+			user: await withPresignedUrl<any>(authenticatedUser, "avatarUrl"),
+			gen_tokens,
+		};
 	}
 
 	getAccessToken = async (code: string) => {
@@ -202,12 +213,41 @@ export class FacebookOAuthService {
 				eq(users.email, userInfo.email),
 			);
 			if (existingUser) {
-				return oauthResponsePage({
-					title: "Account Not Linked",
-					message: `An account with this email already exists. Please login using your email and password, then link your Facebook account from settings.`,
-					status: "error",
-					payload: { type: "oauth_error", code: "ACCOUNT_NOT_LINKED" },
-				});
+				/* @info - Origin-locked: a password/OTP account can never sign in via OAuth */
+				const hasOAuth = await credentialRepo.findOne(
+					eq(userCredentials.userId, existingUser.id),
+				);
+				if (!hasOAuth) {
+					return oauthResponsePage({
+						title: "Sign in with Email",
+						message:
+							"This account was created with email and password. Please sign in using your email.",
+						status: "error",
+						payload: { type: "oauth_error", code: "WRONG_LOGIN_METHOD" },
+					});
+				}
+
+				/* OAuth account: upsert this provider's credential and log in */
+				const existingProvider = await credentialRepo.findOne(
+					and(
+						eq(userCredentials.provider, this.provider),
+						eq(userCredentials.userId, existingUser.id),
+					)!,
+				);
+				if (existingProvider) {
+					await credentialRepo.update(existingProvider.id, {
+						tokens: this.buildFacebookCredentials(tokens),
+					});
+				} else {
+					await credentialRepo.create({
+						userId: existingUser.id,
+						role: userType,
+						provider: this.provider,
+						providerAccountId: userInfo.id,
+						tokens: this.buildFacebookCredentials(tokens),
+					} as any);
+				}
+				user = existingUser;
 			}
 
 			try {
@@ -243,10 +283,7 @@ export class FacebookOAuthService {
 				});
 				isNewUser = true;
 			} catch (e) {
-				this.log.error(
-					"Error creating user during Facebook OAuth callback",
-					e,
-				);
+				this.log.error("Error creating user during Facebook OAuth callback", e);
 				return oauthResponsePage({
 					title: "User Creation Error",
 					message:
@@ -266,7 +303,10 @@ export class FacebookOAuthService {
 			}
 		}
 
-		const { user: sessionUser, gen_tokens } = await this.finaliseSession(user, userType);
+		const { user: sessionUser, gen_tokens } = await this.finaliseSession(
+			user,
+			userType,
+		);
 
 		if (isNewUser) {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {
