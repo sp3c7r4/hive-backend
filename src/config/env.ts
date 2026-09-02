@@ -47,6 +47,7 @@ const EnvSchema = z.object({
 	AWS_S3_ENDPOINT: z.string().optional(),
 	/* @info - Email via Resend (SMTP). No SES policy needed. */
 	RESEND_API_KEY: z.string(),
+	RESEND_DOMAIN: z.string(),
 
 	FACEBOOK_CLIENT_ID: z.string(),
 	FACEBOOK_CLIENT_SECRET: z.string(),

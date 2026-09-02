@@ -12,7 +12,9 @@ import nodemailer from "nodemailer";
 export class EmailService {
 	private static instance: EmailService;
 
-	private readonly domain: string = config.mail.domain;
+	/* @info - From-domain must be verified in Resend (RESEND_DOMAIN), not the
+	 * root MAIL_DOMAIN. Unverified domains get SMTP 550. */
+	private readonly domain: string = config.aws.resend.domain;
 
 	private readonly transporter: nodemailer.Transporter;
 

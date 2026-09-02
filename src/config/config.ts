@@ -52,6 +52,7 @@ export const config = {
 		s3Endpoint: env.AWS_S3_ENDPOINT,
 		resend: {
 			apiKey: env.RESEND_API_KEY,
+			domain: env.RESEND_DOMAIN,
 		},
 	},
 
