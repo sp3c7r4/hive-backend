@@ -3,7 +3,7 @@ import { RelationalRepository } from "@/bases/repositories";
 import { config } from "@/config";
 import { TTL } from "@/constants";
 import { EmailJobNames } from "@/enums";
-import { JwtAction } from "@/enums/auth/auth.enums";
+import { AuthLoginTypes, JwtAction } from "@/enums/auth/auth.enums";
 import {
 	generateAuthenticatedData,
 	generateAuthId,
@@ -122,7 +122,7 @@ export class AuthService {
 	}
 
 	login = async (data: ILoginDataWithMetadata) => {
-		const { email, password } = data;
+		const { email, password, loginType } = data;
 
 		const user = await this.userRepo.findOne(eq(users.email, email));
 		if (!user) throwNotFoundError("Invalid email or password");
@@ -131,6 +131,58 @@ export class AuthService {
 		if (userAny.deletedAt) throwNotFoundError("Invalid email or password");
 		if (userAny.suspendedAt)
 			throwUnauthorizedError("This account is suspended. Contact support.");
+
+		/* @info - Passwordless OTP login: email a code, verify via /verify-email (AUTHENTICATE) */
+		if (loginType === AuthLoginTypes.OTP) {
+			const provider = await this.oauthProviderName(user!.id);
+			if (provider) {
+				throwUnauthorizedError(
+					`This account uses ${provider} to sign in. Please continue with that button instead.`,
+				);
+			}
+			if (!userAny.passwordHash)
+				throwNotFoundError("Invalid email or password");
+
+			const authId = generateAuthId(user!.id.toString());
+			const otpId = generateOTPId();
+			const otp = generateOTP();
+
+			const cacheData = {
+				authId,
+				otpId,
+				firstName: userAny.firstName,
+				lastName: userAny.lastName,
+				email: userAny.email,
+				action: JwtAction.AUTHENTICATE,
+				userType: "student",
+			};
+
+			await Promise.all([
+				this.cacheService.set(authId, cacheData, TTL.IN_30_MINUTES),
+				this.cacheService.set(
+					otpId,
+					{ otp: this.encryptionService.encrypt(otp) },
+					TTL.IN_30_MINUTES,
+				),
+			]);
+
+			this.emailQueueService.add(EmailJobNames.VERIFY_OTP as any, {
+				message: { to: email, subject: "Your Hive login code" },
+				template: "verify-otp" as any,
+				locals: {
+					otp,
+					name: userAny.firstName,
+					expiryMinutes: TTL.IN_30_MINUTES / 60,
+					timestamp: new Date().toISOString(),
+					ipAddress: data.ipAddress,
+					location: data.location,
+					device: data.userAgent,
+				},
+			});
+
+			const token = this.jwtService.generateToken(authId);
+			return { message: "Login code sent", token };
+		}
 
 		if (!userAny.passwordHash) {
 			const provider = await this.oauthProviderName(user!.id);

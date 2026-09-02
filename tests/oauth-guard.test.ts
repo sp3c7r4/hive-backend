@@ -69,6 +69,25 @@ describe("Origin-locked login guards", () => {
 		).rejects.toThrow(/uses Google to sign in/);
 	});
 
+	it("OTP login request on an OAuth account throws with the provider name", async () => {
+		await expect(
+			service.login({
+				email: oauthEmail,
+				password: undefined,
+				loginType: "otp",
+			} as any),
+		).rejects.toThrow(/uses Google to sign in/);
+	});
+
+	it("OTP login request on a password account sends a code", async () => {
+		const res = await service.login({
+			email: passwordEmail,
+			password: undefined,
+			loginType: "otp",
+		} as any);
+		expect((res as any).token).toBeTruthy();
+	});
+
 	it("OTP completion (AUTHENTICATE) on an OAuth account is blocked", async () => {
 		const otpId = generateOTPId();
 		const otp = "000000";

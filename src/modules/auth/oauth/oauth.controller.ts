@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { AuthMethods, UserRole } from "@/enums";
+import { AuthMethods, type UserRole } from "@/enums";
 import { sendSuccessResponse } from "@/helpers";
 import { FacebookOAuthService } from "./services/facebook.oauth.service";
 import { GoogleOAuthService } from "./services/google.oauth.service";
