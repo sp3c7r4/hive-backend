@@ -11,6 +11,7 @@ import { BrowserEngine } from "@/services/engine/browser.engine";
 import { CacheService } from "@/services/cache.service";
 import { EmailWorkerService } from "@/services/workers/email.worker.service";
 import { CertificateWorkerService } from "@/services/workers/certificate.worker.service";
+import { LessonChunkWorkerService } from "@/services/workers/lesson-chunk.worker.service";
 
 // Trigger Redis + Postgres connections (the certificate worker queries the DB)
 CacheService.getInstance();
@@ -23,6 +24,7 @@ connectPostgresDB(async () => {
 	// ── Register workers ──────────────────────────────────
 	EmailWorkerService.getInstance();
 	CertificateWorkerService.getInstance();
+	LessonChunkWorkerService.getInstance();
 
 	console.log("[Workers] All workers registered and listening.");
 });

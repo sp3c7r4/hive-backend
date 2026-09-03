@@ -338,7 +338,15 @@ export class CourseService {
 
 	createLesson = async (moduleId: number, data: NewLesson) => {
 		this.assertDriveLink(data.type, data.driveUrl);
-		return this.lessonsRepo.create({ ...data, moduleId } as any);
+		const lesson = await this.lessonsRepo.create({ ...data, moduleId } as any);
+		/* @info - Publish immediately? Index it for the AI tutor */
+		if (lesson.status === "published") {
+			const { enqueueLessonForIndexing } = await import(
+				"@/services/queues/lesson-chunk.queue.service"
+			);
+			await enqueueLessonForIndexing(lesson.id);
+		}
+		return lesson;
 	};
 
 	listLessons = async (moduleId: number) => {
@@ -357,6 +365,15 @@ export class CourseService {
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
 		this.assertDriveLink(data.type ?? existing!.type, data.driveUrl ?? existing!.driveUrl);
 		const lesson = await this.lessonsRepo.update(id, data as any);
+		/* @info - A published lesson that was edited gets re-embedded so the
+		 * tutor never serves stale content */
+		const merged = { ...existing, ...data };
+		if (lesson && merged.status === "published") {
+			const { enqueueLessonForIndexing } = await import(
+				"@/services/queues/lesson-chunk.queue.service"
+			);
+			await enqueueLessonForIndexing(id);
+		}
 		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
 	};
 

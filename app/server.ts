@@ -12,6 +12,10 @@ import { healthCheck } from "@/helpers";
 import { errorHandler, RequestLogger, routeNotFound } from "@/middlewares";
 import { router } from "@/routes";
 import { EmailQueueService } from "@/services";
+import { LessonChunkQueueService } from "@/services/queues/lesson-chunk.queue.service";
+import { CertificateQueueService } from "@/services/queues/certificate.queue.service";
+import { ReceiptQueueService } from "@/services/queues/receipt.queue.service";
+import { SubscriptionExpiryQueueService } from "@/services/queues/subscription-expiry.queue.service";
 import { messagingWsHandler } from "@/modules/messaging/messaging.ws";
 import { logger } from "@/utils";
 
@@ -58,6 +62,10 @@ bullMQAdapter.setBasePath("/queue");
 createBullBoard({
 	queues: [
 		new BullMQAdapter(EmailQueueService.getInstance().getQueue()),
+		new BullMQAdapter(LessonChunkQueueService.getInstance().getQueue()),
+		new BullMQAdapter(CertificateQueueService.getInstance().getQueue()),
+		new BullMQAdapter(ReceiptQueueService.getInstance().getQueue()),
+		new BullMQAdapter(SubscriptionExpiryQueueService.getInstance().getQueue()),
 	],
 	serverAdapter: bullMQAdapter,
 	options: {

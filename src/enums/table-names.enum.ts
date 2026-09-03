@@ -37,4 +37,6 @@ export enum TableNames {
 	MESSAGES = "messages",
 	NOTIFICATIONS = "notifications",
 	USER_CREDENTIALS = "user_credentials",
+	LESSON_CHUNKS = "lesson_chunks",
+	AI_TUTOR_LOGS = "ai_tutor_logs",
 }

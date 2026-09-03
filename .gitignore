@@ -47,3 +47,4 @@ mint_tokens.tmp.js
 
 # any env file, anywhere
 .env
+local_cache/

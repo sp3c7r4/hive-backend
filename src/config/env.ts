@@ -66,6 +66,10 @@ const EnvSchema = z.object({
 	PAYSTACK_DEV_RESOLVE_FALLBACK: z.string().optional(),
 
 	OPENAI_API_KEY: z.string(),
+	DEEPSEEK_API_KEY: z.string().optional(),
+
+	/** @info - Min cosine similarity before the tutor answers (else fallback) */
+	AI_TUTOR_SIM_THRESHOLD: z.coerce.number().optional(),
 
 	ZEUS: z.string(),
 	ATHENA: z.string(),

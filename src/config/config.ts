@@ -99,6 +99,10 @@ export const config = {
 			ZEUS: env.ZEUS,
 			ATHENA: env.ATHENA,
 		},
+		/** @info - Course tutor: DeepSeek + retrieval threshold */
+		deepseekApiKey: env.DEEPSEEK_API_KEY,
+		deepseekModel: "deepseek-v4-flash",
+		simThreshold: env.AI_TUTOR_SIM_THRESHOLD ?? 0.35,
 	},
 
 	env: env.NODE_ENV,
