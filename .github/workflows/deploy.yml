@@ -10,6 +10,13 @@
 # ------------------------------------------------------------------
 name: Deploy Hive Backend
 
+# @info - Only one deploy at a time: rapid pushes used to race on the box
+# (two npm ci / tar extractions on the same instance -> ENOTEMPTY, tar
+# errors). Later runs wait for the running deploy to finish.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
