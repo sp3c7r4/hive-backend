@@ -21,5 +21,6 @@ export enum EmailJobNames {
 	ENROLLMENT_CONFIRMED = "enrollment-confirmed",
 	CERTIFICATE_ISSUED = "certificate-issued",
 	COMMUNITY_INVITE = "community-invite",
+	MEMBERSHIP_APPROVED = "membership-approved",
 	ASSIGNMENT_GRADED = "assignment-graded",
 }

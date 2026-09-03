@@ -329,6 +329,30 @@ export class CommunityMemberService {
 			() => {},
 		);
 
+		/* @info - Tell the approved student their request went through */
+		const [approvedUser] = await db
+			.select({ email: users.email, firstName: users.firstName })
+			.from(users)
+			.where(eq(users.id, targetUserId))
+			.limit(1);
+		if (approvedUser?.email) {
+			this.emailQueue.add(EmailJobNames.MEMBERSHIP_APPROVED as any, {
+				message: {
+					to: approvedUser.email,
+					subject: `Your request to join ${(community as any).name} was approved`,
+				},
+				template: "membership-approved" as any,
+				locals: {
+					memberName: approvedUser.firstName ?? "",
+					communityName: (community as any).name,
+					communityLink: `${
+						process.env.APP_URL ||
+						`https://${config.server.serverDomain}`
+					}/dashboard/explore/communities/${(community as any).slug}`,
+				},
+			});
+		}
+
 		return updated;
 	};
 
