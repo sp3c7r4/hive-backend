@@ -172,7 +172,7 @@ export class SessionRegistryService {
 					DEMO_SESSIONS[
 						[...key].reduce((a, ch) => a + ch.charCodeAt(0), 0) %
 							DEMO_SESSIONS.length
-					];
+					] ?? DEMO_SESSIONS[0]!;
 				meta = {
 					userAgent: demo.ua,
 					ipAddress: demo.ip,

@@ -104,7 +104,7 @@ export class UserController {
 
 	revokeSession = async (c: Context) => {
 		const authData = c.get("authData");
-		const refreshId = decodeURIComponent(c.req.param("refreshId"));
+		const refreshId = decodeURIComponent(c.req.param("refreshId") ?? "");
 		const revoked = await SessionRegistryService.getInstance().revoke(
 			Number(authData.id),
 			refreshId,

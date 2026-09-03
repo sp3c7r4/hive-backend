@@ -115,6 +115,7 @@ export class AiTutorService {
 			)
 			.limit(1);
 		if (!enrollment) throwNotFoundError("You are not enrolled in this course.");
+		const enrollmentId = enrollment!.id;
 
 		/* @info - Scope = every published lesson in the course (ask about
 		 * anything, taken or not; the content is already visible to enrolled
@@ -136,7 +137,7 @@ export class AiTutorService {
 			.from(lessonProgress)
 			.where(
 				and(
-					eq(lessonProgress.enrollmentId, enrollment.id),
+					eq(lessonProgress.enrollmentId, enrollmentId),
 					eq(lessonProgress.completed, true),
 				),
 			);

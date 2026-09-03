@@ -161,7 +161,7 @@ export class QuizService {
 	createQuestion = async (data: NewQuizQuestion) => {
 		const question = await this.questions.create(data as any);
 		/* @info - Quiz content feeds the tutor; re-index the lesson */
-		await this.reindexLesson(question.lessonId);
+		await this.reindexLesson(question!.lessonId);
 		return question;
 	};
 
@@ -172,14 +172,14 @@ export class QuizService {
 
 	updateQuestion = async (id: number, data: Partial<NewQuizQuestion>) => {
 		const question = await this.questions.update(id, data as any);
-		if (question) await this.reindexLesson(question.lessonId);
+		if (question) await this.reindexLesson(question!.lessonId);
 		return question ?? throwNotFoundError(QuizMessages.NOT_FOUND);
 	};
 
 	deleteQuestion = async (id: number): Promise<void> => {
 		const question = await this.questions.delete(id);
 		if (!question) throwNotFoundError(QuizMessages.NOT_FOUND);
-		await this.reindexLesson(question.lessonId);
+		await this.reindexLesson(question!.lessonId);
 		this.log.info(`Quiz question ${id} deleted`);
 	};
 

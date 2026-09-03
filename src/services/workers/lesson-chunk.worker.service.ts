@@ -22,7 +22,7 @@ import type { LessonChunkJobData } from "@/services/queues/lesson-chunk.queue.se
 
 export class LessonChunkWorkerService extends BaseWorkerService<LessonChunkJobData> {
 	private static instance: LessonChunkWorkerService;
-	private readonly log = logger;
+	private readonly workerLog = logger;
 
 	static getInstance(): LessonChunkWorkerService {
 		if (!this.instance) this.instance = new LessonChunkWorkerService();
@@ -37,7 +37,7 @@ export class LessonChunkWorkerService extends BaseWorkerService<LessonChunkJobDa
 		});
 	}
 
-	protected async process(job: Job<LessonChunkJobData>): Promise<void> {
+	protected override async process(job: Job<LessonChunkJobData>): Promise<void> {
 		const { lessonId, courseId } = job.data;
 		const db = getDb();
 
@@ -45,11 +45,11 @@ export class LessonChunkWorkerService extends BaseWorkerService<LessonChunkJobDa
 			lessonId,
 		);
 		if (!lesson) {
-			this.log.warn(`[LessonChunk] Lesson ${lessonId} not found, skipping`);
+			this.workerLog.warn(`[LessonChunk] Lesson ${lessonId} not found, skipping`);
 			return;
 		}
 		if (lesson.status !== "published") {
-			this.log.info(`[LessonChunk] Lesson ${lessonId} not published, skipping`);
+			this.workerLog.info(`[LessonChunk] Lesson ${lessonId} not published, skipping`);
 			return;
 		}
 
@@ -60,7 +60,7 @@ export class LessonChunkWorkerService extends BaseWorkerService<LessonChunkJobDa
 		).findMany(eq(quizQuestions.lessonId, lessonId));
 		const text = await extractLessonText(lesson, questions);
 		if (!text) {
-			this.log.info(
+			this.workerLog.info(
 				`[LessonChunk] Lesson ${lessonId} has no groundable text, skipping`,
 			);
 			return;
@@ -81,16 +81,17 @@ export class LessonChunkWorkerService extends BaseWorkerService<LessonChunkJobDa
 				sql`DELETE FROM lesson_chunks WHERE lesson_id = ${lessonId}`,
 			);
 			for (let i = 0; i < chunks.length; i++) {
+				const vector = vectors[i]!;
 				await tx.execute(
 					sql`INSERT INTO lesson_chunks
 						(course_id, lesson_id, lesson_type, content, embedding)
 						VALUES (${courseId}, ${lessonId}, ${lesson.type}, ${chunks[i]},
-							${EmbeddingService.toVectorLiteral(vectors[i])}::vector)`,
+							${EmbeddingService.toVectorLiteral(vector)}::vector)`,
 				);
 			}
 		});
 
-		this.log.info(
+		this.workerLog.info(
 			`[LessonChunk] Lesson ${lessonId} indexed: ${chunks.length} chunks (${JobNames.EMBED_LESSON})`,
 		);
 	}
