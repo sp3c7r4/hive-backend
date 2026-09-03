@@ -3,6 +3,7 @@ import { sendSuccessResponse } from "@/helpers";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { UserService } from "@/modules/user/user.service";
 import { AdminDashboardService } from "./admin.service";
+import { CertificateSettingsService } from "./certificate-settings.service";
 
 export class AdminController {
 	private static instance: AdminController;
@@ -13,10 +14,12 @@ export class AdminController {
 	}
 
 	private service: AdminDashboardService;
+	private certSettings: CertificateSettingsService;
 	private userService: UserService;
 
 	private constructor() {
 		this.service = AdminDashboardService.getInstance();
+		this.certSettings = CertificateSettingsService.getInstance();
 		this.userService = UserService.getInstance();
 	}
 
@@ -64,5 +67,19 @@ export class AdminController {
 	dashboard = async (c: Context) => {
 		const data = await this.service.dashboard();
 		return sendSuccessResponse(c, { message: "Admin dashboard data fetched", data });
+	};
+
+	getCertificateSettings = async (c: Context) => {
+		const data = await this.certSettings.get();
+		return sendSuccessResponse(c, { data });
+	};
+
+	updateCertificateSettings = async (c: Context) => {
+		const body = await c.req.json();
+		const data = await this.certSettings.update({
+			directorName: body.directorName,
+			directorSignature: body.directorSignature,
+		});
+		return sendSuccessResponse(c, { data });
 	};
 }

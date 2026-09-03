@@ -6,10 +6,11 @@ import { logger } from "@/utils";
 import { getDb } from "@/db/postgres.db";
 import { config } from "@/config";
 import { users } from "@/modules/user/user.model";
+import { instructorProfiles } from "@/modules/instructor/instructor.model";
 import { courses } from "@/modules/courses/course.model";
-import { communities } from "@/modules/communities/community.model";
 import { certificates } from "@/modules/certificates/certificate.model";
 import { CertificateService } from "@/modules/certificates/certificate.service";
+import { CertificateSettingsService } from "@/modules/admin/certificate-settings.service";
 import { NotificationService } from "@/modules/notifications";
 import { NotificationType } from "@/enums";
 import { CertificateGenerator, type CertificateTemplateData } from "../certificate.generator.service";
@@ -71,20 +72,17 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 			.limit(1);
 		if (!user || !course) throw new Error(`Missing user/course for certificate job ${job.id}`);
 
-		/* Issuer + community context */
+		/* Course instructor (+ their uploaded signature) */
 		const [instructor] = await db
-			.select({ firstName: users.firstName, lastName: users.lastName })
+			.select({
+				firstName: users.firstName,
+				lastName: users.lastName,
+				signatureUrl: instructorProfiles.signatureUrl,
+			})
 			.from(users)
+			.leftJoin(instructorProfiles, eq(instructorProfiles.userId, users.id))
 			.where(eq(users.id, course.instructorId))
 			.limit(1);
-		const [community] = course.communityId
-			? await db
-					.select({ name: communities.name })
-					.from(communities)
-					.where(eq(communities.id, course.communityId))
-					.limit(1)
-			: [undefined];
-
 		/* Issue (idempotent — returns the existing row + skips re-emailing) */
 		const certificate = await CertificateService.getInstance().issue(
 			{
@@ -119,21 +117,22 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 			day: "numeric",
 		});
 
+		/* @info - Director block: platform_settings wins, env is the fallback */
+		const director = await CertificateSettingsService.getInstance().get();
+
 		const htmlData: CertificateTemplateData = {
 			studentName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(),
-			courseTitle: course.title ?? "Course",
-			instructorName: `${instructor?.firstName ?? ""} ${instructor?.lastName ?? ""}`.trim() || "Hive Instructor",
-			instructorTitle: "Course instructor",
-			issuerName: community?.name ?? "Hive",
-			communityName: community?.name,
-			completionDate,
+			course: course.title ?? "Course",
 			certificateId: certificate.code,
-			verificationUrl: `${config.server.rootDomain}/verify/${certificate.code}`,
-			gradeVariant: (certificate.quizScorePercent ?? 0) >= 90 ? "distinction" : "pass",
-			courseLevel: course.courseLevel ?? undefined,
-			courseCategory: course.category ?? undefined,
-			finalProgress: `${certificate.completionPercent}%`,
-			quizScore: certificate.quizScorePercent > 0 ? `${certificate.quizScorePercent}%` : undefined,
+			issuedDate: completionDate,
+			courseInstructorName:
+				`${instructor?.firstName ?? ""} ${instructor?.lastName ?? ""}`.trim() ||
+				"Course Instructor",
+			courseInstructorSignature:
+				instructor?.signatureUrl?.trim() || undefined,
+			executiveDirectorName: director.directorName,
+			executiveDirectorSignature:
+				director.directorSignature?.trim() || undefined,
 		};
 
 		/* @info - Certificates are images: render the template to a crisp PNG */

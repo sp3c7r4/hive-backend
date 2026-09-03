@@ -39,4 +39,5 @@ export enum TableNames {
 	USER_CREDENTIALS = "user_credentials",
 	LESSON_CHUNKS = "lesson_chunks",
 	AI_TUTOR_LOGS = "ai_tutor_logs",
+	PLATFORM_SETTINGS = "platform_settings",
 }

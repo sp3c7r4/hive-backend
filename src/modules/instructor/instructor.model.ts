@@ -3,6 +3,7 @@ import {
 	integer,
 	jsonb,
 	pgTable,
+	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { TableNames } from "@/enums";
@@ -22,6 +23,8 @@ export const instructorProfiles = pgTable(
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
 		specializationTags: jsonb("specialization_tags").$type<string[]>().default([]),
+		/** @info - Instructor signature image for certificates (white bg) */
+		signatureUrl: varchar("signature_url", { length: 1000 }),
 		isAdmin: boolean("is_admin").default(false),
 		...timestamps,
 	},

@@ -93,6 +93,12 @@ export const config = {
 		devResolveFallback: env.PAYSTACK_DEV_RESOLVE_FALLBACK === "true",
 	},
 
+	certificates: {
+		/** @info - Executive director block on certificate images */
+		directorName: env.CERT_DIRECTOR_NAME || "Executive Director",
+		directorSignature: env.CERT_DIRECTOR_SIGNATURE,
+	},
+
 	ai: {
 		apiKey: env.OPENAI_API_KEY,
 		models: {

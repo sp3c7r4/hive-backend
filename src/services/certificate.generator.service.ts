@@ -5,20 +5,14 @@ import { FileGenerator } from "./engine/browser.engine";
  * Everything arrives preformatted — the template never computes dates/percentages. */
 export interface CertificateTemplateData {
 	studentName: string;
-	courseTitle: string;
-	instructorName: string;
-	issuerName: string;
-	completionDate: string;
+	course: string;
 	certificateId: string;
-	verificationUrl: string;
-	logoUrl?: string;
-	gradeVariant?: "pass" | "distinction";
-	courseLevel?: string;
-	courseCategory?: string;
-	finalProgress?: string;
-	quizScore?: string;
-	instructorTitle?: string;
-	communityName?: string;
+	issuedDate: string;
+	courseInstructorName: string;
+	/** @info - Uploaded signature image (white background), optional until set */
+	courseInstructorSignature?: string;
+	executiveDirectorName: string;
+	executiveDirectorSignature?: string;
 }
 
 export class CertificateGenerator extends FileGenerator<CertificateTemplateData> {
@@ -38,9 +32,6 @@ export class CertificateGenerator extends FileGenerator<CertificateTemplateData>
 
 	protected async buildHtml(options: CertificateTemplateData): Promise<string> {
 		const source = await this.getTemplate(Templates.CERTIFICATE);
-		return this.compile(source, {
-			...options,
-			logoUrl: options.logoUrl?.trim() || this.fallbackLogo,
-		});
+		return this.compile(source, options);
 	}
 }

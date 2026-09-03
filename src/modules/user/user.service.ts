@@ -39,10 +39,23 @@ export class UserService {
 			eq(user_roles.userId, Number(authData.id)),
 		);
 
-		return withPresignedUrl<any>({
+		const roleList = roles.map((r) => r.role);
+		const result: Record<string, any> = {
 			...user,
-			roles: roles.map((r) => r.role),
-		}, "avatarUrl");
+			roles: roleList,
+		};
+
+		/* @info - Instructor certificate signature (settings page preview) */
+		if (roleList.includes("instructor")) {
+			const profile = await new RelationalRepository(
+				instructorProfiles,
+			).findOne(eq(instructorProfiles.userId, Number(authData.id)));
+			if (profile?.signatureUrl) result.signatureUrl = profile.signatureUrl;
+		}
+
+		let out = withPresignedUrl<any>(result, "avatarUrl");
+		if (result.signatureUrl) out = withPresignedUrl(out, "signatureUrl");
+		return out;
 	};
 
 	update = async (authData: IAuthData, data: Record<string, any>) => {
@@ -302,4 +315,30 @@ export class UserService {
 			}
 		} while (cursor !== "0");
 	};
+
+	updateSignature = async (authData: IAuthData, signatureKey: string) => {
+		const userId = Number(authData.id);
+
+		/* @info - Upsert the instructor profile row carrying the signature */
+		const existing = await new RelationalRepository(
+			instructorProfiles,
+		).findOne(eq(instructorProfiles.userId, userId));
+		if (existing) {
+			await new RelationalRepository(instructorProfiles).update(
+				existing.id,
+				{ signatureUrl: signatureKey } as any,
+			);
+		} else {
+			await new RelationalRepository(instructorProfiles).create({
+				userId,
+				signatureUrl: signatureKey,
+			} as any);
+		}
+
+		return withPresignedUrl<any>(
+			{ signatureUrl: signatureKey },
+			"signatureUrl",
+		);
+	};
+
 }

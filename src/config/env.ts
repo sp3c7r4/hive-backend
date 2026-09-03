@@ -71,6 +71,10 @@ const EnvSchema = z.object({
 	/** @info - Min cosine similarity before the tutor answers (else fallback) */
 	AI_TUTOR_SIM_THRESHOLD: z.coerce.number().optional(),
 
+	/** @info - Certificate executive director (interim until admin-managed) */
+	CERT_DIRECTOR_NAME: z.string().optional(),
+	CERT_DIRECTOR_SIGNATURE: z.string().optional(),
+
 	ZEUS: z.string(),
 	ATHENA: z.string(),
 
