@@ -82,4 +82,13 @@ export class AdminController {
 		});
 		return sendSuccessResponse(c, { data });
 	};
+
+	/** @info - Server-side director signature upload (avoids browser->S3 CORS) */
+	uploadDirectorSignature = async (c: Context) => {
+		const { key } = c.get("uploadedFile");
+		const data = await this.certSettings.update({
+			directorSignature: key,
+		});
+		return sendSuccessResponse(c, { data });
+	};
 }

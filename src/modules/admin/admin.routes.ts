@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { JwtService } from "@/services/jwt.service";
 import { requireAdmin } from "@/middlewares/auth/guards";
+import { FileUploadMiddleware } from "@/middlewares/upload";
+import { FILE_SIZES } from "@/constants/file-size";
+import { ImageMimeType } from "@/enums";
 import { z } from "zod";
 import { ZodEngine } from "@/services";
 import { AdminController } from "./admin.controller";
@@ -16,6 +19,7 @@ export const adminRouter = new Hono({ strict: true });
 const jwt = JwtService.getInstance();
 const zod = ZodEngine.getInstance();
 const controller = AdminController.getInstance();
+const upload = FileUploadMiddleware.getInstance();
 
 adminRouter.use("*", jwt.validateToken, requireAdmin);
 adminRouter.get("/dashboard", controller.dashboard);
@@ -27,3 +31,17 @@ adminRouter.get("/activity-logs", controller.activityLogs);
 adminRouter.patch("/users/:id/action", controller.userAction);
 adminRouter.get("/settings/certificates", controller.getCertificateSettings);
 adminRouter.put("/settings/certificates", zod.validate.body(certificateSettingsSchema), controller.updateCertificateSettings);
+adminRouter.put(
+	"/settings/certificates/signature",
+	upload.single({
+		fieldName: "signature",
+		sizeLimit: FILE_SIZES["2MB"],
+		allowedTypes: [
+			ImageMimeType.JPEG,
+			ImageMimeType.JPG,
+			ImageMimeType.PNG,
+			ImageMimeType.WEBP,
+		],
+	}),
+	controller.uploadDirectorSignature,
+);
