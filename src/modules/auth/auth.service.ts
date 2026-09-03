@@ -186,11 +186,15 @@ export class AuthService {
 
 		if (!userAny.passwordHash) {
 			const provider = await this.oauthProviderName(user!.id);
-			throwUnauthorizedError(
-				provider
-					? `This account uses ${provider} to sign in. Please continue with that button instead.`
-					: "This account uses OAuth. Please sign in with Google or Facebook.",
-			);
+			/* @info - Named provider when a credential row exists. No credential
+			 * row + no password is NOT an OAuth account (could be OTP-created or
+			 * a missing row), so stay silent like the not-found case. */
+			if (provider) {
+				throwUnauthorizedError(
+					`This account uses ${provider} to sign in. Please continue with that button instead.`,
+				);
+			}
+			throwNotFoundError("Invalid email or password");
 		}
 
 		const isPasswordValid = await this.encryptionService.compare(
