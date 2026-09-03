@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { formDataToObject, sendSuccessResponse } from "@/helpers";
 import { UserService } from "./user.service";
+import { SessionRegistryService } from "./session-registry.service";
 
 export class UserController {
 	private static instance: UserController;
@@ -61,6 +62,16 @@ export class UserController {
 		});
 	};
 
+	updateSignature = async (c: Context) => {
+		const authData = c.get("authData");
+		const { key } = c.get("uploadedFile");
+		const result = await this.userService.updateSignature(authData, key);
+		return sendSuccessResponse(c, {
+			message: "Signature updated successfully!",
+			data: result,
+		});
+	};
+
 	changePassword = async (c: Context) => {
 		const authData = c.get("authData");
 		const { currentPassword, newPassword } = await c.req.json();
@@ -81,4 +92,27 @@ export class UserController {
 			message: "Account deleted successfully!",
 		});
 	};
+
+	listSessions = async (c: Context) => {
+		const authData = c.get("authData");
+		const sessions = await SessionRegistryService.getInstance().listForUser(
+			Number(authData.id),
+			authData.authId,
+		);
+		return sendSuccessResponse(c, { sessions });
+	};
+
+	revokeSession = async (c: Context) => {
+		const authData = c.get("authData");
+		const refreshId = decodeURIComponent(c.req.param("refreshId"));
+		const revoked = await SessionRegistryService.getInstance().revoke(
+			Number(authData.id),
+			refreshId,
+		);
+		if (!revoked) {
+			return sendSuccessResponse(c, { revoked: false });
+		}
+		return sendSuccessResponse(c, { revoked: true });
+	};
+
 }

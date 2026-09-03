@@ -38,7 +38,11 @@ export class AuthController {
 
 	login = async (c: Context) => {
 		const data = await c.req.json();
-		const result = await this.authService.login(data);
+		const clientMetadata = c.get("clientMetadata");
+		const result = await this.authService.login({
+			...data,
+			...clientMetadata,
+		});
 		return sendSuccessResponse(c, {
 			...result,
 		});

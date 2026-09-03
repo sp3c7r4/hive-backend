@@ -31,6 +31,7 @@ import {
 	EncryptionService,
 	JwtService,
 } from "@/services";
+import { SessionRegistryService } from "@/modules/user/session-registry.service";
 import type { ILoginDataWithMetadata, ISignupDataWithMetadata } from "@/shared";
 
 export class AuthService {
@@ -231,6 +232,20 @@ export class AuthService {
 		const authenticatedUser = generateAuthenticatedData(sanitized);
 		const tokens = await generateAuthTokens(authId, primaryRole);
 
+		/* @info - Session registry metadata (best-effort) */
+		try {
+			const { refreshId } = this.jwtService.verifyToken(tokens.refreshToken);
+			if (refreshId) {
+				await SessionRegistryService.getInstance().register(refreshId, {
+					userAgent: data.userAgent,
+					ipAddress: data.ipAddress,
+					location: data.location,
+				});
+			}
+		} catch {
+			/* registry never blocks login */
+		}
+
 		return {
 			message: "Login successful",
 			user: await withPresignedUrl<any>(
@@ -251,6 +266,27 @@ export class AuthService {
 
 		const exists = await this.cacheService.redis.exists(refreshId);
 		if (!exists) {
+			/* @info - Rotation grace window: refresh tokens rotate on every
+			 * call, so a concurrent refresh (session route + parallel 401s,
+			 * second tab) can consume the token a moment before this request.
+			 * The consumed id is mapped to its successor for ~45s — hand the
+			 * successor back instead of killing the session. Only a token
+			 * whose successor is ALSO gone (really expired / logged out)
+			 * reaches the expired error below. */
+			const rotated = await this.cacheService.redis.get(
+				`rotated:${refreshId}`,
+			);
+			if (rotated) {
+				const mapped = JSON.parse(rotated) as {
+					refreshToken: string;
+					authId: string;
+				};
+				const accessToken = this.jwtService.generateToken(
+					mapped.authId ?? authId,
+				);
+				return { accessToken, refreshToken: mapped.refreshToken };
+			}
+
 			/* @info - Suspended users' tokens are revoked; tell them apart
 			 * from a plain expired session so the client can show the notice. */
 			const userId = grabUserIdFromAuthId(refreshId);
@@ -282,7 +318,36 @@ export class AuthService {
 			await this.cacheService.set(authId, userData, TTL.IN_30_MINUTES);
 		}
 
-		return generateAuthTokens(authId, userType ?? "");
+		const tokens = await generateAuthTokens(authId, userType ?? "");
+
+		/* @info - Remember the successor so a racing stale refresh can heal
+		 * within the window (45s > any realistic rotation race) */
+		await this.cacheService.redis.set(
+			`rotated:${refreshId}`,
+			JSON.stringify({
+				refreshToken: tokens.refreshToken,
+				authId,
+			}),
+			"EX",
+			45,
+		);
+
+		/* @info - Carry the session metadata forward (no new GeoIP lookup) */
+		try {
+			const { refreshId: newRefreshId } = this.jwtService.verifyToken(
+				tokens.refreshToken,
+			);
+			if (newRefreshId) {
+				await SessionRegistryService.getInstance().copyOnRotate(
+					refreshId,
+					newRefreshId,
+				);
+			}
+		} catch {
+			/* best-effort */
+		}
+
+		return tokens;
 	};
 
 	logout = async (refreshToken: string) => {

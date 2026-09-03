@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { JwtService, ZodEngine } from "@/services";
+import { requireInstructor } from "@/middlewares/auth";
 import { FileUploadMiddleware } from "@/middlewares/upload";
 import { FILE_SIZES } from "@/constants/file-size";
 import { ImageMimeType } from "@/enums";
@@ -19,11 +20,29 @@ const upload = FileUploadMiddleware.getInstance();
 userRouter.use(jwtService.validateToken);
 
 userRouter.get("/profile", userController.getProfile);
+userRouter.get("/sessions", userController.listSessions);
+userRouter.delete("/sessions/:refreshId", userController.revokeSession);
 
 userRouter.put(
 	"/profile",
 	zodEngine.validate.body(updateUserSchema),
 	userController.updateProfile,
+);
+
+userRouter.put(
+	"/signature",
+	requireInstructor,
+	upload.single({
+		fieldName: "signature",
+		sizeLimit: FILE_SIZES["2MB"],
+		allowedTypes: [
+			ImageMimeType.JPEG,
+			ImageMimeType.JPG,
+			ImageMimeType.PNG,
+			ImageMimeType.WEBP,
+		],
+	}),
+	userController.updateSignature,
 );
 
 userRouter.put(
