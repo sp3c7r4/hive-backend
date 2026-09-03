@@ -45,7 +45,7 @@ export const onboardUserSchema = z.object({
 
 export const updateUserSchema = z.object({
 	firstName: z.string().min(1).optional(),
-	lastName: z.string().min(1).optional(),
+	lastName: z.string().max(255).optional(),
 	phone: z.string().optional(),
 	bio: z.string().optional(),
 	preferences: z
