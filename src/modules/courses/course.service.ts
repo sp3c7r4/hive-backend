@@ -177,9 +177,11 @@ export class CourseService {
 			updatedAt: courses.updatedAt,
 		};
 
-		/* Roles may be missing from authData (e.g. after token refresh rebuild) — query DB to be safe */
+		/* Roles may be missing OR stale-empty from authData (e.g. after OAuth
+		 * signup the session cached roles: [] before the user picked a role) —
+		 * query DB whenever the cache cannot prove an instructor */
 		let roles = authData.roles as string[] | undefined;
-		if (!Array.isArray(roles)) {
+		if (!Array.isArray(roles) || roles.length === 0) {
 			const roleRows = await db
 				.select({ role: user_roles.role })
 				.from(user_roles)

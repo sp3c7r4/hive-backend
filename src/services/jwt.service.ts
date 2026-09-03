@@ -105,7 +105,7 @@ export class JwtService {
 				throwUnauthorizedError("Something went wrong, please try again.");
 			}
 
-			c.set("authData", data);
+			c.set("authData", { ...data, authId: decoded.authId });
 			await next();
 		} catch (e: any) {
 			if (e instanceof TokenExpiredError) {

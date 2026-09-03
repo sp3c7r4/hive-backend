@@ -590,6 +590,25 @@ export class AuthService {
 			eq(user_roles.userId, userId),
 		);
 
+		/* @info - Update the live session cache: the JWT stays valid (same
+		 * authId, now attached by the middleware) but the cached authData
+		 * must carry the new role, or role-gated code keeps treating the
+		 * user as roleless until the session expires. */
+		const fresh = (await this.userRepo.findById(userId)) as any;
+		if (fresh && authData.authId) {
+			const { passwordHash: _, deleted_at: __, hash: ___, ...sanitized } =
+				fresh;
+			await this.cacheService.set(
+				authData.authId,
+				{
+					...sanitized,
+					roles: roles.map((r) => r.role),
+					isAuthenticated: true,
+				},
+				TTL.IN_30_MINUTES,
+			);
+		}
+
 		return {
 			roles: roles.map((r) => r.role),
 		};
