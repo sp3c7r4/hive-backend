@@ -101,6 +101,12 @@ export class GoogleOAuthService {
 		userType: string,
 	) {
 		const authenticatedUser = generateAuthenticatedData(userData);
+		/* @info - Real roles so the frontend can tell a brand-new account
+		 * (no roles) from an existing one after the popup */
+		const roles = await UserRoleRepository.getInstance().findMany(
+			eq(user_roles.userId, userData.id),
+		);
+		(authenticatedUser as any).roles = roles.map((r) => r.role);
 		const authId = generateAuthId(userData.id.toString());
 		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
@@ -159,7 +165,6 @@ export class GoogleOAuthService {
 		);
 
 		const userRepo = UserRepository.getInstance();
-		const userRoleRepo = UserRoleRepository.getInstance();
 
 		let user: any;
 		let isNewUser = false;
@@ -205,37 +210,39 @@ export class GoogleOAuthService {
 				}
 				user = existingUser;
 			}
-			try {
-				user = await withTransaction(async (tx) => {
-					const uRepo = new RelationalRepository(users, tx);
-					const cRepo = new RelationalRepository(userCredentials, tx);
-					const urRepo = new RelationalRepository(user_roles, tx);
+				try {
+					user = await withTransaction(async (tx) => {
+						const uRepo = new RelationalRepository(users, tx);
+						const cRepo = new RelationalRepository(userCredentials, tx);
 
-					const newUser = await uRepo.create({
-						firstName: userInfo.given_name!,
-						lastName: userInfo.family_name!,
-						email: userInfo.email!,
-						avatarUrl: userInfo.picture!,
-						emailVerified: true,
-						emailVerifiedAt: new Date(),
-						lastLoginAt: new Date(),
-					} as any);
+						/* @info - Google omits family_name on single-name profiles;
+						 * fall back so the NOT NULL columns never receive null */
+						const nameFallback =
+							userInfo.email?.split("@")[0] ?? "Hive";
+						const newUser = await uRepo.create({
+							firstName: userInfo.given_name ?? nameFallback,
+							lastName: userInfo.family_name ?? "",
+							email: userInfo.email!,
+							avatarUrl: userInfo.picture!,
+							emailVerified: true,
+							emailVerifiedAt: new Date(),
+							lastLoginAt: new Date(),
+						} as any);
 
-					await cRepo.create({
-						userId: newUser.id,
-						role: userType,
-						provider: this.provider,
-						providerAccountId: userInfo.id!,
-						tokens: this.buildGoogleCredentials(tokens),
-					} as any);
+						await cRepo.create({
+							userId: newUser.id,
+							role: userType,
+							provider: this.provider,
+							providerAccountId: userInfo.id!,
+							tokens: this.buildGoogleCredentials(tokens),
+						} as any);
 
-					await urRepo.create({
-						userId: newUser.id,
-						role: userType,
-					} as any);
+						/* @info - No user_roles row for new OAuth users: the role is
+						 * chosen post-callback via POST /auth/roles (see the role
+						 * selection design). Credential role above is only a label. */
 
-					return newUser;
-				});
+						return newUser;
+					});
 				isNewUser = true;
 			} catch (e) {
 				this.log.error("Error creating user during Google OAuth callback", e);

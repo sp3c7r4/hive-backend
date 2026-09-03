@@ -92,6 +92,12 @@ export class FacebookOAuthService {
 		userType: string,
 	) {
 		const authenticatedUser = generateAuthenticatedData(userData);
+		/* @info - Real roles so the frontend can tell a brand-new account
+		 * (no roles) from an existing one after the popup */
+		const roles = await UserRoleRepository.getInstance().findMany(
+			eq(user_roles.userId, userData.id),
+		);
+		(authenticatedUser as any).roles = roles.map((r) => r.role);
 		const authId = generateAuthId(userData.id.toString());
 		const gen_tokens = await generateAuthTokens(authId, userType);
 		await this.cacheService.set(authId, authenticatedUser, TTL.IN_30_MINUTES);
@@ -211,7 +217,6 @@ export class FacebookOAuthService {
 		);
 
 		const userRepo = UserRepository.getInstance();
-		const userRoleRepo = UserRoleRepository.getInstance();
 
 		isNewUser = false;
 
@@ -261,7 +266,6 @@ export class FacebookOAuthService {
 				user = await withTransaction(async (tx) => {
 					const uRepo = new RelationalRepository(users, tx);
 					const cRepo = new RelationalRepository(userCredentials, tx);
-					const urRepo = new RelationalRepository(user_roles, tx);
 
 					const newUser = await uRepo.create({
 						firstName: userInfo.first_name,
@@ -281,10 +285,8 @@ export class FacebookOAuthService {
 						tokens: this.buildFacebookCredentials(tokens),
 					} as any);
 
-					await urRepo.create({
-						userId: newUser.id,
-						role: userType,
-					} as any);
+					/* @info - No user_roles row for new OAuth users: the role is
+					 * chosen post-callback via POST /auth/roles. */
 
 					return newUser;
 				});
