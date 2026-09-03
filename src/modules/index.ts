@@ -1,5 +1,6 @@
 export * from "./assessments";
 export * from "./certificates";
+export * from "./course-builder";
 export * from "./communities";
 export * from "./courses";
 export * from "./enrollments";
