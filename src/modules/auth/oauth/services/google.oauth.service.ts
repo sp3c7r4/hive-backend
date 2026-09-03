@@ -67,6 +67,15 @@ export class GoogleOAuthService {
 	}
 
 	private buildRedirectUrl() {
+		/* @info - Explicit env override wins when shaped like a real callback
+		 * (the dev env file sets NODE_ENV=production, so auto-derivation
+		 * alone would send dev Google logins to prod). The shape guard keeps
+		 * stale prod secrets (missing /api/v1) from breaking the callback —
+		 * they fall back to the derived URL. */
+		const override = config.google.redirectUri?.trim() ?? "";
+		if (override.endsWith("/api/v1/auth/google/callback")) {
+			return override;
+		}
 		const base =
 			config.env === "development"
 				? `http://127.0.0.1:${config.server.port}`
