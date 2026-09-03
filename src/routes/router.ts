@@ -3,6 +3,7 @@ import { healthCheck } from "@/helpers";
 import { quizRouter, submissionRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
 import { aiTutorRouter } from "@/modules/ai-tutor";
+import { courseBuilderRouter } from "@/modules/course-builder";
 import { certificateRouter } from "@/modules/certificates";
 import { reviewRouter } from "@/modules/reviews";
 import { studentRouter } from "@/modules/student";
@@ -26,6 +27,7 @@ export const router = new Hono();
 router.get("/", healthCheck);
 
 router.route("/auth", authRouter);
+router.route("/ai", courseBuilderRouter);
 router.route("/courses", aiTutorRouter);
 router.route("/certificates", certificateRouter);
 router.route("/reviews", reviewRouter);

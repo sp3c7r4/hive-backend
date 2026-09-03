@@ -7,6 +7,7 @@ export * from "@/modules/certificates/certificate.model";
 export * from "@/modules/communities/community.model";
 export * from "@/modules/communities/community-feed.model";
 export * from "@/modules/courses/course.model";
+export * from "@/modules/course-builder/course-builder-log.model";
 export * from "@/modules/enrollments/enrollment.model";
 export * from "@/modules/instructor/instructor.model";
 export * from "@/modules/messaging/message.model";

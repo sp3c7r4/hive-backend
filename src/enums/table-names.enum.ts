@@ -40,4 +40,5 @@ export enum TableNames {
 	LESSON_CHUNKS = "lesson_chunks",
 	AI_TUTOR_LOGS = "ai_tutor_logs",
 	PLATFORM_SETTINGS = "platform_settings",
+	AI_COURSE_BUILDER_LOGS = "ai_course_builder_logs",
 }

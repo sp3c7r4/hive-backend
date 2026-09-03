@@ -13,6 +13,7 @@ import { getDb } from "@/db/postgres.db";
 import { config } from "@/config";
 import { logger } from "@/utils";
 import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { runInputGuardrails } from "@/helpers/ai/prompt-guardrails.helper";
 import { EmbeddingService } from "@/services/ai/embedding.service";
 import { enrollments, lessonProgress } from "@/modules/enrollments/enrollment.model";
 import { lessons, modules } from "@/modules/courses/course.model";
@@ -21,30 +22,6 @@ import { AiTutorRepository } from "./ai-tutor.repository";
 
 export const FALLBACK_ANSWER =
 	"I could not find this in the course materials. Ask your instructor for help with this one.";
-
-/** @info - Hand-written input guardrails (no package): PII + injection heuristics */
-const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
-const PHONE_RE = /(\+?\d[\d\s-]{9,14}\d)/;
-const INJECTION_PHRASES = [
-	"ignore previous instructions",
-	"ignore your instructions",
-	"ignore all previous",
-	"ignore your system prompt",
-	"you are now",
-	"act as an unrestricted",
-	"forget everything",
-	"jailbreak",
-	"reveal your system prompt",
-	"system prompt",
-	"developer message",
-];
-
-export function runInputGuardrails(question: string): string | null {
-	if (EMAIL_RE.test(question) || PHONE_RE.test(question)) return "pii";
-	const lower = question.toLowerCase();
-	if (INJECTION_PHRASES.some((p) => lower.includes(p))) return "injection";
-	return null;
-}
 
 export type TutorChatResult =
 	| { kind: "stream"; response: Response; chunkIds: number[] }
