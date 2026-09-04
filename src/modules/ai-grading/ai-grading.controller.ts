@@ -37,6 +37,13 @@ export class AiGradingController {
 		return sendSuccessResponse(c, snapshot);
 	};
 
+	/** @info - GET /ai/grading/batches/running — reload rediscovery */
+	runningBatch = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.runningBatch(authData.id);
+		return sendSuccessResponse(c, { data: result });
+	};
+
 	/** @info - GET /ai/grading/batches/:batchId/stream — SSE forwarder */
 	stream = async (c: Context) => {
 		const authData = c.get("authData");

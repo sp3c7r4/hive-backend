@@ -31,4 +31,10 @@ export class AiService {
 	model() {
 		return this.deepseek(config.ai.deepseekModel);
 	}
+
+	/** @info - Vision model (config.ai.visionModel, an -exp release).
+	 * Used only for image grading; callers degrade gracefully on failure. */
+	visionModel() {
+		return this.deepseek(config.ai.visionModel);
+	}
 }

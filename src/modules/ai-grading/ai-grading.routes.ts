@@ -30,6 +30,8 @@ aiGradingRouter.post(
 	controller.massGrade,
 );
 
+aiGradingRouter.get("/grading/batches/running", controller.runningBatch);
+
 aiGradingRouter.get("/grading/batches/:batchId", controller.batchSnapshot);
 
 aiGradingRouter.get("/grading/batches/:batchId/stream", controller.stream);

@@ -106,13 +106,17 @@ export class AiGradingService {
 			.where(eq(assignmentSubmissions.id, body.submissionId))
 			.limit(1);
 		if (!submission) throwNotFoundError("Submission not found");
-		if (!submission!.text) throwBadRequestError("This submission has no text to grade.");
 
 		await this.assertLessonOwner(instructorId, submission!.lessonId);
 
 		const suggestion = await this.grading.gradeSubmission(submission!.id, {
 			instructorContext: body.instructorContext,
 		});
+		if (!suggestion) {
+			throwBadRequestError(
+				"This submission has no gradeable content: it needs text, a PDF, or an image file.",
+			);
+		}
 		return suggestion;
 	};
 
@@ -351,6 +355,42 @@ export class AiGradingService {
 		await this.assertLessonOwner(instructorId, submission!.lessonId);
 
 		return this.grading.gradeSubmission(submissionId);
+	};
+
+	/** @info - Latest running batch for this instructor (chip reload
+	 * rediscovery: after a page reload the client has no batch id). */
+	runningBatch = async (instructorId: number) => {
+		const db = getDb();
+		const [batch] = await db
+			.select()
+			.from(gradingBatches)
+			.where(
+				and(
+					eq(gradingBatches.createdBy, instructorId),
+					eq(gradingBatches.status, "running"),
+				),
+			)
+			.orderBy(sql`${gradingBatches.createdAt} DESC`)
+			.limit(1);
+		if (!batch) return null;
+
+		const entries = await db
+			.select({
+				submissionId: aiGradingLogs.submissionId,
+				status: aiGradingLogs.status,
+				score: aiGradingLogs.suggestedScore,
+				studentName: users.firstName,
+				studentLastName: users.lastName,
+			})
+			.from(aiGradingLogs)
+			.innerJoin(
+				assignmentSubmissions,
+				eq(aiGradingLogs.submissionId, assignmentSubmissions.id),
+			)
+			.innerJoin(users, eq(assignmentSubmissions.userId, users.id))
+			.where(eq(aiGradingLogs.batchId, batch!.id));
+
+		return { batch: batch!, entries };
 	};
 
 	/** @info - SSE ownership check reused by the stream route */
