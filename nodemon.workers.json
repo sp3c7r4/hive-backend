@@ -1,0 +1,6 @@
+{
+  "watch": ["src", "app", "package.json", ".env.development"],
+  "ext": "ts,json",
+  "ignore": ["node_modules", "dist", "**/*.test.ts"],
+  "exec": "node --import tsx app/init.workers.ts"
+}

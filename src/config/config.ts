@@ -108,6 +108,8 @@ export const config = {
 		/** @info - Course tutor: DeepSeek + retrieval threshold */
 		deepseekApiKey: env.DEEPSEEK_API_KEY,
 		deepseekModel: "deepseek-v4-flash",
+		/** @info - Image grading model (-exp release; degrade gracefully on failure) */
+		visionModel: "deepseek-v4-flash-vision-exp",
 		simThreshold: env.AI_TUTOR_SIM_THRESHOLD ?? 0.35,
 	},
 

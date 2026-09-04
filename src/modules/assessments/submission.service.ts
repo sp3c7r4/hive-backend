@@ -103,6 +103,8 @@ export class AssignmentService {
 				feedback: assignmentSubmissions.feedback,
 				submittedAt: assignmentSubmissions.submittedAt,
 				gradedAt: assignmentSubmissions.gradedAt,
+				aiSuggestedScore: assignmentSubmissions.aiSuggestedScore,
+				aiSuggestedAt: assignmentSubmissions.aiSuggestedAt,
 			})
 			.from(assignmentSubmissions)
 			.innerJoin(lessons, eq(assignmentSubmissions.lessonId, lessons.id))

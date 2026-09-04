@@ -29,7 +29,7 @@ export function stripHtml(html?: string | null): string {
 		.trim();
 }
 
-async function fetchBuffer(url: string): Promise<Uint8Array | null> {
+export async function fetchBuffer(url: string): Promise<Uint8Array | null> {
 	return fetch(url, {
 		headers: { "User-Agent": "Mozilla/5.0 (compatible; HiveTutor/1.0)" },
 		signal: AbortSignal.timeout(20_000),
@@ -45,7 +45,7 @@ async function fetchBuffer(url: string): Promise<Uint8Array | null> {
 		.catch(() => null);
 }
 
-async function fetchPdfText(url: string): Promise<string | null> {
+export async function fetchPdfText(url: string): Promise<string | null> {
 	const buf = await fetchBuffer(url);
 	if (buf === null) return null;
 	try {

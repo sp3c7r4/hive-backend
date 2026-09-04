@@ -92,6 +92,12 @@ export const assignmentSubmissions = pgTable(
 		feedback: text("feedback"),
 		submittedAt: timestamp("submitted_at"),
 		gradedAt: timestamp("graded_at"),
+		/** @info - AI grading staging fields; authoritative grade stays in
+		 * score/feedback/gradedAt until an instructor approves. */
+		aiSuggestedScore: integer("ai_suggested_score"),
+		aiSuggestedFeedback: text("ai_suggested_feedback"),
+		aiSuggestedAt: timestamp("ai_suggested_at"),
+		aiGraderRunId: integer("ai_grader_run_id"),
 		...timestamps,
 	},
 	(table) => [

@@ -41,4 +41,6 @@ export enum TableNames {
 	AI_TUTOR_LOGS = "ai_tutor_logs",
 	PLATFORM_SETTINGS = "platform_settings",
 	AI_COURSE_BUILDER_LOGS = "ai_course_builder_logs",
+	GRADING_BATCHES = "grading_batches",
+	AI_GRADING_LOGS = "ai_grading_logs",
 }
