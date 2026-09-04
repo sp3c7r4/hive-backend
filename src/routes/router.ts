@@ -4,6 +4,7 @@ import { quizRouter, submissionRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
 import { aiTutorRouter } from "@/modules/ai-tutor";
 import { courseBuilderRouter } from "@/modules/course-builder";
+import { aiGradingRouter } from "@/modules/ai-grading";
 import { certificateRouter } from "@/modules/certificates";
 import { reviewRouter } from "@/modules/reviews";
 import { studentRouter } from "@/modules/student";
@@ -28,6 +29,7 @@ router.get("/", healthCheck);
 
 router.route("/auth", authRouter);
 router.route("/ai", courseBuilderRouter);
+router.route("/ai", aiGradingRouter);
 router.route("/courses", aiTutorRouter);
 router.route("/certificates", certificateRouter);
 router.route("/reviews", reviewRouter);

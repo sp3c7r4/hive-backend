@@ -1,4 +1,5 @@
 export * from "./assessments";
+export * from "./ai-grading";
 export * from "./certificates";
 export * from "./course-builder";
 export * from "./communities";

@@ -16,6 +16,7 @@ import { LessonChunkQueueService } from "@/services/queues/lesson-chunk.queue.se
 import { CertificateQueueService } from "@/services/queues/certificate.queue.service";
 import { ReceiptQueueService } from "@/services/queues/receipt.queue.service";
 import { SubscriptionExpiryQueueService } from "@/services/queues/subscription-expiry.queue.service";
+import { GradingQueueService } from "@/services/queues/grading.queue.service";
 import { messagingWsHandler } from "@/modules/messaging/messaging.ws";
 import { logger } from "@/utils";
 
@@ -66,6 +67,7 @@ createBullBoard({
 		new BullMQAdapter(CertificateQueueService.getInstance().getQueue()),
 		new BullMQAdapter(ReceiptQueueService.getInstance().getQueue()),
 		new BullMQAdapter(SubscriptionExpiryQueueService.getInstance().getQueue()),
+		new BullMQAdapter(GradingQueueService.getInstance().getQueue()),
 	],
 	serverAdapter: bullMQAdapter,
 	options: {
