@@ -30,10 +30,12 @@ cd /home/ec2-user/hive-backend
 rm -rf node_modules   # npm ci ENOTEMPTY on stale dirs otherwise
 npm ci --omit=dev --ignore-scripts
 
-# Apply the repo-owned PROD compose (Redis only, redis.conf). Postgres
-# lives in Docker for now ONLY as an unmanaged leftover until the RDS
-# cutover; docker compose never removes it (no --remove-orphans below).
+# Apply the repo-owned docker-compose.yml (Postgres + Redis). The prod
+# compose (docker-compose.prod.yml) is staged alongside for the RDS
+# cutover; the ACTIVE apply stays on docker-compose.yml until the
+# database moves to RDS, then the deploy flips to the prod compose.
 mkdir -p /opt/hive-db
+cp docker-compose.yml /opt/hive-db/docker-compose.yml
 cp docker-compose.prod.yml /opt/hive-db/docker-compose.prod.yml
 cp redis.conf /opt/hive-db/redis.conf
 PG_PW=$(grep -oP '^POSTGRES_PASSWORD=\K.*' .env.production | head -1)
@@ -41,7 +43,7 @@ echo "POSTGRES_PASSWORD=${PG_PW}" > /opt/hive-db/.env
 chmod 600 /opt/hive-db/.env
 cd /opt/hive-db
 sudo dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
-docker compose -f docker-compose.prod.yml up -d 2>/dev/null || docker-compose -f docker-compose.prod.yml up -d
+docker compose up -d 2>/dev/null || docker-compose up -d
 
 # @info - DB password CONVERGENCE: compose only sets the password at volume
 # init. If the shipped env changed it, sync it to the running Postgres so
