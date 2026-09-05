@@ -33,6 +33,11 @@ npm ci --omit=dev --ignore-scripts
 # Apply the repo-owned docker-compose.yml (Postgres + Redis + anything you add)
 mkdir -p /opt/hive-db
 cp docker-compose.yml /opt/hive-db/docker-compose.yml
+# @info - RDS migration staging: ship the prod compose + redis.conf so the
+# box has them ready. The ACTIVE apply below still uses docker-compose.yml
+# (Postgres container) until the RDS cutover flips the compose file.
+cp docker-compose.prod.yml /opt/hive-db/docker-compose.prod.yml
+cp redis.conf /opt/hive-db/redis.conf
 PG_PW=$(grep -oP '^POSTGRES_PASSWORD=\K.*' .env.production | head -1)
 echo "POSTGRES_PASSWORD=${PG_PW}" > /opt/hive-db/.env
 chmod 600 /opt/hive-db/.env
