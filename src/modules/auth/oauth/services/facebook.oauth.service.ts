@@ -209,6 +209,9 @@ export class FacebookOAuthService {
 		}
 
 		const credentialRepo = new RelationalRepository(userCredentials);
+		/* @info - Normalize provider emails: uniqueness is case-insensitive
+		 * (migration 0020); providers occasionally return mixed-case. */
+		userInfo.email = (userInfo.email || "").toLowerCase();
 		const existingCredential = await credentialRepo.findOne(
 			and(
 				eq(userCredentials.provider, this.provider),
