@@ -61,7 +61,11 @@ export class AuthService {
 	}
 
 	signup = async (data: ISignupDataWithMetadata) => {
-		const existing = await this.userRepo.findOne(eq(users.email, data.email));
+		/* @info - Email uniqueness is case-insensitive (migration 0020);
+		 * normalize here or Test@mail.com and test@mail.com become two accounts. */
+		const email = data.email.toLowerCase();
+
+		const existing = await this.userRepo.findOne(eq(users.email, email));
 		if (existing) throwBadRequestError("Email already exists");
 
 		const authId = generateAuthId();
@@ -73,7 +77,7 @@ export class AuthService {
 			otpId,
 			firstName: data.firstName,
 			lastName: data.lastName,
-			email: data.email,
+			email,
 			action: JwtAction.VERIFY_EMAIL,
 			role: data.role,
 			password: this.encryptionService.encrypt(data.password),
@@ -90,7 +94,7 @@ export class AuthService {
 
 		this.emailQueueService.add(EmailJobNames.VERIFY_OTP as any, {
 			message: {
-				to: data.email,
+				to: email,
 				subject: "Verify your email",
 			},
 			template: "verify-otp" as any,
@@ -123,7 +127,9 @@ export class AuthService {
 	}
 
 	login = async (data: ILoginDataWithMetadata) => {
-		const { email, password, loginType } = data;
+		const { password, loginType } = data;
+		/* @info - Normalize: stored emails are lowercase (migration 0020) */
+		const email = data.email.toLowerCase();
 
 		const user = await this.userRepo.findOne(eq(users.email, email));
 		if (!user) throwNotFoundError("Invalid email or password");
@@ -435,7 +441,8 @@ export class AuthService {
 		let userRoles: Array<{ role: string }> = [];
 
 		if (action === JwtAction.VERIFY_EMAIL) {
-			const { firstName, lastName, email } = rest;
+			const { firstName, lastName } = rest;
+			const email = String((rest as any).email || "").toLowerCase();
 			const role = (rest as any).role;
 			const decryptedPassword = this.encryptionService.decrypt(
 				(rest as any).password!,
@@ -473,7 +480,9 @@ export class AuthService {
 				} as any);
 			}
 		} else if (action === JwtAction.AUTHENTICATE) {
-			user = await this.userRepo.findOne(eq(users.email, (rest as any).email));
+			user = await this.userRepo.findOne(
+				eq(users.email, String((rest as any).email || "").toLowerCase()),
+			);
 			if (user) {
 				/* @info - OTP login on an OAuth-created account is blocked (origin-locked) */
 				const provider = await this.oauthProviderName(user.id);
@@ -491,7 +500,9 @@ export class AuthService {
 			}
 		} else if (action === JwtAction.FORGOT_PASSWORD) {
 			const { email } = rest as any;
-			const foundUser = await this.userRepo.findOne(eq(users.email, email));
+			const foundUser = await this.userRepo.findOne(
+				eq(users.email, String(email || "").toLowerCase()),
+			);
 			if (!foundUser) throwNotFoundError("User not found.");
 			user = foundUser;
 
@@ -568,6 +579,8 @@ export class AuthService {
 		email: string,
 		metadata: { ipAddress: string; location: string; userAgent: string },
 	) => {
+		/* @info - Normalize: stored emails are lowercase (migration 0020) */
+		email = email.toLowerCase();
 		const user = await this.userRepo.findOne(eq(users.email, email));
 		if (!user) throwNotFoundError("No account found with this email.");
 

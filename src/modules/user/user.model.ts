@@ -5,7 +5,6 @@ import {
 	pgTable,
 	text,
 	timestamp,
-	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -49,10 +48,12 @@ export const users = pgTable(
 		...softDelete,
 		...timestamps,
 	},
-	(table) => [
-		uniqueIndex("uq_users_email").on(table.email),
-	],
 );
+
+/* @info - Email uniqueness is CASE-INSENSITIVE: enforced by
+ * uq_users_email_lower ON users (lower(email)), created in migration
+ * 0020_email_case_insensitive.sql (replaces the old case-sensitive
+ * uq_users_email). Code paths must store/lookup lowercase emails. */
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
