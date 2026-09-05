@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import type { Context, Next } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendErrorResponse } from "@/helpers/response/send-response";
@@ -58,8 +58,11 @@ export const requireInstructor = async (c: Context, next: Next) => {
 };
 
 /**
- * @info - Require is_admin = true on instructor_profiles.
- *         Queries user_roles + instructor_profiles directly.
+ * @info - Platform admins hold role 'admin' (user_roles). The legacy
+ * path (instructor role + instructor_profiles.is_admin = true) is still
+ * honored. Before 2026-09-05 this guard ONLY accepted the legacy path,
+ * so role-admin accounts (e.g. the seeded QA admin) got 403 on every
+ * /admin endpoint while no account on prod had is_admin set.
  */
 export const requireAdmin = async (c: Context, next: Next) => {
 	const authData = c.get("authData");
@@ -73,14 +76,17 @@ export const requireAdmin = async (c: Context, next: Next) => {
 
 	const db = getDb();
 
-	/* Check instructor role exists */
+	/* Check the user holds role admin OR instructor (legacy) */
 	const [roleRow] = await db
 		.select()
 		.from(user_roles)
 		.where(
 			and(
 				eq(user_roles.userId, Number(authData.id)),
-				eq(user_roles.role, "instructor"),
+				or(
+					eq(user_roles.role, "admin"),
+					eq(user_roles.role, "instructor"),
+				),
 			),
 		)
 		.limit(1);
@@ -93,7 +99,13 @@ export const requireAdmin = async (c: Context, next: Next) => {
 		);
 	}
 
-	/* Check admin flag on profile */
+	/* Role 'admin' alone is sufficient (the modern grant path) */
+	if (roleRow.role === "admin") {
+		await next();
+		return;
+	}
+
+	/* Legacy: instructor role still needs the profile admin flag */
 	const [profile] = await db
 		.select()
 		.from(instructorProfiles)
