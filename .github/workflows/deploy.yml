@@ -66,7 +66,7 @@ jobs:
 
       - name: Package artifact
         run: |
-          tar -czf release.tar.gz dist package.json package-lock.json ecosystem.config.cjs docker-compose.yml scripts/remote-deploy.sh
+          tar -czf release.tar.gz dist package.json package-lock.json ecosystem.config.cjs docker-compose.yml docker-compose.prod.yml redis.conf scripts/remote-deploy.sh
           ls -lh release.tar.gz
           # env shipped with the artifact (written fresh every deploy — no
           # write-once logic on the box)

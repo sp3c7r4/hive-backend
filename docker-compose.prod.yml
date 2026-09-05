@@ -1,0 +1,34 @@
+# ------------------------------------------------------------------
+# Hive backend PROD containers (post-RDS)
+#
+# THIS FILE IS OWNED BY THE REPO. Once the database moves to RDS
+# (Option A: RDS in a private subnet, backend SG-only access), the
+# deploy switches to `docker compose -f docker-compose.prod.yml up -d`
+# and this file becomes the only running compose: Redis 8 with the
+# repo-owned redis.conf (AOF on, noeviction, loopback-only).
+#
+# The dev compose (docker-compose.yml with Postgres 18 + Redis) stays
+# untouched for local development. Postgres is intentionally NOT here:
+# production data lives in RDS.
+#
+# Redis binds to 127.0.0.1 ONLY. Never reachable externally.
+# ------------------------------------------------------------------
+services:
+  redis:
+    image: redis:8-alpine
+    container_name: hive-redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - hive-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  hive-redis-data:

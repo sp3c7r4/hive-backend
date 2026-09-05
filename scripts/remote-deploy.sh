@@ -30,28 +30,21 @@ cd /home/ec2-user/hive-backend
 rm -rf node_modules   # npm ci ENOTEMPTY on stale dirs otherwise
 npm ci --omit=dev --ignore-scripts
 
-# Apply the repo-owned docker-compose.yml (Postgres + Redis + anything you add)
+# Apply the PROD compose (Redis only, redis.conf). The database lives in
+# RDS; the old Postgres container is retired below.
 mkdir -p /opt/hive-db
-cp docker-compose.yml /opt/hive-db/docker-compose.yml
-PG_PW=$(grep -oP '^POSTGRES_PASSWORD=\K.*' .env.production | head -1)
-echo "POSTGRES_PASSWORD=${PG_PW}" > /opt/hive-db/.env
-chmod 600 /opt/hive-db/.env
+cp docker-compose.prod.yml /opt/hive-db/docker-compose.prod.yml
+cp redis.conf /opt/hive-db/redis.conf
 cd /opt/hive-db
 sudo dnf install -y docker-compose-plugin >/dev/null 2>&1 || true
-docker compose up -d 2>/dev/null || docker-compose up -d
-
-# @info - DB password CONVERGENCE: compose only sets the password at volume
-# init. If the shipped env changed it, sync it to the running Postgres so
-# the app never breaks on a password rotation. The check runs from the HOST
-# (through docker-proxy = real scram auth; in-container 127.0.0.1 is trust).
-# ALTER uses the in-container socket (passwordless). POSTGRES_USER/DB are
-# structural and still require a manual migration.
-sudo dnf install -y postgresql16 >/dev/null 2>&1 || sudo dnf install -y postgresql15 >/dev/null 2>&1 || true
-PG_PW_ESC=${PG_PW//\'/''}
-if ! PGPASSWORD="$PG_PW" psql -h 127.0.0.1 -U postgres -d hive -t -A -c "SELECT 1" >/dev/null 2>&1; then
-  docker exec hive-postgres psql -U postgres -d hive -c "ALTER USER postgres PASSWORD '$PG_PW_ESC';" >/dev/null 2>&1 || true
-  echo "postgres password synced to the shipped env"
+docker compose -f docker-compose.prod.yml up -d 2>/dev/null || docker-compose -f docker-compose.prod.yml up -d
+# Retire the local Postgres container (data now lives in RDS). The old
+# volume is kept for a week as a rollback artifact.
+if docker ps -a --format '{{.Names}}' | grep -q '^hive-postgres$'; then
+  docker rm -f hive-postgres || true
+  echo "hive-postgres container retired (volume kept)"
 fi
+
 cd /home/ec2-user/hive-backend
 
 NODE_ENV=production node ./dist/migrate.js
