@@ -6,50 +6,64 @@ import { CacheService } from "@/services/cache.service";
 import { JwtService } from "@/services/jwt.service";
 import { generateRefreshTokenId, grabUserIdFromAuthId } from "../id-generators";
 
-const isPrivateIP = (ip: string): boolean => {
-  return (
-    ip === "127.0.0.1" ||
-    ip === "::1" ||
-    ip.startsWith("192.168.") ||
-    ip.startsWith("10.") ||
-    ip.startsWith("172.16.") ||
-    ip.startsWith("172.17.") ||
-    ip.startsWith("172.18.") ||
-    ip.startsWith("172.19.") ||
-    ip.startsWith("172.20.") ||
-    ip.startsWith("172.21.") ||
-    ip.startsWith("172.22.") ||
-    ip.startsWith("172.23.") ||
-    ip.startsWith("172.24.") ||
-    ip.startsWith("172.25.") ||
-    ip.startsWith("172.26.") ||
-    ip.startsWith("172.27.") ||
-    ip.startsWith("172.28.") ||
-    ip.startsWith("172.29.") ||
-    ip.startsWith("172.30.") ||
-    ip.startsWith("172.31.")
-  );
+export const isPrivateIP = (ip: string): boolean => {
+	return (
+		ip === "127.0.0.1" ||
+		ip === "::1" ||
+		ip.startsWith("192.168.") ||
+		ip.startsWith("10.") ||
+		ip.startsWith("172.16.") ||
+		ip.startsWith("172.17.") ||
+		ip.startsWith("172.18.") ||
+		ip.startsWith("172.19.") ||
+		ip.startsWith("172.20.") ||
+		ip.startsWith("172.21.") ||
+		ip.startsWith("172.22.") ||
+		ip.startsWith("172.23.") ||
+		ip.startsWith("172.24.") ||
+		ip.startsWith("172.25.") ||
+		ip.startsWith("172.26.") ||
+		ip.startsWith("172.27.") ||
+		ip.startsWith("172.28.") ||
+		ip.startsWith("172.29.") ||
+		ip.startsWith("172.30.") ||
+		ip.startsWith("172.31.")
+	);
 };
 
+/* @info - In-process cache: geo lookups are rare per IP, and hitting an
+ * external API on every request would be wasteful (and slow on the hot
+ * path - see metadata-grabber's deferred design). */
+const locationCache = new Map<string, { loc: string; at: number }>();
+const LOCATION_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 export const getLocationFromIP = async (ip: string): Promise<string> => {
-  try {
-    if (isPrivateIP(ip)) return "Local Network";
+	if (!ip || isPrivateIP(ip)) return "Local Network";
 
-    const { data } = await axios.get(`https://ipapi.co/${ip}/json/`, {
-      timeout: 5000,
-    });
+	const hit = locationCache.get(ip);
+	if (hit && Date.now() - hit.at < LOCATION_CACHE_TTL) return hit.loc;
 
-    if (data.error) throw new Error(data.error);
+	try {
+		const { data } = await axios.get(`https://ipapi.co/${ip}/json/`, {
+			timeout: 5000,
+		});
 
-    const city = data.city?.trim() || "";
-    const country = data.country_name?.trim() || "";
-    const location = [city, country].filter(Boolean).join(", ");
+		if (data.error) throw new Error(data.error);
 
-    return location || "Unknown Location";
-  } catch (error: any) {
-    console.error(`Failed to get location for IP ${ip}:`, error instanceof Error ? error.message : String(error));
-    return "Unknown Location";
-  }
+		const city = data.city?.trim() || "";
+		const country = data.country_name?.trim() || "";
+		const location = [city, country].filter(Boolean).join(", ");
+
+		const resolved = location || "Unknown Location";
+		locationCache.set(ip, { loc: resolved, at: Date.now() });
+		return resolved;
+	} catch (error: unknown) {
+		console.error(
+			`Failed to get location for IP ${ip}:`,
+			error instanceof Error ? error.message : String(error),
+		);
+		return "Unknown Location";
+	}
 };
 
 export const generateAuthenticatedData = (
@@ -64,10 +78,7 @@ export const generateAuthenticatedData = (
 	return _.omit(data, ["hash"]) as IAuthenticatedUser;
 };
 
-export const generateAuthTokens = async (
-	authId: string,
-	userType: string,
-) => {
+export const generateAuthTokens = async (authId: string, userType: string) => {
 	const cacheService = CacheService.getInstance();
 	const jwtService = JwtService.getInstance();
 

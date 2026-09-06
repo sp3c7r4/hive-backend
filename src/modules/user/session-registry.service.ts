@@ -6,6 +6,7 @@
  * lists sessions, and revokes one by deleting the same keys logout uses.
  */
 import { TTL } from "@/constants";
+import { getLocationFromIP } from "@/helpers";
 import { CacheService } from "@/services/cache.service";
 
 export interface SessionMeta {
@@ -90,7 +91,9 @@ export class SessionRegistryService {
 		return this.instance;
 	}
 
-	/** @info - Metadata only; the refresh token itself is the session. */
+	/** @info - Metadata only; the refresh token itself is the session.
+	 * Location resolution runs in the background (cached + deferred) so
+	 * login latency never depends on an external geo API. */
 	register = async (
 		refreshId: string,
 		meta: { userAgent?: string; ipAddress?: string; location?: string },
@@ -109,8 +112,30 @@ export class SessionRegistryService {
 				"EX",
 				TTL.IN_7_DAYS,
 			);
+			void this.enrichLocation(refreshId, meta.ipAddress);
 		} catch {
 			/* @info - Registry is best-effort; never fail auth for it */
+		}
+	};
+
+	/** @info - Fire-and-forget: backfills the location field once the geo
+	 * lookup resolves, keeping the request path fast. */
+	private enrichLocation = async (refreshId: string, ip?: string) => {
+		if (!ip) return;
+		try {
+			const location = await getLocationFromIP(ip);
+			const key = `session:${refreshId}`;
+			const raw = await this.cache.redis.get(key);
+			if (!raw) return;
+			const meta = JSON.parse(raw) as SessionMeta;
+			if (meta.location) return; // already resolved
+			await this.cache.redis.set(
+				key,
+				JSON.stringify({ ...meta, location }),
+				"KEEPTTL",
+			);
+		} catch {
+			/* best-effort; the list still renders without location */
 		}
 	};
 
@@ -156,9 +181,7 @@ export class SessionRegistryService {
 			const tsRaw = key.split("-").pop();
 			const createdAt = Number(tsRaw) || Date.now();
 			const rawAuth = await this.cache.redis.get(key).catch(() => null);
-			const authId = rawAuth
-				? (JSON.parse(rawAuth) as string)
-				: null;
+			const authId = rawAuth ? (JSON.parse(rawAuth) as string) : null;
 			const raw = await this.cache.redis
 				.get(`session:${key}`)
 				.catch(() => null);
@@ -199,9 +222,7 @@ export class SessionRegistryService {
 	revoke = async (userId: number, refreshId: string): Promise<boolean> => {
 		if (!refreshId.startsWith(`refresh:${userId}-`)) return false;
 		const rawAuth = await this.cache.redis.get(refreshId).catch(() => null);
-		const authId = rawAuth
-			? (JSON.parse(rawAuth) as string)
-			: null;
+		const authId = rawAuth ? (JSON.parse(rawAuth) as string) : null;
 		await this.cache.redis.del(refreshId);
 		if (authId) await this.cache.redis.del(authId);
 		await this.cache.redis.del(`session:${refreshId}`);
