@@ -1,4 +1,5 @@
 import type Redis from "ioredis";
+import { config } from "@/config";
 import { CacheService } from "@/services/cache.service";
 import { serviceLogger } from "@/utils";
 import { WebsocketEngine } from "./websocket.engine";
@@ -25,7 +26,8 @@ export class ChatPubSubService {
 
 	private constructor() {}
 
-	static channelFor = (userId: number) => `chat:user:${userId}`;
+	static channelFor = (userId: number) =>
+		`${config.redis.channelPrefix}chat:user:${userId}`;
 
 	private ensureSubscriber = async () => {
 		if (this.subscriber) return;
@@ -35,7 +37,10 @@ export class ChatPubSubService {
 		 * ready-check would run INFO and crash with "only P|S)SUBSCRIBE allowed". */
 		this.subscriber = client.duplicate({ enableReadyCheck: false }) as Redis;
 		this.subscriber.on("message", (channel, message) => {
-			const userId = Number(channel.split(":")[2]);
+			/* @info - Parse from the end so an env prefix (staging:) never
+			 * shifts the userId segment. */
+			const parts = channel.split(":");
+			const userId = Number(parts[parts.length - 1]);
 			if (!userId) return;
 			try {
 				this.engine.send(userId, JSON.parse(message));

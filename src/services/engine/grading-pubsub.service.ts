@@ -4,6 +4,7 @@
  * Mirrors ChatPubSubService: one duplicate subscriber per SSE connection.
  */
 import type Redis from "ioredis";
+import { config } from "@/config";
 import { CacheService } from "@/services/cache.service";
 import { serviceLogger } from "@/utils";
 
@@ -32,7 +33,8 @@ export class GradingPubSubService {
 		return this.instance;
 	}
 
-	static channelFor = (batchId: number) => `grading-batch:${batchId}`;
+	static channelFor = (batchId: number) =>
+		`${config.redis.channelPrefix}grading-batch:${batchId}`;
 
 	publish = async (batchId: number, event: GradingBatchEvent): Promise<void> => {
 		try {

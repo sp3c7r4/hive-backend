@@ -16,6 +16,11 @@ const EnvSchema = z.object({
 	POSTGRES_PORT: z.coerce.number(),
 	POSTGRES_URI: z.string(),
 	REDIS_URI: z.string(),
+	/* @info - Prefixes Redis pub/sub channels (chat:user:*, grading-batch:*).
+	 * Pub/sub is NOT scoped by Redis db index, so staging and prod sharing
+	 * one Redis server would cross-talk on identical channel names. Prod
+	 * leaves this empty; staging sets REDIS_CHANNEL_PREFIX=staging:. */
+	REDIS_CHANNEL_PREFIX: z.string().default(""),
 	HOSTNAME: z.string(),
 	JWT_PRIVATE_KEY: z.string(),
 	JWT_PUBLIC_KEY: z.string(),

@@ -23,6 +23,7 @@ export const config = {
 
 	redis: {
 		uri: env.REDIS_URI,
+		channelPrefix: env.REDIS_CHANNEL_PREFIX,
 	},
 
 	server: {
