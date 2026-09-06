@@ -28,14 +28,24 @@ on:
       - "package-lock.json"
       - "build.ts"
       - "ecosystem.config.cjs"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target"
+        required: true
+        default: "prod"
+        type: choice
+        options: [prod, staging]
 
 env:
   S3_BUCKET: hive-backups-prod
   S3_PREFIX: deploy/hive-backend
-  INSTANCE_TAG: hive-backend
+  INSTANCE_TAG: hive-backend # staging API shares the prod backend box
   # @info - multi-line secrets via env context, NOT inline in run scripts
-  BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+  BACKEND_ENV: ${{ github.event.inputs.target == 'staging' && secrets.BACKEND_ENV_STAGING || secrets.BACKEND_ENV }}
+  DEPLOY_SCRIPT: ${{ github.event.inputs.target == 'staging' && 'scripts/staging-deploy.sh' || 'scripts/remote-deploy.sh' }}
+  # push triggers always deploy prod (no dispatch inputs on push)
+  TARGET_LABEL: ${{ github.event.inputs.target || 'prod' }}
 
 jobs:
   deploy:
@@ -66,7 +76,7 @@ jobs:
 
       - name: Package artifact
         run: |
-          tar -czf release.tar.gz dist package.json package-lock.json ecosystem.config.cjs docker-compose.yml docker-compose.prod.yml redis.conf scripts/remote-deploy.sh
+          tar -czf release.tar.gz dist package.json package-lock.json ecosystem.config.cjs docker-compose.yml docker-compose.prod.yml redis.conf scripts/remote-deploy.sh scripts/staging-deploy.sh
           ls -lh release.tar.gz
           # env shipped with the artifact (written fresh every deploy — no
           # write-once logic on the box)
@@ -85,7 +95,7 @@ jobs:
         run: |
           CMD_ID=$(aws ssm send-command --targets "Key=tag:Name,Values=${INSTANCE_TAG}" \
             --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"cd /tmp && aws s3 cp s3://${S3_BUCKET}/${ARTIFACT_KEY} /tmp/release.tar.gz && tar -xzf /tmp/release.tar.gz scripts/remote-deploy.sh && S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash scripts/remote-deploy.sh\"]}" \
+            --parameters "{\"commands\":[\"cd /tmp && aws s3 cp s3://${S3_BUCKET}/${ARTIFACT_KEY} /tmp/release.tar.gz && tar -xzf /tmp/release.tar.gz scripts/remote-deploy.sh && S3_BUCKET=${S3_BUCKET} ARTIFACT_KEY=${ARTIFACT_KEY} ENV_KEY=${ENV_KEY} bash ${DEPLOY_SCRIPT}\"]}" \
             --query "Command.CommandId" --output text)
 
           echo "SSM command: $CMD_ID"
