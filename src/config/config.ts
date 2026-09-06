@@ -114,6 +114,14 @@ export const config = {
 		simThreshold: env.AI_TUTOR_SIM_THRESHOLD ?? 0.35,
 	},
 
+	livekit: {
+		url: env.LIVEKIT_URL,
+		publicUrl: env.LIVEKIT_PUBLIC_URL,
+		apiKey: env.LIVEKIT_API_KEY,
+		apiSecret: env.LIVEKIT_API_SECRET,
+		roomPrefix: env.LIVEKIT_ROOM_PREFIX,
+	},
+
 	env: env.NODE_ENV,
 	getEnvUrl: () => {
 		return config.env === "development"

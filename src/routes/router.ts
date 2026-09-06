@@ -1,23 +1,28 @@
 import { Hono } from "hono";
 import { healthCheck } from "@/helpers";
+import { adminRouter } from "@/modules/admin";
+import { aiGradingRouter } from "@/modules/ai-grading";
+import { aiTutorRouter } from "@/modules/ai-tutor";
 import { quizRouter, submissionRouter } from "@/modules/assessments";
 import { authRouter } from "@/modules/auth";
-import { aiTutorRouter } from "@/modules/ai-tutor";
-import { courseBuilderRouter } from "@/modules/course-builder";
-import { aiGradingRouter } from "@/modules/ai-grading";
 import { certificateRouter } from "@/modules/certificates";
-import { reviewRouter } from "@/modules/reviews";
-import { studentRouter } from "@/modules/student";
-import { adminRouter } from "@/modules/admin";
 import { communityRouter, memberRouter } from "@/modules/communities";
+import { courseBuilderRouter } from "@/modules/course-builder";
 import { courseRouter, moduleRouter } from "@/modules/courses";
-import { enrollmentRouter } from "@/modules/enrollments";
 import { earningsRouter } from "@/modules/earnings";
+import { enrollmentRouter } from "@/modules/enrollments";
 import { instructorRouter } from "@/modules/instructor";
+import { liveRouter } from "@/modules/live";
 import { messagingRouter } from "@/modules/messaging";
 import { notificationRouter } from "@/modules/notifications";
+import {
+	adminWithdrawalRouter,
+	instructorWithdrawalRouter,
+	paymentRouter,
+} from "@/modules/payment";
+import { reviewRouter } from "@/modules/reviews";
 import { searchRouter } from "@/modules/search";
-import { paymentRouter, instructorWithdrawalRouter, adminWithdrawalRouter } from "@/modules/payment";
+import { studentRouter } from "@/modules/student";
 import { testRouter } from "@/modules/test";
 import { uploadRouter } from "@/modules/upload";
 import { userRouter } from "@/modules/user/user.routes";
@@ -46,6 +51,7 @@ router.route("/modules", moduleRouter);
 router.route("/quiz", quizRouter);
 router.route("/submissions", submissionRouter);
 router.route("/test", testRouter);
+router.route("/lessons", liveRouter);
 router.route("/payment", paymentRouter);
 router.route("/notifications", notificationRouter);
 router.route("/search", searchRouter);
