@@ -108,11 +108,16 @@ export class LiveService {
 		}
 
 		const roomName = roomNameForLesson(lessonId);
+		const displayName = [authData.firstName, authData.lastName]
+			.filter(Boolean)
+			.join(" ")
+			.trim();
 		const token = new AccessToken(
 			config.livekit.apiKey,
 			config.livekit.apiSecret,
 			{
 				identity: `user-${authData.id}`,
+				name: displayName || `User ${authData.id}`,
 				ttl: `${TOKEN_TTL_SECONDS}s`,
 			},
 		);
