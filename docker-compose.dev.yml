@@ -1,0 +1,65 @@
+# ------------------------------------------------------------------
+# Hive LOCAL DEV stack (Postgres 18 + pgvector, Redis, optional tunnel)
+#
+# USE:  docker compose -f docker-compose.dev.yml up -d
+#
+# This is the dev-only companion to docker-compose.yml, which is owned
+# by the deploy pipeline (prod box). Do NOT run bare `docker compose up`
+# locally - it starts the deploy stack on 5432/6379 and crash-loops
+# without /opt/hive-db/.env. Dev always uses 5436/6382, matching
+# .env.development.
+#
+# Project name is pinned to "hive" so the named volumes
+# (hive_hive-db / hive_hive-cache) match the legacy dev containers and
+# `up` adopts existing data instead of losing it.
+# ------------------------------------------------------------------
+name: hive
+
+services:
+  database:
+    container_name: hive-db
+    image: pgvector/pgvector:pg18
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=hive
+      - POSTGRES_PASSWORD=spectra
+    volumes:
+      - hive_hive-db:/var/lib/postgresql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "hive"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  cache:
+    container_name: hive-cache
+    image: redis:8.4-alpine
+    ports:
+      - "6382:6379"
+    volumes:
+      - hive_hive-cache:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # @info - Dev only: expose the local backend (port 5000) to the web
+  # via Cloudflare tunnel. Opt in with: --profile dev
+  edge-endpoint:
+    container_name: hive-edge-endpoint
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --protocol http2 --url http://host.docker.internal:5000
+    profiles: ["dev"]
+
+volumes:
+  hive_hive-db:
+    external: true
+  hive_hive-cache:
+    external: true
