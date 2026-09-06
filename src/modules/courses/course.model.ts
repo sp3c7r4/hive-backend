@@ -1,3 +1,4 @@
+import { relations } from "drizzle-orm";
 import {
 	boolean,
 	index,
@@ -6,33 +7,64 @@ import {
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
 	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
-import { users } from "@/modules/user/user.model";
-import { communities } from "@/modules/communities/community.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
-import { certificates } from "@/modules/certificates/certificate.model";
-import { reviews } from "@/modules/reviews/review.model";
-import { quizQuestions, quizAttempts, assignmentSubmissions } from "@/modules/assessments/assessment.model";
-import { lessonProgress } from "@/modules/enrollments/enrollment.model";
 import {
 	CourseDifficulty,
-	CourseVisibility,
 	CourseStatus,
-	LessonType,
+	CourseVisibility,
+	LessonLiveStatus,
+	LessonMeetingType,
 	LessonStatus,
+	LessonType,
 	TableNames,
 } from "@/enums";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
+import {
+	assignmentSubmissions,
+	quizAttempts,
+	quizQuestions,
+} from "@/modules/assessments/assessment.model";
+import { certificates } from "@/modules/certificates/certificate.model";
+import { communities } from "@/modules/communities/community.model";
+import {
+	enrollments,
+	lessonProgress,
+} from "@/modules/enrollments/enrollment.model";
+import { reviews } from "@/modules/reviews/review.model";
+import { users } from "@/modules/user/user.model";
 
-export const courseDifficultyEnum = pgEnum("course_difficulty", Object.values(CourseDifficulty) as [string, ...string[]]);
-export const courseVisibilityEnum = pgEnum("course_visibility", Object.values(CourseVisibility) as [string, ...string[]]);
-export const courseStatusEnum = pgEnum("course_status", Object.values(CourseStatus) as [string, ...string[]]);
-export const lessonTypeEnum = pgEnum("lesson_type", Object.values(LessonType) as [string, ...string[]]);
-export const lessonStatusEnum = pgEnum("lesson_status", Object.values(LessonStatus) as [string, ...string[]]);
+export const courseDifficultyEnum = pgEnum(
+	"course_difficulty",
+	Object.values(CourseDifficulty) as [string, ...string[]],
+);
+export const courseVisibilityEnum = pgEnum(
+	"course_visibility",
+	Object.values(CourseVisibility) as [string, ...string[]],
+);
+export const courseStatusEnum = pgEnum(
+	"course_status",
+	Object.values(CourseStatus) as [string, ...string[]],
+);
+export const lessonTypeEnum = pgEnum(
+	"lesson_type",
+	Object.values(LessonType) as [string, ...string[]],
+);
+export const lessonStatusEnum = pgEnum(
+	"lesson_status",
+	Object.values(LessonStatus) as [string, ...string[]],
+);
+export const lessonMeetingTypeEnum = pgEnum(
+	"lesson_meeting_type",
+	Object.values(LessonMeetingType) as [string, ...string[]],
+);
+export const lessonLiveStatusEnum = pgEnum(
+	"lesson_live_status",
+	Object.values(LessonLiveStatus) as [string, ...string[]],
+);
 
 /** @info - A course belongs to one community and is owned by one user (instructor) */
 export const courses = pgTable(
@@ -50,7 +82,9 @@ export const courses = pgTable(
 		subtitle: varchar("subtitle", { length: 500 }),
 		description: text("description"),
 		category: varchar("category", { length: 255 }),
-		difficulty: courseDifficultyEnum("difficulty").default("beginner").notNull(),
+		difficulty: courseDifficultyEnum("difficulty")
+			.default("beginner")
+			.notNull(),
 		visibility: courseVisibilityEnum("visibility").default("public").notNull(),
 		price: integer("price").default(0).notNull(),
 		isFree: boolean("is_free").default(true),
@@ -93,9 +127,7 @@ export const modules = pgTable(
 		sortOrder: integer("sort_order").default(0).notNull(),
 		...timestamps,
 	},
-	(table) => [
-		index("idx_modules_course").on(table.courseId),
-	],
+	(table) => [index("idx_modules_course").on(table.courseId)],
 );
 
 /** @info - Individual lesson within a module — video, PDF, live, quiz, or assignment */
@@ -114,6 +146,20 @@ export const lessons = pgTable(
 		freePreview: boolean("free_preview").default(false),
 		randomizeQuestions: boolean("randomize_questions").default(false).notNull(),
 		status: lessonStatusEnum("status").default("draft").notNull(),
+		/* @info - Live-session scheduling (spec 19). meeting_type discriminates
+		 * LIVE lessons: 'none' = not a meeting, 'native' = LiveKit room,
+		 * 'external' = bring-your-own meeting link. Legacy fields below
+		 * (liveMeetingLink/liveMeetingDate) are kept until the frontend
+		 * migrates to meetingUrl/scheduledAt; dropped in a later migration. */
+		meetingType: lessonMeetingTypeEnum("meeting_type")
+			.default("none")
+			.notNull(),
+		meetingUrl: text("meeting_url"),
+		scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+		liveStatus: lessonLiveStatusEnum("live_status")
+			.default("scheduled")
+			.notNull(),
+		durationMinutes: integer("duration_minutes").default(60).notNull(),
 		videoUrl: varchar("video_url", { length: 1000 }),
 		pdfUrl: varchar("pdf_url", { length: 1000 }),
 		liveMeetingLink: varchar("live_meeting_link", { length: 1000 }),
@@ -127,6 +173,7 @@ export const lessons = pgTable(
 		index("idx_lessons_module").on(table.moduleId),
 		index("idx_lessons_type").on(table.type),
 		index("idx_lessons_status").on(table.status),
+		index("idx_lessons_scheduled_at").on(table.scheduledAt),
 	],
 );
 
