@@ -26,6 +26,8 @@ messagingRouter.get(
 	zod.validate.query(messagesQuerySchema),
 	controller.listMessages,
 );
+messagingRouter.get("/conversations/:id/media", controller.listMedia);
+messagingRouter.get("/conversations/:id/media", controller.listMedia);
 messagingRouter.post("/conversations/:id/read", controller.markRead);
 messagingRouter.delete("/conversations/:id", controller.leave);
 messagingRouter.post("/", zod.validate.body(sendMessageSchema), controller.send);

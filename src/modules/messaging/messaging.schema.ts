@@ -11,6 +11,7 @@ export const sendMessageSchema = z.object({
 	content: z.string().trim().min(1).max(2000).optional(),
 	attachmentType: z.nativeEnum(MessageType).optional(),
 	attachmentUrl: z.string().max(1000).optional(),
+	durationMs: z.number().int().min(1).max(3_600_000).optional(),
 }).refine((v) => v.recipientId || v.communityId, {
 	message: "Either recipientId or communityId is required",
 });

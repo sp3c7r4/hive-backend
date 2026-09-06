@@ -7,6 +7,7 @@ type ConversationRow = {
 	type: string;
 	title: string | null;
 	communityId: number | null;
+	communitySlug?: string | null;
 	coverImageUrl?: string | null;
 	lastMessageAt: Date | null;
 	createdAt: Date | null;
@@ -28,6 +29,7 @@ type MessageRow = {
 	type: string;
 	content: string | null;
 	attachmentUrl: string | null;
+	durationMs: number | null;
 	readAt: Date | null;
 	createdAt: Date | null;
 	deletedAt: Date | null;
@@ -54,6 +56,7 @@ export const toConversationDto = (row: ConversationRow) => ({
 	type: row.type,
 	title: row.title,
 	communityId: row.communityId ?? null,
+	communitySlug: row.communitySlug ?? null,
 	avatarUrl: row.type === "group"
 		? row.coverImageUrl
 			? withPresignedUrl({ coverImageUrl: row.coverImageUrl }, "coverImageUrl").coverImageUrl
@@ -88,6 +91,7 @@ export const toMessageDto = (m: any) => ({
 	attachmentUrl: m.attachmentUrl
 		? withPresignedUrl({ attachmentUrl: m.attachmentUrl }, "attachmentUrl").attachmentUrl
 		: null,
+	durationMs: m.durationMs ?? null,
 	readAt: m.readAt,
 	createdAt: m.createdAt,
 	deletedAt: m.deletedAt,
@@ -103,3 +107,13 @@ export const toMessageDto = (m: any) => ({
 			}
 		: undefined,
 });
+
+/** @info - Shared media item for the Community Details media tabs. */
+export type MediaItemDto = {
+	kind: "image" | "document" | "audio" | "link";
+	url: string | null;
+	fileName: string | null;
+	content: string | null;
+	durationMs: number | null;
+	createdAt: string;
+};

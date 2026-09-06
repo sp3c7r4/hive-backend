@@ -76,6 +76,7 @@ export const messages = pgTable(
 		type: messageTypeEnum("type").default("text").notNull(),
 		content: text("content"),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
+		durationMs: integer("duration_ms"),
 		readAt: timestamp("read_at"),
 		...timestamps,
 		...softDelete,

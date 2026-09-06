@@ -93,7 +93,7 @@ export class MessagingService {
 
 	send = async (
 		authData: IAuthData,
-		body: { recipientId?: number; communityId?: number; content?: string; attachmentUrl?: string; attachmentType?: string },
+		body: { recipientId?: number; communityId?: number; content?: string; attachmentUrl?: string; attachmentType?: string; durationMs?: number },
 	) => {
 		if (body.recipientId === authData.id) throwBadRequestError(MSG.CANNOT_MESSAGE_SELF);
 		if (!body.content?.trim() && !body.attachmentUrl) {
@@ -109,6 +109,7 @@ export class MessagingService {
 				content: body.content,
 				attachmentUrl: body.attachmentUrl,
 				attachmentType: body.attachmentType,
+				durationMs: body.durationMs,
 			});
 		}
 		if (!body.recipientId) throwBadRequestError(MSG.RECIPIENT_NOT_FOUND);
@@ -137,6 +138,7 @@ export class MessagingService {
 			type,
 			content: sanitizeContent(body.content) || null,
 			attachmentUrl: body.attachmentUrl ?? null,
+			durationMs: body.durationMs ?? null,
 		});
 
 		/* @info - Notify the recipient of the new message */
@@ -193,6 +195,27 @@ export class MessagingService {
 				peer: { id: recipient.id, firstName: recipient.firstName, lastName: recipient.lastName, email: recipient.email },
 			},
 		};
+	};
+
+	listMedia = async (authData: IAuthData, conversationId: number, tab: string) => {
+		await this.ensureParticipant(conversationId, authData.id);
+		const mediaMap = {
+			images: () => this.repo.listMediaAttachments(conversationId, [MessageType.IMAGE]),
+			documents: () => this.repo.listMediaAttachments(conversationId, [MessageType.FILE]),
+			audio: () => this.repo.listMediaAttachments(conversationId, [MessageType.AUDIO]),
+			links: () => this.repo.listLinkMessages(conversationId),
+		} as Record<string, () => Promise<any[]>>;
+		const fn = mediaMap[tab] ?? null;
+		if (!fn) throwBadRequestError("Invalid media tab");
+		const rows = await fn!();
+		return rows.map((r) => ({
+			kind: r.type === MessageType.IMAGE ? "image" : r.type === MessageType.AUDIO ? "audio" : r.type === MessageType.FILE ? "document" : "link",
+			url: r.attachmentUrl ? withPresignedUrl({ attachmentUrl: r.attachmentUrl }, "attachmentUrl").attachmentUrl : null,
+			fileName: null,
+			content: r.content ?? null,
+			durationMs: r.durationMs ?? null,
+			createdAt: r.createdAt?.toISOString?.() ?? r.createdAt,
+		}));
 	};
 
 	markRead = async (authData: IAuthData, conversationId: number) => {
@@ -254,7 +277,7 @@ export class MessagingService {
 	/** @info - Send a message to a community's group chat (all active members). */
 	private sendToCommunity = async (
 		authData: IAuthData,
-		body: { communityId: number; content?: string; attachmentUrl?: string; attachmentType?: string },
+		body: { communityId: number; content?: string; attachmentUrl?: string; attachmentType?: string; durationMs?: number },
 	) => {
 		const info = await this.repo.getCommunityInfo(body.communityId);
 		if (!info) throwNotFoundError("Community not found");
@@ -279,6 +302,7 @@ export class MessagingService {
 			type,
 			content: sanitizeContent(body.content) || null,
 			attachmentUrl: body.attachmentUrl ?? null,
+			durationMs: body.durationMs ?? null,
 		});
 
 		const participants = await this.repo.getParticipantIds(conversation.id);

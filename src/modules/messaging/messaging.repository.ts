@@ -102,6 +102,7 @@ export class MessagingRepository {
 				type: conversations.type,
 				title: conversations.title,
 				communityId: conversations.communityId,
+				communitySlug: communities.slug,
 				coverImageUrl: communities.coverImageUrl,
 				lastMessageAt: conversations.lastMessageAt,
 				createdAt: conversations.createdAt,
@@ -190,6 +191,7 @@ export class MessagingRepository {
 				type: messages.type,
 				content: messages.content,
 				attachmentUrl: messages.attachmentUrl,
+				durationMs: messages.durationMs,
 				readAt: messages.readAt,
 				createdAt: messages.createdAt,
 				deletedAt: messages.deletedAt,
@@ -221,6 +223,7 @@ export class MessagingRepository {
 		type: string;
 		content?: string | null;
 		attachmentUrl?: string | null;
+		durationMs?: number | null;
 	}) => {
 		const db = getDb();
 		const message = await db.transaction(async (tx) => {
@@ -232,6 +235,7 @@ export class MessagingRepository {
 					type: data.type as any,
 					content: data.content ?? null,
 					attachmentUrl: data.attachmentUrl ?? null,
+					durationMs: data.durationMs ?? null,
 				})
 				.returning();
 			await tx
@@ -241,6 +245,59 @@ export class MessagingRepository {
 			return inserted;
 		});
 		return message;
+	};
+
+	/** @info - Shared media for the media tabs: images / documents / audio files. */
+	listMediaAttachments = async (conversationId: number, types: string[], limit = 60) => {
+		const db = getDb();
+		if (types.length === 0) return [];
+		return db
+			.select({
+				id: messages.id,
+				conversationId: messages.conversationId,
+				senderId: messages.senderId,
+				type: messages.type,
+				content: messages.content,
+				attachmentUrl: messages.attachmentUrl,
+				durationMs: messages.durationMs,
+				readAt: messages.readAt,
+				createdAt: messages.createdAt,
+				deletedAt: messages.deletedAt,
+			})
+			.from(messages)
+			.where(and(
+				eq(messages.conversationId, conversationId),
+				isNull(messages.deletedAt),
+				inArray(messages.type, types as any),
+			))
+			.orderBy(sql`${messages.id} DESC`)
+			.limit(limit);
+	};
+
+	/** @info - Messages whose text contains at least one URL (Links tab). */
+	listLinkMessages = async (conversationId: number, limit = 60) => {
+		const db = getDb();
+		return db
+			.select({
+				id: messages.id,
+				conversationId: messages.conversationId,
+				senderId: messages.senderId,
+				type: messages.type,
+				content: messages.content,
+				attachmentUrl: messages.attachmentUrl,
+				durationMs: messages.durationMs,
+				readAt: messages.readAt,
+				createdAt: messages.createdAt,
+				deletedAt: messages.deletedAt,
+			})
+			.from(messages)
+			.where(and(
+				eq(messages.conversationId, conversationId),
+				isNull(messages.deletedAt),
+				sql`${messages.content} ILIKE '%http%'`,
+			))
+			.orderBy(sql`${messages.id} DESC`)
+			.limit(limit);
 	};
 
 	isParticipant = async (conversationId: number, userId: number) => {

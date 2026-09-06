@@ -37,6 +37,14 @@ export class MessagingController {
 		return sendSuccessResponse(c, { message: "Conversation created", data }, StatusCodes.CREATED);
 	};
 
+	listMedia = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = Number(c.req.param("id"));
+		const tab = c.req.query("tab") ?? "images";
+		const data = await this.service.listMedia(authData, id, tab);
+		return sendSuccessResponse(c, { message: "Media fetched", data });
+	};
+
 	listMessages = async (c: Context) => {
 		const authData = c.get("authData");
 		const query = c.req.query();
