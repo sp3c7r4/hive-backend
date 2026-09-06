@@ -86,10 +86,20 @@ export class UploadController {
 			"application/pdf",
 			"application/msword",
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"application/vnd.ms-excel",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			"application/vnd.ms-powerpoint",
+			"application/vnd.openxmlformats-officedocument.presentationml.presentation",
 			"image/jpeg",
 			"image/png",
 			"image/gif",
 			"image/webp",
+			"audio/webm",
+			"audio/mp4",
+			"audio/x-m4a",
+			"audio/ogg",
+			"audio/mpeg",
+			"video/mp4",
 		];
 		if (!file || !(file instanceof File)) {
 			return sendErrorResponse(
@@ -109,7 +119,7 @@ export class UploadController {
 		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid file type '${fileType}'. Allowed: PDF, DOC, DOCX, JPEG, PNG, GIF, WebP` },
+				{ message: `Invalid file type '${fileType}'. Allowed: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, JPEG, PNG, GIF, WebP, audio` },
 				StatusCodes.BAD_REQUEST,
 			);
 		}
