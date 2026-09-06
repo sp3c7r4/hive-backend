@@ -93,7 +93,7 @@ const EnvSchema = z.object({
 	 * (livekit dev defaults: devkey/secret). Prod/staging secrets come
 	 * from deploy env; room prefix isolates shared instances. */
 	LIVEKIT_URL: z.string().default("ws://127.0.0.1:7880"),
-	LIVEKIT_PUBLIC_URL: z.string().default("ws://127.0.0.1:7880"),
+	LIVEKIT_PUBLIC_URL: z.string().optional(),
 	LIVEKIT_API_KEY: z.string().default("devkey"),
 	LIVEKIT_API_SECRET: z.string().default("secret"),
 	LIVEKIT_ROOM_PREFIX: z.string().default(""),

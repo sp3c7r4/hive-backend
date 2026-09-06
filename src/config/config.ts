@@ -116,7 +116,7 @@ export const config = {
 
 	livekit: {
 		url: env.LIVEKIT_URL,
-		publicUrl: env.LIVEKIT_PUBLIC_URL,
+		publicUrl: env.LIVEKIT_PUBLIC_URL || env.LIVEKIT_URL,
 		apiKey: env.LIVEKIT_API_KEY,
 		apiSecret: env.LIVEKIT_API_SECRET,
 		roomPrefix: env.LIVEKIT_ROOM_PREFIX,
