@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { CourseDifficulty, CourseVisibility, LessonType } from "@/enums";
+import {
+	CourseDifficulty,
+	CourseVisibility,
+	LessonMeetingType,
+	LessonType,
+} from "@/enums";
 
 const coerceBool = (val: unknown) => {
 	if (typeof val === "string") return val === "true" || val === "1";
@@ -47,9 +52,18 @@ export const createCourseFormSchema = z.object({
 	sequentialAccess: z.preprocess(coerceBool, z.boolean().optional()),
 	dripContent: z.preprocess(coerceBool, z.boolean().optional()),
 	offerCertificate: z.preprocess(coerceBool, z.boolean().optional()),
-	minCompletionPercent: z.preprocess(coerceInt, z.number().int().min(0).max(100).optional()),
-	minQuizScorePercent: z.preprocess(coerceInt, z.number().int().min(0).max(100).optional()),
-	minAttendancePercent: z.preprocess(coerceInt, z.number().int().min(0).max(100).optional()),
+	minCompletionPercent: z.preprocess(
+		coerceInt,
+		z.number().int().min(0).max(100).optional(),
+	),
+	minQuizScorePercent: z.preprocess(
+		coerceInt,
+		z.number().int().min(0).max(100).optional(),
+	),
+	minAttendancePercent: z.preprocess(
+		coerceInt,
+		z.number().int().min(0).max(100).optional(),
+	),
 });
 
 export const createModuleSchema = z.object({
@@ -69,6 +83,13 @@ export const createLessonSchema = z.object({
 	videoUrl: z.string().max(1000).optional(),
 	pdfUrl: z.string().max(1000).optional(),
 	driveUrl: z.string().max(1000).optional(),
+	/* @info - Live lesson scheduling (spec 19). meetingUrl + scheduledAt
+	 * replace the legacy liveMeetingLink/liveMeetingDate fields for new
+	 * rows; legacy fields are still accepted for the transition. */
+	meetingType: z.nativeEnum(LessonMeetingType).optional(),
+	meetingUrl: z.string().max(1000).optional(),
+	scheduledAt: z.string().optional(),
+	durationMinutes: z.number().int().min(5).max(600).optional(),
 	liveMeetingLink: z.string().max(1000).optional(),
 	liveMeetingDate: z.string().max(255).optional(),
 	attachmentUrl: z.string().max(1000).optional(),
@@ -86,10 +107,14 @@ export const generateMeetingSchema = z.object({
 	description: z.string().optional(),
 	startTime: z.string().min(1),
 	endTime: z.string().min(1),
-	attendees: z.array(z.object({
-		entityId: z.number().int(),
-		entityType: z.string(),
-	})).optional(),
+	attendees: z
+		.array(
+			z.object({
+				entityId: z.number().int(),
+				entityType: z.string(),
+			}),
+		)
+		.optional(),
 	duration: z.number().int().optional(),
 	autoRecord: z.boolean().optional(),
 });
