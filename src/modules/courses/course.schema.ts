@@ -88,7 +88,10 @@ export const createLessonSchema = z.object({
 	 * rows; legacy fields are still accepted for the transition. */
 	meetingType: z.nativeEnum(LessonMeetingType).optional(),
 	meetingUrl: z.string().max(1000).optional(),
-	scheduledAt: z.string().optional(),
+	/* @info - Drizzle timestamp columns need Date objects; the client sends
+	 * an ISO string. z.coerce.date() converts (and 400s on junk) - without
+	 * it every schedule save died on value.toISOString(). */
+	scheduledAt: z.coerce.date().optional(),
 	durationMinutes: z.number().int().min(5).max(600).optional(),
 	liveMeetingLink: z.string().max(1000).optional(),
 	liveMeetingDate: z.string().max(255).optional(),

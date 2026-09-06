@@ -19,6 +19,7 @@ export interface CalendarEvent {
 		meetingType: "native" | "external";
 		meetingUrl: string | null;
 		liveStatus: string;
+		description: string | null;
 	};
 }
 
@@ -73,6 +74,7 @@ export class CalendarService {
 				courseSlug: courses.slug,
 				courseTitle: courses.title,
 				moduleTitle: modules.title,
+				description: lessons.description,
 			})
 			.from(lessons)
 			.innerJoin(modules, eq(lessons.moduleId, modules.id))
@@ -106,6 +108,7 @@ export class CalendarService {
 					meetingType: row.meetingType as "native" | "external",
 					meetingUrl: row.meetingUrl,
 					liveStatus: row.liveStatus,
+					description: row.description,
 				},
 			};
 		});

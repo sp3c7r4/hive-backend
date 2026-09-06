@@ -1,26 +1,45 @@
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { RelationalRepository } from "@/bases";
+import { getDb } from "@/db/postgres.db";
+import { LessonType, UserRole } from "@/enums";
+import { withPresignedUrl, withTransaction } from "@/helpers";
+import {
+	throwBadRequestError,
+	throwNotFoundError,
+} from "@/helpers/errors/throw-errors";
+import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import { communities } from "@/modules/communities/community.model";
+import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { users } from "@/modules/user/user.model";
+import { user_roles } from "@/modules/user/user-role.model";
 import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
-import { eq, and, isNull, asc, desc, sql } from "drizzle-orm";
-import { throwNotFoundError, throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { PaginationService } from "@/services/pagination.service";
 import { serviceLogger } from "@/utils";
-import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { UserRole, LessonType } from "@/enums";
-import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
-import { CourseMessages, ModuleMessages, LessonMessages } from "./course.message";
-import { courses, modules, lessons } from "./course.model";
-import { communities } from "@/modules/communities/community.model";
-import { users } from "@/modules/user/user.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
-import { user_roles } from "@/modules/user/user-role.model";
+import {
+	CourseMessages,
+	LessonMessages,
+	ModuleMessages,
+} from "./course.message";
+import type { NewCourse, NewLesson, NewModule } from "./course.model";
+import { courses, lessons, modules } from "./course.model";
 import {
 	CourseRepository,
-	ModuleRepository,
 	LessonRepository,
+	ModuleRepository,
 } from "./course.repository";
-import type { NewCourse, NewModule, NewLesson } from "./course.model";
-import { getDb } from "@/db/postgres.db";
-import { withPresignedUrl, withTransaction } from "@/helpers";
-import { RelationalRepository } from "@/bases";
+
+/* @info - The HTTP layer sends scheduledAt as an ISO string (zod is only
+ * used as a 400 gate in this codebase - controllers re-read raw bodies).
+ * Drizzle timestamp columns need a Date, so coerce at the service edge. */
+const normalizeScheduledAt = <T extends { scheduledAt?: unknown }>(
+	data: T,
+): T => {
+	if (typeof data.scheduledAt === "string") {
+		return { ...data, scheduledAt: new Date(data.scheduledAt) } as T;
+	}
+	return data;
+};
 
 export class CourseService {
 	private static instance: CourseService;
@@ -72,7 +91,8 @@ export class CourseService {
 
 	getCourse = async (idOrSlug: number | string) => {
 		const db = getDb();
-		const isNumericId = typeof idOrSlug === "number" || /^\d+$/.test(String(idOrSlug));
+		const isNumericId =
+			typeof idOrSlug === "number" || /^\d+$/.test(String(idOrSlug));
 
 		let course;
 		if (isNumericId) {
@@ -86,7 +106,9 @@ export class CourseService {
 			const [result] = await db
 				.select()
 				.from(courses)
-				.where(and(eq(courses.slug, String(idOrSlug)), isNull(courses.deletedAt)))
+				.where(
+					and(eq(courses.slug, String(idOrSlug)), isNull(courses.deletedAt)),
+				)
 				.limit(1);
 			course = result ?? null;
 		}
@@ -98,7 +120,11 @@ export class CourseService {
 		const enriched = { ...course } as Record<string, unknown>;
 		/* @info - Instructor profile for the detail page (name + avatar) */
 		const [instructorUser] = await db
-			.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+			.select({
+				firstName: users.firstName,
+				lastName: users.lastName,
+				avatarUrl: users.avatarUrl,
+			})
 			.from(users)
 			.where(eq(users.id, course!.instructorId))
 			.limit(1);
@@ -107,7 +133,10 @@ export class CourseService {
 					id: course!.instructorId,
 					name: `${instructorUser.firstName ?? ""} ${instructorUser.lastName ?? ""}`.trim(),
 					avatarUrl: instructorUser.avatarUrl
-						? withPresignedUrl({ avatar: instructorUser.avatarUrl } as any, "avatar").avatar
+						? withPresignedUrl(
+								{ avatar: instructorUser.avatarUrl } as any,
+								"avatar",
+							).avatar
 						: null,
 				}
 			: null;
@@ -123,7 +152,11 @@ export class CourseService {
 		return withPresignedUrl(enriched, "coverImageUrl");
 	};
 
-	listCourses = async (params?: { page?: number; limit?: number; communityId?: number }) => {
+	listCourses = async (params?: {
+		page?: number;
+		limit?: number;
+		communityId?: number;
+	}) => {
 		const conditions: any[] = [isNull(courses.deletedAt)];
 
 		if (params?.communityId) {
@@ -139,7 +172,10 @@ export class CourseService {
 			where: and(...conditions),
 		});
 
-		return { ...result, data: result.data.map(c => withPresignedUrl(c, "coverImageUrl")) };
+		return {
+			...result,
+			data: result.data.map((c) => withPresignedUrl(c, "coverImageUrl")),
+		};
 	};
 
 	/** @info Returns courses the authenticated user is enrolled in */
@@ -196,10 +232,9 @@ export class CourseService {
 			rows = await db
 				.select(selectFields)
 				.from(courses)
-				.where(and(
-					eq(courses.instructorId, authData.id),
-					isNull(courses.deletedAt),
-				))
+				.where(
+					and(eq(courses.instructorId, authData.id), isNull(courses.deletedAt)),
+				)
 				.orderBy(desc(courses.updatedAt));
 		} else {
 			/* Student: enrolled courses */
@@ -207,33 +242,48 @@ export class CourseService {
 				.select(selectFields)
 				.from(courses)
 				.innerJoin(enrollments, eq(courses.id, enrollments.courseId))
-				.where(and(
-					eq(enrollments.userId, authData.id),
-					isNull(courses.deletedAt),
-				))
+				.where(
+					and(eq(enrollments.userId, authData.id), isNull(courses.deletedAt)),
+				)
 				.orderBy(desc(courses.updatedAt));
 		}
 
 		return rows.map((c: any) => withPresignedUrl(c, "coverImageUrl"));
 	};
 
-	updateCourse = async (authData: IAuthData, id: number, data: Partial<NewCourse>) => {
+	updateCourse = async (
+		authData: IAuthData,
+		id: number,
+		data: Partial<NewCourse>,
+	) => {
 		const course = await this.coursesRepo.findById(id);
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 
 		// Coerce FormData string values to proper types
 		const coerced: Record<string, any> = { ...data };
-		if (typeof coerced.price === "string") coerced.price = Number(coerced.price);
-		if (typeof coerced.isFree === "string") coerced.isFree = coerced.isFree === "true";
-		if (typeof coerced.sequentialAccess === "string") coerced.sequentialAccess = coerced.sequentialAccess === "true";
-		if (typeof coerced.dripContent === "string") coerced.dripContent = coerced.dripContent === "true";
-		if (typeof coerced.allowComments === "string") coerced.allowComments = coerced.allowComments === "true";
-		if (typeof coerced.allowDownloads === "string") coerced.allowDownloads = coerced.allowDownloads === "true";
-		if (typeof coerced.offerCertificate === "string") coerced.offerCertificate = coerced.offerCertificate === "true";
-		if (typeof coerced.minCompletionPercent === "string") coerced.minCompletionPercent = Number(coerced.minCompletionPercent);
-		if (typeof coerced.minQuizScorePercent === "string") coerced.minQuizScorePercent = Number(coerced.minQuizScorePercent);
-		if (typeof coerced.minAttendancePercent === "string") coerced.minAttendancePercent = Number(coerced.minAttendancePercent);
-		if (typeof coerced.monthlyPrice === "string") coerced.monthlyPrice = coerced.monthlyPrice === "" ? null : Number(coerced.monthlyPrice);
+		if (typeof coerced.price === "string")
+			coerced.price = Number(coerced.price);
+		if (typeof coerced.isFree === "string")
+			coerced.isFree = coerced.isFree === "true";
+		if (typeof coerced.sequentialAccess === "string")
+			coerced.sequentialAccess = coerced.sequentialAccess === "true";
+		if (typeof coerced.dripContent === "string")
+			coerced.dripContent = coerced.dripContent === "true";
+		if (typeof coerced.allowComments === "string")
+			coerced.allowComments = coerced.allowComments === "true";
+		if (typeof coerced.allowDownloads === "string")
+			coerced.allowDownloads = coerced.allowDownloads === "true";
+		if (typeof coerced.offerCertificate === "string")
+			coerced.offerCertificate = coerced.offerCertificate === "true";
+		if (typeof coerced.minCompletionPercent === "string")
+			coerced.minCompletionPercent = Number(coerced.minCompletionPercent);
+		if (typeof coerced.minQuizScorePercent === "string")
+			coerced.minQuizScorePercent = Number(coerced.minQuizScorePercent);
+		if (typeof coerced.minAttendancePercent === "string")
+			coerced.minAttendancePercent = Number(coerced.minAttendancePercent);
+		if (typeof coerced.monthlyPrice === "string")
+			coerced.monthlyPrice =
+				coerced.monthlyPrice === "" ? null : Number(coerced.monthlyPrice);
 		if (coerced.price === "") coerced.price = 0;
 
 		const updated = await this.coursesRepo.update(id, coerced as any);
@@ -332,15 +382,27 @@ export class CourseService {
 	 * (the two-step add-lesson flow). Only an INVALID link is rejected; a
 	 * missing link is fine and gets filled in from the editor drawer.
 	 */
-	private assertDriveLink(type: string | undefined, driveUrl: string | null | undefined) {
-		if (type === LessonType.GOOGLE_DRIVE && driveUrl && !isGoogleDriveLink(driveUrl)) {
-			throwBadRequestError("A valid Google Drive share link is required for Google Drive lessons.");
+	private assertDriveLink(
+		type: string | undefined,
+		driveUrl: string | null | undefined,
+	) {
+		if (
+			type === LessonType.GOOGLE_DRIVE &&
+			driveUrl &&
+			!isGoogleDriveLink(driveUrl)
+		) {
+			throwBadRequestError(
+				"A valid Google Drive share link is required for Google Drive lessons.",
+			);
 		}
 	}
 
 	createLesson = async (moduleId: number, data: NewLesson) => {
 		this.assertDriveLink(data.type, data.driveUrl);
-		const lesson = await this.lessonsRepo.create({ ...data, moduleId } as any);
+		const lesson = await this.lessonsRepo.create({
+			...normalizeScheduledAt(data),
+			moduleId,
+		} as any);
 		/* @info - Publish immediately? Index it for the AI tutor */
 		if (lesson.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
@@ -362,10 +424,29 @@ export class CourseService {
 
 	updateLesson = async (id: number, data: Partial<NewLesson>) => {
 		const db = getDb();
-		const [existing] = await db.select().from(lessons).where(eq(lessons.id, id)).limit(1);
+		const [existing] = await db
+			.select()
+			.from(lessons)
+			.where(eq(lessons.id, id))
+			.limit(1);
 		if (!existing) throwNotFoundError(LessonMessages.NOT_FOUND);
+		data = normalizeScheduledAt(data);
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
-		this.assertDriveLink(data.type ?? existing!.type, data.driveUrl ?? existing!.driveUrl);
+		this.assertDriveLink(
+			data.type ?? existing!.type,
+			data.driveUrl ?? existing!.driveUrl,
+		);
+		/* @info - Re-arming: editing the time of an ended session brings it
+		 * back to the calendar (ended sessions are hidden by design, which
+		 * made reschedules look like they 'didn't commit'). */
+		if (
+			data.scheduledAt &&
+			existing!.liveStatus === "ended" &&
+			existing!.meetingType &&
+			existing!.meetingType !== "none"
+		) {
+			data = { ...data, liveStatus: "scheduled" };
+		}
 		const lesson = await this.lessonsRepo.update(id, data as any);
 		/* @info - A published lesson that was edited gets re-embedded so the
 		 * tutor never serves stale content */
