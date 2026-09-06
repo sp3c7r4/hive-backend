@@ -25,6 +25,11 @@ chmod 600 /home/ec2-user/hive-backend/.env.staging
 chown ec2-user:ec2-user /home/ec2-user/hive-backend/.env.staging
 rm -f /tmp/env.staging
 
+# @info - Install deps when package.json changed. --ignore-scripts skips
+# husky (dev-only); CI already ran the full install, the box only needs
+# production modules for the bundled ESM imports.
+runuser -u ec2-user -- bash -lc "cd /home/ec2-user/hive-backend && npm ci --omit=dev --ignore-scripts >/dev/null 2>&1 || npm install --omit=dev --ignore-scripts >/dev/null 2>&1 || true"
+
 cd /home/ec2-user/hive-backend
 
 # Staging migrations run against hive_staging only (env points there)
