@@ -159,6 +159,10 @@ export class CourseService {
 	}) => {
 		const conditions: any[] = [isNull(courses.deletedAt)];
 
+		/* @info - Only PUBLISHED courses are ever listed for students: drafts
+		 * must not surface in Explore or community catalogs. */
+		conditions.push(eq(courses.status, "published"));
+
 		if (params?.communityId) {
 			conditions.push(eq(courses.communityId, params.communityId));
 		} else {
