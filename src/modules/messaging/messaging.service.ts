@@ -248,7 +248,7 @@ export class MessagingService {
 		const message = await this.repo.findMessage(messageId);
 		if (!message) throwNotFoundError("Message not found");
 		if (message!.senderId !== authData.id) throwForbiddenError(MSG.NOT_MESSAGE_OWNER);
-		const deleted = (await this.repo.softDeleteMessage(messageId))!;
+		const deleted = (await this.repo.softDeleteMessage(messageId, authData.id))!;
 
 		/* Real-time delete to every participant */
 		const participants = await this.repo.getParticipantIds(deleted.conversationId);
@@ -258,7 +258,16 @@ export class MessagingService {
 			success: true,
 			data: {
 				type: "message:deleted",
-				payload: { conversationId: deleted.conversationId, messageId: deleted.id },
+				payload: {
+					conversationId: deleted.conversationId,
+					messageId: deleted.id,
+					deletedAt: deleted.deletedAt,
+					deletedBy: {
+						id: authData.id,
+						firstName: authData.firstName ?? "",
+						lastName: authData.lastName ?? "",
+					},
+				},
 			},
 		};
 		await Promise.allSettled(participants.map((pid) => this.pubsub.publishUser(pid, envelope)));

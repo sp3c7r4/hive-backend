@@ -37,6 +37,9 @@ type MessageRow = {
 	senderLastName?: string;
 	senderEmail?: string;
 	senderAvatarUrl?: string | null;
+	deletedByFirstName?: string | null;
+	deletedByLastName?: string | null;
+	deletedByEmail?: string | null;
 };
 
 const toPeerDto = (row: ConversationRow) =>
@@ -72,6 +75,7 @@ export const toConversationDto = (row: ConversationRow) => ({
 				id: row.lastMessage.id,
 				type: row.lastMessage.type,
 				content: row.lastMessage.content,
+				deletedAt: row.lastMessage.deletedAt ?? null,
 				attachmentUrl: row.lastMessage.attachmentUrl
 					? withPresignedUrl({ attachmentUrl: row.lastMessage.attachmentUrl }, "attachmentUrl")
 							.attachmentUrl
@@ -95,6 +99,14 @@ export const toMessageDto = (m: any) => ({
 	readAt: m.readAt,
 	createdAt: m.createdAt,
 	deletedAt: m.deletedAt,
+	deletedBy: m.deletedBy
+		? {
+				id: m.deletedBy,
+				firstName: m.deletedByFirstName ?? "",
+				lastName: m.deletedByLastName ?? "",
+				email: m.deletedByEmail ?? "",
+			}
+		: null,
 	sender: m.senderId
 		? {
 				id: m.senderId,

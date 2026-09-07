@@ -136,9 +136,10 @@ export class MessagingRepository {
 					attachmentUrl: messages.attachmentUrl,
 					createdAt: messages.createdAt,
 					senderId: messages.senderId,
+					deletedAt: messages.deletedAt,
 				})
 				.from(messages)
-				.where(and(inArray(messages.conversationId, ids), isNull(messages.deletedAt)))
+				.where(inArray(messages.conversationId, ids))
 				.orderBy(messages.id),
 			db
 				.select({
@@ -180,8 +181,9 @@ export class MessagingRepository {
 	/** Messages for a conversation — newest-first cursor page (limit+1 tells if more). */
 	listMessages = async (conversationId: number, before?: number, limit = 30) => {
 		const db = getDb();
-		const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
+		const conditions = [eq(messages.conversationId, conversationId)];
 		if (before) conditions.push(lt(messages.id, before));
+		const deleter = alias(users, "deleter");
 
 		return db
 			.select({
@@ -195,13 +197,18 @@ export class MessagingRepository {
 				readAt: messages.readAt,
 				createdAt: messages.createdAt,
 				deletedAt: messages.deletedAt,
+				deletedBy: messages.deletedBy,
 				senderFirstName: users.firstName,
 				senderLastName: users.lastName,
 				senderEmail: users.email,
 				senderAvatarUrl: users.avatarUrl,
+				deletedByFirstName: deleter.firstName,
+				deletedByLastName: deleter.lastName,
+				deletedByEmail: deleter.email,
 			})
 			.from(messages)
 			.innerJoin(users, eq(users.id, messages.senderId))
+			.leftJoin(deleter, eq(deleter.id, messages.deletedBy))
 			.where(and(...conditions))
 			.orderBy(sql`${messages.id} DESC`)
 			.limit(limit + 1);
@@ -543,11 +550,11 @@ export class MessagingRepository {
 		return conversation;
 	};
 
-	softDeleteMessage = async (messageId: number) => {
+	softDeleteMessage = async (messageId: number, deletedBy: number) => {
 		const db = getDb();
 		const [row] = await db
 			.update(messages)
-			.set({ deletedAt: new Date() })
+			.set({ deletedAt: new Date(), deletedBy })
 			.where(eq(messages.id, messageId))
 			.returning();
 		return row;

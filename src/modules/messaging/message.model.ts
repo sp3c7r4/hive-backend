@@ -78,6 +78,7 @@ export const messages = pgTable(
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
 		durationMs: integer("duration_ms"),
 		readAt: timestamp("read_at"),
+		deletedBy: integer("deleted_by"),
 		...timestamps,
 		...softDelete,
 	},
