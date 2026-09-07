@@ -118,6 +118,7 @@ export class PaymentController {
 			amount,
 			reference,
 			callback_url: `${config.frontendUrl}/dashboard/payments?ref=${reference}`,
+			channels: ["card", "bank_transfer", "bank", "ussd", "qr"],
 			metadata: {
 				paymentType: type,
 				courseId: courseId ?? null,
