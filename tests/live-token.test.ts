@@ -12,7 +12,7 @@ import { LiveService } from "@/modules/live";
 /**
  * @info - Live session token grants (spec 19):
  *  - instructor owns the course -> canPublish (publish + subscribe)
- *  - enrolled student          -> subscribe-only + canPublishData
+ *  - enrolled student          -> publish + subscribe + chat data (everyone can speak)
  *  - non-enrolled user         -> 403
  *  - non-native lesson         -> 400
  * Creates real rows in a throwaway course and cleans them up.

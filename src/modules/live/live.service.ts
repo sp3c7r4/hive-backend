@@ -76,9 +76,10 @@ export class LiveService {
 
 	/**
 	 * @info - POST /lessons/:id/live-token
-	 * Issues a LiveKit join token. The instructor may publish (camera +
-	 * mic); enrolled students subscribe only but may send chat data.
-	 * Enrollment check mirrors the AI tutor gate (deletedAt is null).
+	 * Issues a LiveKit join token. Instructors AND enrolled students may
+	 * publish (camera + mic + chat data) so every participant can speak
+	 * and share video in the live class. Enrollment check mirrors the AI
+	 * tutor gate (deletedAt is null).
 	 */
 	issueToken = async (authData: IAuthData, lessonId: number) => {
 		await this.enforceTokenRateLimit(Number(authData.id));
@@ -124,7 +125,7 @@ export class LiveService {
 		token.addGrant({
 			room: roomName,
 			roomJoin: true,
-			canPublish: isInstructor,
+			canPublish: true,
 			canSubscribe: true,
 			canPublishData: true,
 		});
