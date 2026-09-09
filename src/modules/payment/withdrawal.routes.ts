@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { requireAdmin, requireInstructor } from "@/middlewares/auth/guards";
 import { JwtService, ZodEngine } from "@/services";
-import { requireAdmin } from "@/middlewares/auth/guards";
 import { WithdrawalController } from "./withdrawal.controller";
 
 /** @info - Mounted at /instructor/withdrawals and /admin/withdrawals */
@@ -15,7 +15,9 @@ const controller = WithdrawalController.getInstance();
 const createWithdrawalSchema = z.object({
 	amount: z.number().int().positive(),
 	bankName: z.string().min(1).max(255),
-	accountNumber: z.string().regex(/^\d{10}$/, "Account number must be 10 digits"),
+	accountNumber: z
+		.string()
+		.regex(/^\d{10}$/, "Account number must be 10 digits"),
 	accountName: z.string().min(1).max(255),
 });
 
@@ -25,10 +27,12 @@ const adminWithdrawalSchema = z.object({
 
 const verifyBankSchema = z.object({
 	bankName: z.string().min(1).max(255),
-	accountNumber: z.string().regex(/^\d{10}$/, "Account number must be 10 digits"),
+	accountNumber: z
+		.string()
+		.regex(/^\d{10}$/, "Account number must be 10 digits"),
 });
 
-instructorWithdrawalRouter.use("*", jwt.validateToken);
+instructorWithdrawalRouter.use("*", jwt.validateToken, requireInstructor);
 instructorWithdrawalRouter.get("/", controller.listMine);
 instructorWithdrawalRouter.post(
 	"/verify-account",
