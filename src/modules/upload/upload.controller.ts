@@ -55,6 +55,28 @@ export class UploadController {
 
 		const ext = filename.split(".").pop() ?? "bin";
 		const folderName = folder ?? "uploads";
+
+		/* @info - Lesson videos are uploaded straight to S3 via this presigned
+		 * URL; keep the declared content type honest at the gate. */
+		if (folderName === "videos") {
+			const allowedVideoTypes = [
+				"video/mp4",
+				"video/quicktime",
+				"video/webm",
+				"video/x-m4v",
+				"video/mpeg",
+			];
+			if (!allowedVideoTypes.includes(contentType)) {
+				return sendErrorResponse(
+					c,
+					{
+						message: `Invalid file type '${contentType}'. Allowed: MP4, MOV, WebM, M4V, MPEG`,
+					},
+					StatusCodes.BAD_REQUEST,
+				);
+			}
+		}
+
 		const key = generateImageKey(folderName, ext, authData.id.toString());
 
 		const result = await this.storage.generatePresignedUploadUrl({
