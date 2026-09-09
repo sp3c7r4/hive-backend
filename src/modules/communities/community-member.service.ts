@@ -345,10 +345,9 @@ export class CommunityMemberService {
 				locals: {
 					memberName: approvedUser.firstName ?? "",
 					communityName: (community as any).name,
-					communityLink: `${
-						process.env.APP_URL ||
-						`https://${config.server.serverDomain}`
-					}/dashboard/explore/communities/${(community as any).slug}`,
+					/* @info - Emails link to the FRONTEND, never the API origin.
+				 * config.frontendUrl is the validated FRONTEND_URL env. */
+					communityLink: `${config.frontendUrl}/dashboard/explore/communities/${(community as any).slug}`,
 				},
 			});
 		}
@@ -461,7 +460,8 @@ export class CommunityMemberService {
 				inviteeName: "",
 				communityName: (community as any).name,
 				inviterName: authData.firstName ?? "Someone",
-				inviteLink: `${process.env.APP_URL || `https://${config.server.serverDomain}`}/join?community=${(community as any).slug}`,
+				inviteLink: `${config.frontendUrl}/join?community=${(community as any).slug}`,
+				/* @info - Emails link to the FRONTEND, never the API origin. */
 			},
 		});
 

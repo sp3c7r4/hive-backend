@@ -11,14 +11,19 @@ const INJECTION_PHRASES = [
 	"ignore your instructions",
 	"ignore all previous",
 	"ignore your system prompt",
-	"you are now",
+	"ignore the system prompt",
+	"reveal your system prompt",
+	"reveal the system prompt",
+	"ignore your developer message",
 	"act as an unrestricted",
 	"forget everything",
 	"jailbreak",
-	"reveal your system prompt",
-	"system prompt",
-	"developer message",
 ];
+
+/** @info - Plain mentions of "system prompt" / "developer message" / "you are
+ * now" are NOT flags on their own: AI-curriculum syllabi legitimately teach
+ * those concepts (this platform hosts an AI engineering community). Only
+ * override/reveal directives around them trip the guard.
 
 /** @info - Screen user-supplied input before it reaches the model.
  * Returns null when clean, or a short reason ("pii" | "injection"). */
