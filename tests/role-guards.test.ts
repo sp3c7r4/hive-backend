@@ -104,7 +104,7 @@ describe("instructor role guards", () => {
 
 		const app = new Hono();
 		app.use("*", (c, next) => {
-			c.set("authData", { id: 123 });
+			(c as any).set("authData", { id: 123 });
 			return next();
 		});
 		app.use("*", requireInstructor);
@@ -120,7 +120,7 @@ describe("instructor role guards", () => {
 
 		const app = new Hono();
 		app.use("*", (c, next) => {
-			c.set("authData", { id: 123 });
+			(c as any).set("authData", { id: 123 });
 			return next();
 		});
 		app.use("*", requireInstructor);

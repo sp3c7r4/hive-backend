@@ -5,6 +5,7 @@ import { LessonType, UserRole } from "@/enums";
 import { withPresignedUrl, withTransaction } from "@/helpers";
 import {
 	throwBadRequestError,
+	throwForbiddenError,
 	throwNotFoundError,
 } from "@/helpers/errors/throw-errors";
 import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
@@ -67,6 +68,40 @@ export class CourseService {
 
 	/* Courses */
 
+	/** @info - Any course mutation requires the owning instructor or a
+	 * platform admin (mirrors community.service assertOwnerOrAdmin). */
+	private assertCourseOwner = (
+		course: { instructorId: number },
+		authData?: IAuthData,
+	) => {
+		const isOwner = Number(course.instructorId) === Number(authData?.id);
+		const isAdmin =
+			Array.isArray(authData?.roles) &&
+			(authData as any).roles.includes("admin");
+		if (!isOwner && !isAdmin) {
+			throwForbiddenError("You don't have permission to modify this course.");
+		}
+	};
+
+	/** @info - Resolves a course and asserts the caller may mutate it. */
+	private assertOwnedCourse = async (courseId: number, authData: IAuthData) => {
+		const course = await this.coursesRepo.findById(Number(courseId));
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+		this.assertCourseOwner(course as any, authData);
+		return course as any;
+	};
+
+	/** @info - Resolves a module's owning course and asserts the caller may
+	 * mutate anything under it. */
+	private assertOwnedModuleCourse = async (
+		mod: { courseId: number | null },
+		authData: IAuthData,
+	) => {
+		const courseId = mod.courseId;
+		if (courseId == null) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		return this.assertOwnedCourse(courseId as number, authData);
+	};
+
 	createCourse = async (authData: IAuthData, data: NewCourse) => {
 		const db = getDb();
 		const slug = await this._uniqueCourseSlug(data.title, authData.id);
@@ -94,7 +129,7 @@ export class CourseService {
 		const isNumericId =
 			typeof idOrSlug === "number" || /^\d+$/.test(String(idOrSlug));
 
-		let course;
+		let course: any = null;
 		if (isNumericId) {
 			const [result] = await db
 				.select()
@@ -262,6 +297,7 @@ export class CourseService {
 	) => {
 		const course = await this.coursesRepo.findById(id);
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+		this.assertCourseOwner(course as any, authData);
 
 		// Coerce FormData string values to proper types
 		const coerced: Record<string, any> = { ...data };
@@ -296,10 +332,11 @@ export class CourseService {
 		return withPresignedUrl(updated!, "coverImageUrl");
 	};
 
-	deleteCourse = async (id: number): Promise<void> => {
+	deleteCourse = async (authData: IAuthData, id: number): Promise<void> => {
 		// Fetch first to get communityId before soft-delete hides it
 		const course = await this.coursesRepo.findById(id);
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+		this.assertCourseOwner(course as any, authData);
 
 		await this.coursesRepo.softDelete(id);
 
@@ -355,7 +392,12 @@ export class CourseService {
 
 	/* Modules */
 
-	createModule = async (courseId: number, data: NewModule) => {
+	createModule = async (
+		authData: IAuthData,
+		courseId: number,
+		data: NewModule,
+	) => {
+		await this.assertOwnedCourse(courseId, authData);
 		return this.modulesRepo.create({ ...data, courseId } as any);
 	};
 
@@ -368,14 +410,24 @@ export class CourseService {
 			.orderBy(asc(modules.sortOrder));
 	};
 
-	updateModule = async (id: number, data: Partial<NewModule>) => {
-		const mod = await this.modulesRepo.update(id, data as any);
-		return mod ?? throwNotFoundError(ModuleMessages.NOT_FOUND);
+	updateModule = async (
+		authData: IAuthData,
+		id: number,
+		data: Partial<NewModule>,
+	) => {
+		const mod = await this.modulesRepo.findById(id);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
+		const updated = await this.modulesRepo.update(id, data as any);
+		return updated ?? throwNotFoundError(ModuleMessages.NOT_FOUND);
 	};
 
-	deleteModule = async (id: number): Promise<void> => {
-		const mod = await this.modulesRepo.softDelete(id);
+	deleteModule = async (authData: IAuthData, id: number): Promise<void> => {
+		const mod = await this.modulesRepo.findById(id);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
+		const deleted = await this.modulesRepo.softDelete(id);
+		if (!deleted) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		this.log.info(`Module ${id} soft-deleted`);
 	};
 
@@ -401,7 +453,14 @@ export class CourseService {
 		}
 	}
 
-	createLesson = async (moduleId: number, data: NewLesson) => {
+	createLesson = async (
+		authData: IAuthData,
+		moduleId: number,
+		data: NewLesson,
+	) => {
+		const mod = await this.modulesRepo.findById(moduleId);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
 		this.assertDriveLink(data.type, data.driveUrl);
 		const lesson = await this.lessonsRepo.create({
 			...normalizeScheduledAt(data),
@@ -426,7 +485,11 @@ export class CourseService {
 			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
 	};
 
-	updateLesson = async (id: number, data: Partial<NewLesson>) => {
+	updateLesson = async (
+		authData: IAuthData,
+		id: number,
+		data: Partial<NewLesson>,
+	) => {
 		const db = getDb();
 		const [existing] = await db
 			.select()
@@ -434,6 +497,9 @@ export class CourseService {
 			.where(eq(lessons.id, id))
 			.limit(1);
 		if (!existing) throwNotFoundError(LessonMessages.NOT_FOUND);
+		const mod = await this.modulesRepo.findById(Number(existing!.moduleId));
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
 		data = normalizeScheduledAt(data);
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
 		this.assertDriveLink(
@@ -464,9 +530,16 @@ export class CourseService {
 		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
 	};
 
-	deleteLesson = async (id: number): Promise<void> => {
-		const lesson = await this.lessonsRepo.softDelete(id);
+	deleteLesson = async (authData: IAuthData, id: number): Promise<void> => {
+		const lesson = await this.lessonsRepo.findById(id);
 		if (!lesson) throwNotFoundError(LessonMessages.NOT_FOUND);
+		const mod = await this.modulesRepo.findById(
+			Number((lesson as any).moduleId),
+		);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
+		const deleted = await this.lessonsRepo.softDelete(id);
+		if (!deleted) throwNotFoundError(LessonMessages.NOT_FOUND);
 		this.log.info(`Lesson ${id} soft-deleted`);
 	};
 
@@ -486,6 +559,14 @@ export class CourseService {
 			autoRecord?: boolean;
 		},
 	) => {
+		const lesson = await this.lessonsRepo.findById(lessonId);
+		if (!lesson) throwNotFoundError(LessonMessages.NOT_FOUND);
+		const mod = await this.modulesRepo.findById(
+			Number((lesson as any).moduleId),
+		);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
+
 		const scheduler = MeetingSchedulerService.getInstance();
 
 		const result = await scheduler.scheduleMeeting({

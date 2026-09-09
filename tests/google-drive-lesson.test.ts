@@ -1,15 +1,25 @@
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { connectPostgresDB, getDb } from "@/db/postgres.db";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { lessons, type NewLesson } from "@/modules/courses/course.model";
 import { CourseService } from "@/modules/courses/course.service";
 
 /**
  * @info - Service-level validation for the google_drive lesson type.
  * Creates real rows in a throwaway module and cleans them up.
+ *
+ * @info - Course ownership (Task C4): these calls run as a platform admin
+ * so the ownership assertion never blocks the drive-link assertions under
+ * test (the test picks an arbitrary existing course row).
  */
 describe("CourseService google_drive lesson validation", () => {
 	const service = CourseService.getInstance();
+	const ADMIN_AUTH = {
+		authId: "auth:drive-test-admin",
+		id: 1,
+		roles: ["admin"],
+	} as unknown as IAuthData;
 	let db: ReturnType<typeof getDb>;
 
 	beforeAll(async () => {
@@ -33,7 +43,7 @@ describe("CourseService google_drive lesson validation", () => {
 		);
 		moduleId = (mod.rows[0] as { id: number }).id;
 
-		const lesson = await service.createLesson(moduleId, {
+		const lesson = await service.createLesson(ADMIN_AUTH, moduleId, {
 			title: "Drive PDF",
 			type: "google_drive",
 			driveUrl: validLink,
@@ -45,7 +55,7 @@ describe("CourseService google_drive lesson validation", () => {
 	});
 
 	it("allows creating a google_drive lesson without a link (draft, link added in the editor)", async () => {
-		const draft = await service.createLesson(moduleId, {
+		const draft = await service.createLesson(ADMIN_AUTH, moduleId, {
 			title: "Drive draft",
 			type: "google_drive",
 		} as NewLesson);
@@ -56,7 +66,7 @@ describe("CourseService google_drive lesson validation", () => {
 
 	it("rejects a google_drive lesson with a non-Google link", async () => {
 		await expect(
-			service.createLesson(moduleId, {
+			service.createLesson(ADMIN_AUTH, moduleId, {
 				title: "Bad link",
 				type: "google_drive",
 				driveUrl: "https://youtube.com/watch?v=x",
@@ -72,14 +82,18 @@ describe("CourseService google_drive lesson validation", () => {
 			.limit(1);
 		expect(row?.type).toBe("google_drive");
 		await expect(
-			service.updateLesson(lessonIds[0]!, { driveUrl: "https://vimeo.com/123" }),
+			service.updateLesson(ADMIN_AUTH, lessonIds[0]!, {
+				driveUrl: "https://vimeo.com/123",
+			}),
 		).rejects.toThrow();
-		const cleared = await service.updateLesson(lessonIds[0]!, { driveUrl: "" });
+		const cleared = await service.updateLesson(ADMIN_AUTH, lessonIds[0]!, {
+			driveUrl: "",
+		});
 		expect((cleared as { driveUrl: string | null }).driveUrl).toBe("");
 	});
 
 	it("allows switching a google_drive lesson to another type", async () => {
-		const updated = await service.updateLesson(lessonIds[0]!, {
+		const updated = await service.updateLesson(ADMIN_AUTH, lessonIds[0]!, {
 			type: "text",
 		} as any);
 		expect((updated as { type: string }).type).toBe("text");
@@ -87,15 +101,15 @@ describe("CourseService google_drive lesson validation", () => {
 
 	it("allows switching a lesson to google_drive without a link (draft state)", async () => {
 		/* clear the link while the lesson is still a text lesson */
-		await service.updateLesson(lessonIds[0]!, { driveUrl: "" });
-		const updated = await service.updateLesson(lessonIds[0]!, {
+		await service.updateLesson(ADMIN_AUTH, lessonIds[0]!, { driveUrl: "" });
+		const updated = await service.updateLesson(ADMIN_AUTH, lessonIds[0]!, {
 			type: "google_drive",
 		} as any);
 		expect((updated as { type: string }).type).toBe("google_drive");
 	});
 
 	it("accepts an open?id= style link", async () => {
-		const lesson = await service.createLesson(moduleId, {
+		const lesson = await service.createLesson(ADMIN_AUTH, moduleId, {
 			title: "Drive video",
 			type: "google_drive",
 			driveUrl: "https://drive.google.com/open?id=VIDEO777",
