@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError } from "@/errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CourseService } from "@/modules/courses/course.service";
+import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
 
 /**
  * @info - Course object-ownership tests (#1 follow-up / Task C4). Every
@@ -65,12 +66,68 @@ describe("course ownership — update/delete course", () => {
 		expect(f.coursesRepo.update).not.toHaveBeenCalled();
 	});
 
+	it("owner can update their own course", async () => {
+		f.coursesRepo.findById.mockResolvedValue(ownCourse);
+		f.coursesRepo.update.mockResolvedValue({ ...ownCourse, title: "new" });
+		const updated = await f.service.updateCourse(OWNER, ownCourse.id, {
+			title: "new",
+		} as any);
+		expect(updated.title).toBe("new");
+		expect(f.coursesRepo.update).toHaveBeenCalledWith(
+			ownCourse.id,
+			expect.objectContaining({ title: "new" }),
+		);
+	});
+
+	it("platform admin can update another instructor's course", async () => {
+		f.coursesRepo.findById.mockResolvedValue(otherCourse);
+		f.coursesRepo.update.mockResolvedValue({ ...otherCourse, title: "new" });
+		const updated = await f.service.updateCourse(ADMIN, otherCourse.id, {
+			title: "new",
+		} as any);
+		expect(updated.title).toBe("new");
+		expect(f.coursesRepo.update).toHaveBeenCalledWith(
+			otherCourse.id,
+			expect.objectContaining({ title: "new" }),
+		);
+	});
+
 	it("403 when a stranger deletes another instructor's course", async () => {
 		f.coursesRepo.findById.mockResolvedValue(otherCourse);
 		await expect(
 			f.service.deleteCourse(STRANGER, otherCourse.id),
 		).rejects.toThrow(ForbiddenError);
 		expect(f.coursesRepo.softDelete).not.toHaveBeenCalled();
+	});
+
+	it("owner can delete their own course", async () => {
+		f.coursesRepo.findById.mockResolvedValue(ownCourse);
+		f.coursesRepo.softDelete.mockResolvedValue(ownCourse);
+		const spyGetDb = vi
+			.spyOn(await import("@/db/postgres.db"), "getDb")
+			.mockReturnValue({
+				update: () => ({ set: () => ({ where: async () => ({}) }) }),
+			} as any);
+		await expect(
+			f.service.deleteCourse(OWNER, ownCourse.id),
+		).resolves.toBeUndefined();
+		expect(f.coursesRepo.softDelete).toHaveBeenCalledWith(ownCourse.id);
+		spyGetDb.mockRestore();
+	});
+
+	it("platform admin can delete another instructor's course", async () => {
+		f.coursesRepo.findById.mockResolvedValue(otherCourse);
+		f.coursesRepo.softDelete.mockResolvedValue(otherCourse);
+		const spyGetDb = vi
+			.spyOn(await import("@/db/postgres.db"), "getDb")
+			.mockReturnValue({
+				update: () => ({ set: () => ({ where: async () => ({}) }) }),
+			} as any);
+		await expect(
+			f.service.deleteCourse(ADMIN, otherCourse.id),
+		).resolves.toBeUndefined();
+		expect(f.coursesRepo.softDelete).toHaveBeenCalledWith(otherCourse.id);
+		spyGetDb.mockRestore();
 	});
 
 	it("404 when the course does not exist", async () => {
@@ -228,6 +285,60 @@ describe("course ownership — lessons", () => {
 		spyGetDb.mockRestore();
 	});
 
+	it("owner can update a lesson in their own course", async () => {
+		const mod = modOf(ownCourse);
+		const lesson = lessonOf(mod);
+		f.modulesRepo.findById.mockResolvedValue(mod);
+		f.coursesRepo.findById.mockResolvedValue(ownCourse);
+		const lessonRows = [lesson];
+		const spyGetDb = vi
+			.spyOn(await import("@/db/postgres.db"), "getDb")
+			.mockReturnValue({
+				select: () => ({
+					from: () => ({
+						where: () => ({ limit: async () => lessonRows }),
+					}),
+				}),
+			} as any);
+		f.lessonsRepo.update.mockResolvedValue({ ...lesson, title: "new" });
+		const updated = await f.service.updateLesson(OWNER, lesson.id, {
+			title: "new",
+		} as any);
+		expect(updated.title).toBe("new");
+		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+			lesson.id,
+			expect.objectContaining({ title: "new" }),
+		);
+		spyGetDb.mockRestore();
+	});
+
+	it("platform admin can update a lesson in another instructor's course", async () => {
+		const mod = modOf(otherCourse);
+		const lesson = lessonOf(mod);
+		f.modulesRepo.findById.mockResolvedValue(mod);
+		f.coursesRepo.findById.mockResolvedValue(otherCourse);
+		const lessonRows = [lesson];
+		const spyGetDb = vi
+			.spyOn(await import("@/db/postgres.db"), "getDb")
+			.mockReturnValue({
+				select: () => ({
+					from: () => ({
+						where: () => ({ limit: async () => lessonRows }),
+					}),
+				}),
+			} as any);
+		f.lessonsRepo.update.mockResolvedValue({ ...lesson, title: "new" });
+		const updated = await f.service.updateLesson(ADMIN, lesson.id, {
+			title: "new",
+		} as any);
+		expect(updated.title).toBe("new");
+		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+			lesson.id,
+			expect.objectContaining({ title: "new" }),
+		);
+		spyGetDb.mockRestore();
+	});
+
 	it("403 when a stranger deletes a lesson in another instructor's course", async () => {
 		const mod = modOf(otherCourse);
 		const lesson = lessonOf(mod);
@@ -268,5 +379,79 @@ describe("course ownership — lessons", () => {
 			} as any),
 		).rejects.toThrow(ForbiddenError);
 		expect(f.lessonsRepo.update).not.toHaveBeenCalled();
+	});
+
+	it("owner can generate a meeting for their own lesson", async () => {
+		const mod = modOf(ownCourse);
+		const lesson = lessonOf(mod);
+		f.lessonsRepo.findById.mockResolvedValue(lesson);
+		f.modulesRepo.findById.mockResolvedValue(mod);
+		f.coursesRepo.findById.mockResolvedValue(ownCourse);
+		const schedSpy = vi
+			.spyOn(MeetingSchedulerService.getInstance(), "scheduleMeeting")
+			.mockResolvedValue({
+				provider: "google",
+				joinLink: "https://meet.example/abc",
+				calendarEventId: "evt_1",
+				calendarHtmlLink: "https://cal.example/evt_1",
+			});
+		f.lessonsRepo.update.mockResolvedValue({
+			...lesson,
+			liveMeetingLink: "https://meet.example/abc",
+		});
+		const result = await f.service.generateMeeting(OWNER, lesson.id, {
+			provider: "google",
+			summary: "s",
+			startTime: "2026-09-10T10:00:00Z",
+			endTime: "2026-09-10T11:00:00Z",
+		} as any);
+		expect(result.joinLink).toBe("https://meet.example/abc");
+		expect(schedSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ summary: "s", provider: "google" }),
+		);
+		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+			lesson.id,
+			expect.objectContaining({
+				liveMeetingLink: "https://meet.example/abc",
+			}),
+		);
+		schedSpy.mockRestore();
+	});
+
+	it("platform admin can generate a meeting for another instructor's lesson", async () => {
+		const mod = modOf(otherCourse);
+		const lesson = lessonOf(mod);
+		f.lessonsRepo.findById.mockResolvedValue(lesson);
+		f.modulesRepo.findById.mockResolvedValue(mod);
+		f.coursesRepo.findById.mockResolvedValue(otherCourse);
+		const schedSpy = vi
+			.spyOn(MeetingSchedulerService.getInstance(), "scheduleMeeting")
+			.mockResolvedValue({
+				provider: "google",
+				joinLink: "https://meet.example/xyz",
+				calendarEventId: "evt_2",
+				calendarHtmlLink: "https://cal.example/evt_2",
+			});
+		f.lessonsRepo.update.mockResolvedValue({
+			...lesson,
+			liveMeetingLink: "https://meet.example/xyz",
+		});
+		const result = await f.service.generateMeeting(ADMIN, lesson.id, {
+			provider: "google",
+			summary: "s",
+			startTime: "2026-09-10T10:00:00Z",
+			endTime: "2026-09-10T11:00:00Z",
+		} as any);
+		expect(result.joinLink).toBe("https://meet.example/xyz");
+		expect(schedSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ summary: "s", provider: "google" }),
+		);
+		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+			lesson.id,
+			expect.objectContaining({
+				liveMeetingLink: "https://meet.example/xyz",
+			}),
+		);
+		schedSpy.mockRestore();
 	});
 });
