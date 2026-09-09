@@ -191,12 +191,30 @@ export class CourseService {
 		page?: number;
 		limit?: number;
 		communityId?: number;
+		includeDrafts?: boolean;
+		authData?: IAuthData | null;
 	}) => {
 		const conditions: any[] = [isNull(courses.deletedAt)];
 
-		/* @info - Only PUBLISHED courses are ever listed for students: drafts
-		 * must not surface in Explore or community catalogs. */
-		conditions.push(eq(courses.status, "published"));
+		/* @info - Drafts are visible ONLY to the community owner/platform admin
+		 * inside a community-scoped listing (their community Courses tab).
+		 * Everyone else (and every unscoped/Explore listing) sees published
+		 * courses only. */
+		let showUnpublished = false;
+		if (params?.includeDrafts && params?.communityId && params?.authData) {
+			const [communityRow] = await getDb()
+				.select({ ownerId: communities.ownerId })
+				.from(communities)
+				.where(eq(communities.id, params.communityId))
+				.limit(1);
+			showUnpublished =
+				!!communityRow &&
+				(communityRow.ownerId === params.authData.id ||
+					params.authData.roles?.includes(UserRole.ADMIN));
+		}
+		if (!showUnpublished) {
+			conditions.push(eq(courses.status, "published"));
+		}
 
 		if (params?.communityId) {
 			conditions.push(eq(courses.communityId, params.communityId));

@@ -42,10 +42,13 @@ export class CourseController {
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
 		const communityId = c.req.query("communityId");
+		const includeDrafts = c.req.query("includeDrafts") === "true";
 		const data = await this.service.listCourses({
 			page,
 			limit,
 			...(communityId ? { communityId: Number(communityId) } : {}),
+			...(includeDrafts ? { includeDrafts } : {}),
+			authData: c.get("authData") ?? null,
 		});
 		return sendSuccessResponse(c, {
 			message: "Courses fetched successfully",
