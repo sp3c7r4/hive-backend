@@ -60,7 +60,17 @@ export const draftSyllabusSchema = z.object({
 export const moduleRegenerateSchema = z.object({
 	courseTitle: z.string().min(1).max(255),
 	otherModuleTitles: z.array(z.string().min(1)).max(30),
-	currentModule: courseModuleSchema,
+	/** @info - Regenerate input context: the module may have NO regenerable
+	 * lessons yet (video/live-only or empty module) — generation starts from
+	 * the title + user instructions. The OUTPUT schema (courseModuleSchema)
+	 * still requires >=1 lesson. */
+	currentModule: z.object({
+		title: z.string().min(1).max(255),
+		lessons: z.array(lessonSchema).optional(),
+	}),
+	/** @info - Free-form steering from the drawer: topic, difficulty, length,
+	 * what to keep/change. Optional; regeneration works without it. */
+	instructions: z.string().max(2000).optional(),
 });
 
 export type CourseDraft = z.infer<typeof courseDraftSchema>;

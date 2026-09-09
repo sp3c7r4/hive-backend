@@ -100,19 +100,33 @@ export class CourseBuilderService {
 		return { kind: "stream", response: result.toTextStreamResponse() };
 	};
 
-	/** @info - Regenerate ONE module with sibling context for consistency */
+	/** @info - (Re)generate ONE module with sibling context for consistency.
+	 * currentModule.lessons may be empty/absent (video/live-only or empty
+	 * module) — the prompt then creates the module from the title + the
+	 * user's instructions. */
 	streamModule = async (
 		userId: number,
-		params: { courseTitle: string; otherModuleTitles: string[]; currentModule: CourseModule },
+		params: {
+			courseTitle: string;
+			otherModuleTitles: string[];
+			currentModule: { title: string; lessons?: CourseModule["lessons"] };
+			instructions?: string;
+		},
 	): Promise<CourseBuilderStreamResult> => {
 		if (!config.ai.deepseekApiKey) {
 			throwBadRequestError("AI drafting is not configured yet.");
 		}
 		const hit =
 			runInputGuardrails(params.courseTitle) ??
-			runInputGuardrails(params.otherModuleTitles.join(" "));
+			runInputGuardrails(params.otherModuleTitles.join(" ")) ??
+			(params.instructions ? runInputGuardrails(params.instructions) : null);
 		if (hit) {
-			await this.logBlocked(userId, "module", params.courseTitle, hit);
+			await this.logBlocked(
+				userId,
+				"module",
+				`${params.courseTitle}${params.instructions ? ` :: ${params.instructions.slice(0, 200)}` : ""}`,
+				hit,
+			);
 			return { kind: "blocked", reason: hit };
 		}
 
@@ -120,18 +134,30 @@ export class CourseBuilderService {
 			params.otherModuleTitles.length > 0
 				? `Keep it consistent with the other modules: ${params.otherModuleTitles.join(", ")}.`
 				: "";
+		const hasExistingContent =
+			Array.isArray(params.currentModule.lessons) &&
+			params.currentModule.lessons.length > 0;
 
 		const result = streamObject({
 			model: model(),
 			schema: courseModuleSchema,
 			system: BUILDER_SYSTEM_PROMPT,
 			prompt: [
-				`Rewrite this one module for the course "${params.courseTitle}".`,
+				hasExistingContent
+					? `Rewrite this one module for the course "${params.courseTitle}".`
+					: `Create this module for the course "${params.courseTitle}" from scratch.`,
 				siblingContext,
-				`Current module:\n${JSON.stringify(params.currentModule)}`,
-				"Improve structure, lesson titles, quiz quality and rubrics. Reply with the replacement module only.",
+				hasExistingContent
+					? `Current module:\n${JSON.stringify(params.currentModule)}`
+					: `Module title to fill: "${params.currentModule.title}".`,
+				params.instructions
+					? `User instructions for this module:\n${params.instructions}`
+					: null,
+				hasExistingContent
+					? "Improve structure, lesson titles, quiz quality and rubrics. Reply with the replacement module only."
+					: "Design a complete, well-structured module: lessons with clear titles, content, and a quiz. Reply with the module only.",
 			]
-				.filter(Boolean)
+				.filter((l): l is string => Boolean(l))
 				.join("\n\n"),
 			onFinish: async ({ object }) => {
 				try {
