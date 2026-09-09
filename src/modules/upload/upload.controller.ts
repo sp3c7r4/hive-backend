@@ -201,7 +201,7 @@ export class UploadController {
 		);
 	};
 
-	/** @info - Lesson video upload (MP4/MOV/WebM/M4V, up to 200 MB). */
+	/** @info - Lesson video upload (MP4/MOV/WebM/M4V, no size cap). */
 	uploadVideo = async (c: Context) => {
 		const formData = await c.req.formData();
 		const file = formData.get("file") as File | null;
@@ -220,13 +220,9 @@ export class UploadController {
 				StatusCodes.BAD_REQUEST,
 			);
 		}
-		if (file.size > 200 * 1024 * 1024) {
-			return sendErrorResponse(
-				c,
-				{ message: "File exceeds size limit of 200 MB" },
-				StatusCodes.BAD_REQUEST,
-			);
-		}
+		/* @info - No size cap: lesson videos can be arbitrarily large (the
+		 * reverse proxy must allow the body; type validation below is the
+		 * gate). */
 		const fileType = inferMime(file);
 		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
