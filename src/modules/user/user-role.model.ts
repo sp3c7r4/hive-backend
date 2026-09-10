@@ -3,6 +3,7 @@ import {
 	pgTable,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { relations } from "drizzle-orm";
 import { userRoleEnum } from "@/bases/models/base.user.model";
 import { TableNames } from "@/enums";
@@ -19,6 +20,12 @@ export const user_roles = pgTable(
 	},
 	(table) => [
 		uniqueIndex("uq_user_role").on(table.userId, table.role),
+		/* @info - One WORKING role per user (admin exempt): multi-role grants the
+		 *         union of permissions and breaks role-scoped tests. Migration
+		 *         0027 merges existing extras before creating this. */
+		uniqueIndex("uq_user_role_single_working")
+			.on(table.userId)
+			.where(sql`${table.role} <> 'admin'`),
 	],
 );
 
