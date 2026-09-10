@@ -29,11 +29,12 @@ import {
 	LessonRepository,
 	ModuleRepository,
 } from "./course.repository";
-import { updateCourseSchema } from "./course.schema";
+import { createCourseFormSchema, updateCourseSchema } from "./course.schema";
 
-/* @info - The HTTP layer sends scheduledAt as an ISO string (zod is only
- * used as a 400 gate in this codebase - controllers re-read raw bodies).
- * Drizzle timestamp columns need a Date, so coerce at the service edge. */
+/* @info - The HTTP layer sends scheduledAt as an ISO string (course create
+ * consumes the validated form; scheduledAt still arrives raw, since zod is a
+ * 400 gate for it). Drizzle timestamp columns need a Date, so coerce at the
+ * service edge. */
 const normalizeScheduledAt = <T extends { scheduledAt?: unknown }>(
 	data: T,
 ): T => {
@@ -141,13 +142,23 @@ export class CourseService {
 	};
 
 	createCourse = async (authData: IAuthData, data: NewCourse) => {
-		const db = getDb();
-		const slug = await this._uniqueCourseSlug(data.title, authData.id);
+		/* @info - Allowlist: createCourseFormSchema is the create contract. The
+		 * controller used to spread the raw form into the insert, so any key
+		 * matching a column name (status, instructorId, enrollmentCount, …) was
+		 * written — the same mass-assignment class the PATCH allowlist closed.
+		 * instructorId and slug are assigned here, never taken from the payload. */
+		const parsed = createCourseFormSchema.safeParse(data);
+		if (!parsed.success) {
+			const issue = parsed.error.issues[0];
+			throwBadRequestError(issue?.message ?? "Invalid course payload.");
+		}
+		const allowed = parsed.data as Record<string, any>;
+		const slug = await this._uniqueCourseSlug(allowed.title, authData.id);
 
 		return withTransaction(async (tx) => {
 			const courseRepo = new RelationalRepository(courses, tx);
 			const course = await courseRepo.create({
-				...data,
+				...allowed,
 				slug,
 				instructorId: authData.id,
 			} as any);
@@ -156,7 +167,7 @@ export class CourseService {
 			await tx
 				.update(communities)
 				.set({ courseCount: sql`${communities.courseCount} + 1` })
-				.where(eq(communities.id, data.communityId!));
+				.where(eq(communities.id, allowed.communityId!));
 
 			return course;
 		});

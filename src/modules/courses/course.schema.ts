@@ -70,6 +70,10 @@ export const createCourseFormSchema = z.object({
 		coerceInt,
 		z.number().int().min(0).max(100).optional(),
 	),
+	/* @info - Upload-path cover key (set by the upload middleware / the file
+	 * field). Declared so the create allowlist keeps it, mirroring
+	 * createCourseSchema and PATCH's updateCourseSchema. */
+	coverImageUrl: z.string().max(500).optional(),
 });
 
 export const createModuleSchema = z.object({

@@ -4,6 +4,16 @@ import { sendSuccessResponse } from "@/helpers";
 import { formDataToObject } from "@/helpers/middleware";
 import { CourseService } from "./course.service";
 
+/** @info - zValidator stores the parsed form under the request's validation
+ * targets; the plain Context type does not expose that generic, so read it
+ * through this narrow accessor instead of the raw body. */
+const validatedForm = (c: Context): Record<string, unknown> => {
+	const req = c.req as unknown as {
+		valid: (target: "form") => Record<string, unknown> | undefined;
+	};
+	return req.valid("form") ?? {};
+};
+
 export class CourseController {
 	private static instance: CourseController;
 	private service: CourseService;
@@ -22,10 +32,16 @@ export class CourseController {
 	create = async (c: Context) => {
 		const authData = c.get("authData");
 
-		/* FormData path — file handled by upload middleware */
-		const formData = await c.req.formData();
-		const data: Record<string, any> = formDataToObject(formData);
-		data.coverImageUrl = c.get("uploadedFile")?.key;
+		/* @info - The validated form is the create contract. Reading it back
+		 * (instead of the raw FormData) is what keeps a stray form key from
+		 * reaching the insert; the upload middleware's key is the only value
+		 * merged from outside the schema. */
+		const validated = validatedForm(c);
+		const data: Record<string, unknown> = Object.fromEntries(
+			Object.entries(validated).filter(([, value]) => value !== undefined),
+		);
+		const coverImageUrl = c.get("uploadedFile")?.key;
+		if (coverImageUrl) data.coverImageUrl = coverImageUrl;
 
 		const result = await this.service.createCourse(authData, data as any);
 		return sendSuccessResponse(
