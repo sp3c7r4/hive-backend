@@ -52,6 +52,11 @@ export const createCourseFormSchema = z.object({
 	isFree: z.preprocess(coerceBool, z.boolean().optional()),
 	sequentialAccess: z.preprocess(coerceBool, z.boolean().optional()),
 	dripContent: z.preprocess(coerceBool, z.boolean().optional()),
+	/* @info - Declared so the create contract matches PATCH (updateCourseSchema)
+	 * and the page's FormData; omitted stays undefined so the model defaults
+	 * (both true) stay authoritative. */
+	allowComments: z.preprocess(coerceBool, z.boolean().optional()),
+	allowDownloads: z.preprocess(coerceBool, z.boolean().optional()),
 	offerCertificate: z.preprocess(coerceBool, z.boolean().optional()),
 	minCompletionPercent: z.preprocess(
 		coerceInt,
