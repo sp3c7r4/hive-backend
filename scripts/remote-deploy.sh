@@ -13,12 +13,15 @@ cd /home/ec2-user
 aws s3 cp "s3://${S3_BUCKET}/${ARTIFACT_KEY}" /tmp/release.tar.gz
 aws s3 cp "s3://${S3_BUCKET}/${ENV_KEY}" /tmp/env.production
 
-# @info - Enforce an env var in place, whatever the secret-sourced env carried.
-set_env_var() {
+# @info - Provide a default only when the key is missing, so an explicit value
+# carried in by the secret-sourced env file survives the deploy (a forced write
+# here would silently reset an incident kill switch).
+set_env_var_if_absent() {
   local file="$1" key="$2" value="$3"
-  grep -v "^${key}=" "$file" > "${file}.tmp" || true
-  printf '%s=%s\n' "$key" "$value" >> "${file}.tmp"
-  mv "${file}.tmp" "$file"
+  if grep -q "^${key}=" "$file"; then
+    return 0
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$file"
 }
 
 rm -rf hive-backend.tmp && mkdir -p hive-backend.tmp
@@ -29,11 +32,12 @@ rsync -a --delete hive-backend.tmp/ /home/ec2-user/hive-backend/
 rm -rf hive-backend.tmp
 
 cp /tmp/env.production /home/ec2-user/hive-backend/.env.production
-# @info - Payout kill switch: prod pays out for real. Spelled out explicitly
-# rather than relying on the code default, so nobody has to guess from the
-# server which way this box is configured (the code default stays "enabled"
-# for any env that never sets it).
-set_env_var /home/ec2-user/hive-backend/.env.production WITHDRAWALS_TRANSFER_ENABLED true
+# @info - Payout kill switch: prod pays out for real, so the explicit default
+# is written only when the deployed env file does not already carry the key.
+# An explicit value from the prod secret (e.g. false during an incident)
+# survives the deploy; the code default stays "enabled" for any env that never
+# sets it. Staging forces false — see staging-deploy.sh.
+set_env_var_if_absent /home/ec2-user/hive-backend/.env.production WITHDRAWALS_TRANSFER_ENABLED true
 chmod 600 /home/ec2-user/hive-backend/.env.production
 # pm2 runs the apps as ec2-user - the env file must be readable by it
 chown ec2-user:ec2-user /home/ec2-user/hive-backend/.env.production
