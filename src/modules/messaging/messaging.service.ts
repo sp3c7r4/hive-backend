@@ -59,7 +59,9 @@ export class MessagingService {
 		/* Joined communities automatically get their group chat */
 		await this.ensureCommunityChats(authData.id);
 		const rows = await this.repo.listForUser(authData.id, undefined, options);
-		return rows.map((r) => toConversationDto(r));
+		return rows.map((r) =>
+			toConversationDto(r, { includeHidden: options?.includeHidden }),
+		);
 	};
 
 	/** User search for the New Message dialog (excludes self, limit 8). */
@@ -379,6 +381,22 @@ export class MessagingService {
 		);
 		if (!participant) throwNotFoundError(MSG.NOT_FOUND);
 
+		const conversation = await this.repo.getConversationById(conversationId);
+		if (!conversation) throwNotFoundError(MSG.NOT_FOUND);
+
+		/* @info - Membership is the source of truth for a community chat, so unhide
+		 *         must not be a back door around a removal: only an active member can
+		 *         clear left_at. Rejoining is what restores access. */
+		if (conversation!.type === "group" && conversation!.communityId) {
+			const membershipStatus = await this.repo.getMembershipStatus(
+				conversation!.communityId,
+				authData.id,
+			);
+			if (membershipStatus !== "active") {
+				throwForbiddenError("You are not a member of this community");
+			}
+		}
+
 		await this.repo.unhideConversation(conversationId, authData.id);
 		return this.loadConversationDto(conversationId, authData.id);
 	};
@@ -421,15 +439,26 @@ export class MessagingService {
 	/** Load the full DTO for one of my conversations (falls back to a bare shape). */
 	private loadConversationDto = async (conversationId: number, userId: number, fallbackPeer?: any) => {
 		const [row] = await this.repo.listForUser(userId, conversationId);
-		if (row) return toConversationDto(row);
+		/* @info - Single-conversation responses (create, unhide) always carry the
+		 *         hidden flag: the FE updates its row from them. */
+		if (row) return toConversationDto(row, { includeHidden: true });
+
+		/* @info - Fallback for a row the list can't resolve (e.g. a DM whose peer
+		 *         left): keep the real conversation identity so the payload still
+		 *         has the same shape as a list row. */
+		const conversation = await this.repo.getConversationById(conversationId);
 		return {
 			id: conversationId,
-			type: "direct" as const,
-			title: null,
-			communityId: null,
+			type: (conversation?.type ?? "direct") as string,
+			title: conversation?.title ?? null,
+			communityId: conversation?.communityId ?? null,
+			communitySlug: null,
+			avatarUrl: null,
 			lastMessageAt: null,
-			createdAt: null,
+			createdAt: conversation?.createdAt ?? null,
 			unreadCount: 0,
+			hidden: false,
+			peerLastReadAt: null,
 			peer: fallbackPeer ?? null,
 			lastMessage: null,
 		};

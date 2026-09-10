@@ -292,18 +292,22 @@ export class CommunityMemberService {
 		if (member!.memberRole === "owner")
 			throwForbiddenError("The owner cannot be removed");
 
-		await db
-			.delete(communityMembers)
-			.where(eq(communityMembers.id, member!.id));
-
 		/* @info - Membership is the source of truth for the community chat: losing
-		 *         it hides the chat. The participant row survives (left_at set) so a
-		 *         rejoin reactivates the same row with its history intact. */
-		await MessagingRepository.getInstance().setCommunityChatHidden(
-			community.id,
-			targetUserId,
-			true,
-		);
+		 *         it hides the chat. Both halves land in one transaction — a failure
+		 *         between them would leave the membership gone but the chat visible.
+		 *         The participant row survives (left_at set) so a rejoin reactivates
+		 *         the same row with its history intact. */
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(communityMembers)
+				.where(eq(communityMembers.id, member!.id));
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				targetUserId,
+				true,
+				tx,
+			);
+		});
 	};
 
 	approveMember = async (
@@ -667,16 +671,19 @@ export class CommunityMemberService {
 			);
 		}
 
-		await db
-			.delete(communityMembers)
-			.where(eq(communityMembers.id, member!.id));
-
-		/* @info - Same rule as removal: no membership, no chat. The participant row
-		 *         stays behind so rejoining brings the same chat back. */
-		await MessagingRepository.getInstance().setCommunityChatHidden(
-			community.id,
-			userId,
-			true,
-		);
+		/* @info - Same rule as removal: no membership, no chat. Both halves land in
+		 *         one transaction. The participant row stays behind so rejoining
+		 *         brings the same chat back. */
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(communityMembers)
+				.where(eq(communityMembers.id, member!.id));
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				userId,
+				true,
+				tx,
+			);
+		});
 	};
 }

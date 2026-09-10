@@ -5,6 +5,7 @@ import { connectPostgresDB, getDb } from "@/db/postgres.db";
 import { CommunityMemberService } from "@/modules/communities/community-member.service";
 import { CommunityService } from "@/modules/communities/community.service";
 import { toConversationDto } from "@/modules/messaging/messaging.dto";
+import { listConversationsQuerySchema } from "@/modules/messaging/messaging.schema";
 import { MessagingRepository } from "@/modules/messaging/messaging.repository";
 import { MessagingService } from "@/modules/messaging/messaging.service";
 
@@ -37,6 +38,8 @@ describe("Messaging × community chat lifecycle", () => {
 	let communityB: number;
 	const slugB = `msg-lifecycle-b-${stamp}`;
 	let conversationB: number;
+	/* DM created by the fallback-shape test */
+	let dmId: number | null = null;
 
 	const authOf = (id: number, email: string) =>
 		({
@@ -115,6 +118,7 @@ describe("Messaging × community chat lifecycle", () => {
 	});
 
 	afterAll(async () => {
+		if (dmId) await db.execute(`DELETE FROM conversations WHERE id = ${dmId}`);
 		await db.execute(
 			`DELETE FROM conversations WHERE community_id IN (${communityA}, ${communityB})`,
 		);
@@ -134,6 +138,12 @@ describe("Messaging × community chat lifecycle", () => {
 		const visible = await repo.listForUser(member);
 		expect(visible.find((r) => r.id === conversationA)).toBeUndefined();
 
+		/* includeHidden=false (and ?includeHidden=0) stays hidden. */
+		const explicitlyOff = await repo.listForUser(member, undefined, {
+			includeHidden: false,
+		});
+		expect(explicitlyOff.find((r) => r.id === conversationA)).toBeUndefined();
+
 		const withHidden = await repo.listForUser(member, undefined, {
 			includeHidden: true,
 		});
@@ -142,7 +152,7 @@ describe("Messaging × community chat lifecycle", () => {
 		expect(row!.myLeftAt).not.toBeNull();
 
 		/* Wire shape the FE draws the dot from: flagged hidden, unread intact. */
-		const dto = toConversationDto(row!);
+		const dto = toConversationDto(row!, { includeHidden: true });
 		expect(dto.hidden).toBe(true);
 		expect(dto.unreadCount).toBe(1);
 
@@ -150,7 +160,45 @@ describe("Messaging × community chat lifecycle", () => {
 		const shownRow = (await repo.listForUser(owner)).find(
 			(r) => r.id === conversationA,
 		);
-		expect(toConversationDto(shownRow!).hidden).toBe(false);
+		expect(toConversationDto(shownRow!, { includeHidden: true }).hidden).toBe(
+			false,
+		);
+	});
+
+	it("keeps the default payload free of the flag, and treats 0/false as off", () => {
+		/* Every consumer but the Communities tab reads the legacy shape. */
+		const visibleRow = {
+			id: 1,
+			type: "group",
+			myLeftAt: null,
+			unreadCount: 0,
+			lastMessage: null,
+		} as any;
+		expect("hidden" in toConversationDto(visibleRow)).toBe(false);
+		expect(
+			"hidden" in toConversationDto({ ...visibleRow, myLeftAt: new Date() }),
+		).toBe(false);
+		expect(
+			toConversationDto({ ...visibleRow, myLeftAt: new Date() }, {
+				includeHidden: true,
+			}).hidden,
+		).toBe(true);
+
+		expect(listConversationsQuerySchema.parse({}).includeHidden).toBe(false);
+		expect(
+			listConversationsQuerySchema.parse({ includeHidden: "0" }).includeHidden,
+		).toBe(false);
+		expect(
+			listConversationsQuerySchema.parse({ includeHidden: "false" })
+				.includeHidden,
+		).toBe(false);
+		expect(
+			listConversationsQuerySchema.parse({ includeHidden: "1" }).includeHidden,
+		).toBe(true);
+		expect(
+			listConversationsQuerySchema.parse({ includeHidden: "true" })
+				.includeHidden,
+		).toBe(true);
 	});
 
 	it("restores a hidden chat on unhide without touching its backlog", async () => {
@@ -205,6 +253,24 @@ describe("Messaging × community chat lifecycle", () => {
 		expect(conversation!.title).not.toBe("Stale name");
 	});
 
+	it("never lets a stale caller snapshot overwrite the community's current name", async () => {
+		await db.execute(
+			`UPDATE conversations SET title = 'Drifted' WHERE id = ${conversationB}`,
+		);
+		const [communityRow] = (
+			await db.execute(`SELECT name FROM communities WHERE id = ${communityB}`)
+		).rows as { name: string }[];
+
+		/* A list request that started BEFORE a rename hands in the old name. */
+		await repo.ensureCommunityConversation(
+			communityB,
+			"Msg Lifecycle B (name from a stale snapshot)",
+		);
+
+		const conversation = await repo.findCommunityConversation(communityB);
+		expect(conversation!.title).toBe(communityRow!.name);
+	});
+
 	it("hides the chat when a member is removed and reactivates the SAME row on rejoin", async () => {
 		const before = (await repo.getParticipant(conversationB, member))!;
 		await repo.insertMessage({
@@ -235,6 +301,29 @@ describe("Messaging × community chat lifecycle", () => {
 		expect((rows.rows[0] as { n: number }).n).toBeGreaterThanOrEqual(2);
 	});
 
+	it("refuses unhide for a removed member: rejoining is what restores access", async () => {
+		await memberService.removeMember(ownerAuth(), slugB, member);
+		const hidden = (await repo.getParticipant(conversationB, member))!;
+		expect(hidden.leftAt).not.toBeNull();
+
+		await expect(
+			service.unhideConversation(memberAuth(), conversationB),
+		).rejects.toThrow(/member of this community/i);
+
+		/* The back door stayed shut. */
+		const stillHidden = (await repo.getParticipant(conversationB, member))!;
+		expect(stillHidden.leftAt).not.toBeNull();
+		expect(await repo.isParticipant(conversationB, member)).toBe(false);
+
+		/* Rejoining reactivates the same row, and unhide is then a no-op. */
+		await memberService.joinCommunity(memberAuth(), slugB);
+		const restored = await service.unhideConversation(memberAuth(), conversationB);
+		expect(restored.id).toBe(conversationB);
+		expect((await repo.getParticipant(conversationB, member))!.id).toBe(
+			hidden.id,
+		);
+	});
+
 	it("hides the chat when a member leaves the community", async () => {
 		await memberService.leaveCommunity(memberAuth(), slugB);
 		const participant = await repo.getParticipant(conversationB, member);
@@ -244,6 +333,47 @@ describe("Messaging × community chat lifecycle", () => {
 		/* Leaving is not a permanent cut either. */
 		await memberService.joinCommunity(memberAuth(), slugB);
 		expect(await repo.isParticipant(conversationB, member)).toBe(true);
+	});
+
+	it("returns a list-shaped DTO when the list can't resolve the conversation", async () => {
+		const dm = await service.createConversation(ownerAuth(), member);
+		dmId = dm.id;
+		/* The peer deletes the DM: their left_at hides it from BOTH lists, so the
+		 * unhide response has to fall back — with the real identity, not a guess. */
+		await repo.leaveConversation(dmId, member);
+
+		const dto = await service.unhideConversation(ownerAuth(), dmId);
+		expect(dto.id).toBe(dmId);
+		expect(dto.type).toBe("direct");
+		expect(dto.communityId).toBeNull();
+		expect((dto as any).hidden).toBe(false);
+
+		const listRow = toConversationDto(
+			(await repo.listForUser(owner)).find((r) => r.id === conversationB)!,
+			{ includeHidden: true },
+		);
+		expect(Object.keys(dto).sort()).toEqual(Object.keys(listRow).sort());
+	});
+
+	it("writes the chat hide through the passed transaction, so a failure rolls back", async () => {
+		const before = (await repo.getParticipant(conversationB, member))!;
+		expect(before.leftAt).toBeNull();
+
+		await expect(
+			db.transaction(async (tx) => {
+				await repo.setCommunityChatHidden(communityB, member, true, tx);
+				throw new Error("rollback probe");
+			}),
+		).rejects.toThrow("rollback probe");
+
+		/* Rolled back with the membership half it belongs to. */
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).toBeNull();
+
+		/* Without a handle it still hides and restores (the membership paths). */
+		await repo.setCommunityChatHidden(communityB, member, true);
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
+		await repo.setCommunityChatHidden(communityB, member, false);
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).toBeNull();
 	});
 
 	it("deleting a community permanently takes its chat and messages with it", async () => {

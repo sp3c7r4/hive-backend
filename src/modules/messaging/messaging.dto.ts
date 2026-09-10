@@ -56,7 +56,16 @@ const toPeerDto = (row: ConversationRow) =>
 		"avatarUrl",
 	);
 
-export const toConversationDto = (row: ConversationRow) => ({
+/**
+ * @info - `hidden` is opt-in: the FE asks for it (GET /conversations?includeHidden=1)
+ *          where it draws the Communities tab, so the default list payload keeps
+ *          the shape every other consumer already reads. Hidden = I left/cleared
+ *          this chat (left_at on my participant row).
+ */
+export const toConversationDto = (
+	row: ConversationRow,
+	options?: { includeHidden?: boolean },
+) => ({
 	id: row.id,
 	type: row.type,
 	title: row.title,
@@ -70,9 +79,7 @@ export const toConversationDto = (row: ConversationRow) => ({
 	lastMessageAt: row.lastMessageAt,
 	createdAt: row.createdAt,
 	unreadCount: row.unreadCount,
-	/** @info - Hidden = I left/cleared this chat; only returned when the caller
-	 *          asked for hidden rows (GET /conversations?includeHidden=1). */
-	hidden: !!row.myLeftAt,
+	...(options?.includeHidden ? { hidden: !!row.myLeftAt } : {}),
 	peerLastReadAt: row.peerLastReadAt ?? null,
 	peer: row.type === "group" ? null : toPeerDto(row),
 	lastMessage: row.lastMessage

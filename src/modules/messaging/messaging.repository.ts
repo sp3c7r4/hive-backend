@@ -395,6 +395,23 @@ export class MessagingRepository {
 		return row;
 	};
 
+	/** A conversation by id — type/community for the unhide guard and DTO fallbacks. */
+	getConversationById = async (conversationId: number) => {
+		const db = getDb();
+		const [row] = await db
+			.select({
+				id: conversations.id,
+				type: conversations.type,
+				title: conversations.title,
+				communityId: conversations.communityId,
+				createdAt: conversations.createdAt,
+			})
+			.from(conversations)
+			.where(eq(conversations.id, conversationId))
+			.limit(1);
+		return row;
+	};
+
 	/** Search users by name/email (excludes the caller). */
 	searchUsers = async (userId: number, q: string, limit = 8) => {
 		const db = getDb();
@@ -598,16 +615,19 @@ export class MessagingRepository {
 	 *          leftAt on their existing participant row, restoring clears it. The
 	 *          row is never deleted, so a rejoin reactivates the same row with its
 	 *          history (and read state) intact. No chat yet → nothing to do.
+	 *          Pass a transaction handle to keep this atomic with the membership
+	 *          change that caused it.
 	 */
 	setCommunityChatHidden = async (
 		communityId: number,
 		userId: number,
 		hidden: boolean,
+		executor?: any,
 	) => {
 		const conversation = await this.findCommunityConversation(communityId);
 		if (!conversation) return null;
 
-		const db = getDb();
+		const db = executor ?? getDb();
 		const [row] = await db
 			.update(conversationParticipants)
 			.set({ leftAt: hidden ? new Date() : null })
@@ -631,12 +651,16 @@ export class MessagingRepository {
 	 */
 	ensureCommunityConversation = async (communityId: number, title: string) => {
 		const db = getDb();
+		/* @info - Resolve the name here rather than trusting the caller's snapshot:
+		 *         a list request that started before a rename would otherwise write
+		 *         the old name back over the new one. */
+		const currentTitle = (await this.getCommunityName(communityId)) ?? title;
 		const memberIds = await this.getActiveMemberIds(communityId);
 
 		const inserted = await db.transaction(async (tx) => {
 			const [row] = await tx
 				.insert(conversations)
-				.values({ type: "group", title, communityId })
+				.values({ type: "group", title: currentTitle, communityId })
 				.onConflictDoNothing()
 				.returning();
 			if (!row) return null;
@@ -664,12 +688,12 @@ export class MessagingRepository {
 
 		/* @info - The title is a snapshot from creation, so a renamed community
 		 *         would otherwise keep an outdated chat name forever. */
-		if (conversation.title !== title) {
+		if (conversation.title !== currentTitle) {
 			await db
 				.update(conversations)
-				.set({ title })
+				.set({ title: currentTitle })
 				.where(eq(conversations.id, conversation.id));
-			conversation.title = title;
+			conversation.title = currentTitle;
 		}
 
 		if (!inserted && memberIds.length) {
