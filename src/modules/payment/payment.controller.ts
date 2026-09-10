@@ -84,7 +84,7 @@ export class PaymentController {
 			if (courseRow!.deletedAt || courseRow!.status !== "published")
 				throwBadRequestError("This course isn't currently accepting enrollments.");
 			if (!courseRow!.price || courseRow!.price <= 0)
-				throwBadRequestError("This course is free — no payment needed");
+				throwBadRequestError("This course is free, no payment needed");
 			if (amount !== courseRow!.price)
 				throwBadRequestError("Amount does not match the course price");
 		} else if (type === "community" && communityId) {
@@ -95,7 +95,7 @@ export class PaymentController {
 				.limit(1);
 			if (!communityRow) throwNotFoundError("Community not found");
 			if (!communityRow!.price || communityRow!.price <= 0)
-				throwBadRequestError("This community is free — no payment needed");
+				throwBadRequestError("This community is free, no payment needed");
 			if (amount !== communityRow!.price)
 				throwBadRequestError("Amount does not match the community price");
 		} else {

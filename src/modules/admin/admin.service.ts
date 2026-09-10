@@ -113,7 +113,7 @@ export class AdminDashboardService {
 			activity.push({ id: seq++, type: "enrollment", action: "Enrolled in", detail: e.courseTitle, time: e.createdAt });
 		}
 		for (const p of payRows as any[]) {
-			activity.push({ id: seq++, type: "payment", action: `Paid ${p.status}`, detail: p.item ?? "—", time: p.createdAt });
+			activity.push({ id: seq++, type: "payment", action: `Paid ${p.status}`, detail: p.item ?? "-", time: p.createdAt });
 		}
 		for (const w of wdRows as any[]) {
 			activity.push({ id: seq++, type: "withdrawal", action: `Withdrawal ${w.status}`, detail: `${w.bankName} (${w.amount})`, time: w.requestedAt });
@@ -129,7 +129,7 @@ export class AdminDashboardService {
 		return {
 			profile: {
 				id: user.id,
-				name: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "—",
+				name: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "-",
 				email: user.email,
 				avatarUrl: user.avatarUrl
 					? withPresignedUrl({ avatarUrl: user.avatarUrl }, "avatarUrl").avatarUrl
@@ -316,7 +316,7 @@ export class AdminDashboardService {
 
 		let result = rows.map((u) => ({
 			id: u.id,
-			name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "—",
+			name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "-",
 			email: u.email,
 			avatarUrl: u.avatarUrl
 				? withPresignedUrl({ avatarUrl: u.avatarUrl }, "avatarUrl").avatarUrl
@@ -405,13 +405,13 @@ export class AdminDashboardService {
 			feed.push({ user: r.email ?? "Someone", action: "Joined Hive", resource: "User", detail: "New account created", time: r.time });
 		}
 		for (const r of payRows as any[]) {
-			feed.push({ user: r.email ?? "A student", action: "Paid for enrollment", resource: "Payment", detail: `${naira(r.amount ?? 0)} - ${r.item ?? "—"}`, time: r.time });
+			feed.push({ user: r.email ?? "A student", action: "Paid for enrollment", resource: "Payment", detail: `${naira(r.amount ?? 0)} - ${r.item ?? "-"}`, time: r.time });
 		}
 		for (const r of enrollRows as any[]) {
 			feed.push({ user: r.email ?? "A student", action: "Enrolled", resource: "Enrollment", detail: r.title ?? "a course", time: r.time });
 		}
 		for (const r of commRows as any[]) {
-			feed.push({ user: r.email ?? "Someone", action: "Created community", resource: "Community", detail: r.name ?? "—", time: r.time });
+			feed.push({ user: r.email ?? "Someone", action: "Created community", resource: "Community", detail: r.name ?? "-", time: r.time });
 		}
 		for (const r of wdRows as any[]) {
 			feed.push({ user: r.email ?? "An instructor", action: "Requested withdrawal", resource: "Withdrawal", detail: `${naira(r.amount ?? 0)} to ${r.bankName ?? "bank"}`, time: r.time });
