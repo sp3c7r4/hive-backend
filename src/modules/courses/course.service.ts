@@ -71,15 +71,22 @@ export class CourseService {
 
 	/** @info - Any course mutation requires the owning instructor or a
 	 * platform admin (mirrors community.service assertOwnerOrAdmin). */
-	private assertCourseOwner = (
+	private isOwnerOrAdmin = (
 		course: { instructorId: number },
 		authData?: IAuthData,
-	) => {
+	): boolean => {
 		const isOwner = Number(course.instructorId) === Number(authData?.id);
 		const isAdmin =
 			Array.isArray(authData?.roles) &&
 			(authData as any).roles.includes("admin");
-		if (!isOwner && !isAdmin) {
+		return isOwner || isAdmin;
+	};
+
+	private assertCourseOwner = (
+		course: { instructorId: number },
+		authData?: IAuthData,
+	) => {
+		if (!this.isOwnerOrAdmin(course, authData)) {
 			throwForbiddenError("You don't have permission to modify this course.");
 		}
 	};
@@ -358,6 +365,18 @@ export class CourseService {
 			includeDeleted: true,
 		});
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Soft-deleted rows must be restored before any edit. Owners/
+		 * admins get a 400 for ANY payload (not just status changes);
+		 * non-owners get 404 so the existence of deleted courses is never
+		 * disclosed. The normal non-deleted non-owner path keeps its 403. */
+		if ((course as any).deletedAt) {
+			if (!this.isOwnerOrAdmin(course as any, authData)) {
+				throwNotFoundError(CourseMessages.NOT_FOUND);
+			}
+			throwBadRequestError("Restore this course before changing its status.");
+		}
+
 		this.assertCourseOwner(course as any, authData);
 
 		// Coerce FormData string values to proper types
@@ -397,11 +416,9 @@ export class CourseService {
 		}
 		const allowed = parsed.data as Record<string, any>;
 
-		/* @info - Status transition matrix (owner/admin already asserted). */
+		/* @info - Status transition matrix (owner/admin already asserted; the
+		 * deletedAt case threw above, before any payload was parsed). */
 		if (allowed.status !== undefined) {
-			if (course!.deletedAt) {
-				throwBadRequestError("Restore this course before changing its status.");
-			}
 			const from = (course as any).status;
 			const to = allowed.status;
 			if (from === "archived" && to === "published") {

@@ -50,6 +50,29 @@ function resetDb() {
 	mocks.calls.length = 0;
 }
 
+/** @info - Render a drizzle SQL expression to text (queryChunks → StringChunk
+ * `.value` / Column `.name`), so assertions can pin the actual SQL operators. */
+function sqlText(expr: unknown): string {
+	if (expr == null) return "";
+	if (typeof expr === "string") return expr;
+	if (typeof expr === "number") return String(expr);
+	if (Array.isArray(expr)) return expr.map(sqlText).join("");
+	if (typeof expr === "object") {
+		const anyExpr = expr as any;
+		if (Array.isArray(anyExpr.queryChunks)) {
+			return anyExpr.queryChunks.map(sqlText).join("");
+		}
+		/* drizzle StringChunk holds value as string[] */
+		if (Array.isArray(anyExpr.value)) {
+			return anyExpr.value.map((v: unknown) => String(v)).join("");
+		}
+		if (typeof anyExpr.value === "string") return anyExpr.value;
+		if (typeof anyExpr.value === "number") return String(anyExpr.value);
+		if (typeof anyExpr.name === "string") return anyExpr.name;
+	}
+	return "";
+}
+
 /* Fresh, mock-aware module graph (loaded once). */
 await vi.resetModules();
 const modules = await (async () => {
@@ -214,6 +237,32 @@ describe("course update — allowlist + transition matrix", () => {
 		});
 	});
 
+	it("rejects ANY payload on a soft-deleted course for the owner (400)", async () => {
+		coursesRepo.findById.mockResolvedValue({
+			id: 10,
+			instructorId: 1,
+			status: "draft",
+			deletedAt: new Date(),
+		});
+		await expect(
+			service.updateCourse(OWNER, 10, { title: "retitled" } as any),
+		).rejects.toThrow(modules.errors.BadRequestError);
+		expect(coursesRepo.update).not.toHaveBeenCalled();
+	});
+
+	it("returns 404 (not 403) for a non-owner on a soft-deleted course", async () => {
+		coursesRepo.findById.mockResolvedValue({
+			id: 10,
+			instructorId: 1,
+			status: "draft",
+			deletedAt: new Date(),
+		});
+		await expect(
+			service.updateCourse(STRANGER, 10, { title: "retitled" } as any),
+		).rejects.toThrow(modules.errors.NotFoundError);
+		expect(coursesRepo.update).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		["draft", "draft"],
 		["published", "published"],
@@ -301,8 +350,9 @@ describe("course restore", () => {
 			{ includeDeleted: true },
 		);
 		expect(restored).toMatchObject({ status: "draft", deletedAt: null });
-		/* courseCount +1 is precise: the communities row update's .set() carries
-		 * a courseCount key (the SQL GREATEST increment expression). */
+		/* courseCount is INCREMENTED here: restore's set-value SQL must read
+		 * `course_count + 1` (GREATEST(... - 1, 0) belongs to deleteCourse's
+		 * decrement), so a regression to a decrement fails this assertion. */
 		const communityUpdate = mocks.calls.find(
 			(c) => c.prop === "update" && c.args[0] === modules.communities,
 		);
@@ -311,6 +361,9 @@ describe("course restore", () => {
 			(c) => c.prop === "set" && c.args[0] && "courseCount" in c.args[0],
 		);
 		expect(setCall).toBeTruthy();
+		const restoreCountSql = sqlText(setCall!.args[0].courseCount);
+		expect(restoreCountSql).toContain("+ 1");
+		expect(restoreCountSql).not.toContain("- 1");
 	});
 
 	it("rejects restore for a non-owner", async () => {
@@ -572,14 +625,19 @@ describe("community permanent-delete guards", () => {
 			.find((c) => c.prop === "where");
 		expect(whereCall).toBeTruthy();
 		/* Walk the where-expression object graph for column names (drizzle
-		 * columns expose `.name`; circular table links are skipped). */
+		 * columns expose `.name`). `table` (and `config`) hold BACK-REFERENCES
+		 * to the whole table, so walking them would enumerate every column of
+		 * both tables and make this assertion vacuous — skip them. */
 		const collectNames = (obj: unknown, seen = new WeakSet()): string[] => {
 			if (!obj || typeof obj !== "object") return [];
 			if (seen.has(obj)) return [];
 			seen.add(obj);
 			const out: string[] = [];
 			if (typeof (obj as any).name === "string") out.push((obj as any).name);
-			for (const v of Object.values(obj)) out.push(...collectNames(v, seen));
+			for (const [key, v] of Object.entries(obj)) {
+				if (key === "table" || key === "config") continue;
+				out.push(...collectNames(v, seen));
+			}
 			return out;
 		};
 		const names = [...new Set(collectNames(whereCall!.args[0]))].join("|");
