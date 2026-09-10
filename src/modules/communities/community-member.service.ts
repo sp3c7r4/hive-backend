@@ -295,6 +295,15 @@ export class CommunityMemberService {
 		await db
 			.delete(communityMembers)
 			.where(eq(communityMembers.id, member!.id));
+
+		/* @info - Membership is the source of truth for the community chat: losing
+		 *         it hides the chat. The participant row survives (left_at set) so a
+		 *         rejoin reactivates the same row with its history intact. */
+		await MessagingRepository.getInstance().setCommunityChatHidden(
+			community.id,
+			targetUserId,
+			true,
+		);
 	};
 
 	approveMember = async (
@@ -327,6 +336,13 @@ export class CommunityMemberService {
 
 		this.notifyCommunityChat(community.id, community.name, targetUserId).catch(
 			() => {},
+		);
+		/* @info - Approving grants the community chat, including for someone who was
+		 *         removed earlier and applied again. */
+		await MessagingRepository.getInstance().setCommunityChatHidden(
+			community.id,
+			targetUserId,
+			false,
 		);
 
 		/* @info - Tell the approved student their request went through */
@@ -595,6 +611,14 @@ export class CommunityMemberService {
 			this.notifyCommunityChat(community.id, community.name, userId).catch(
 				() => {},
 			);
+			/* @info - Rejoining restores the chat they hid earlier: same participant
+			 *         row, same history. If the chat does not exist yet, the ensure
+			 *         above creates it with them visible anyway. */
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				userId,
+				false,
+			);
 		}
 
 		return member;
@@ -646,5 +670,13 @@ export class CommunityMemberService {
 		await db
 			.delete(communityMembers)
 			.where(eq(communityMembers.id, member!.id));
+
+		/* @info - Same rule as removal: no membership, no chat. The participant row
+		 *         stays behind so rejoining brings the same chat back. */
+		await MessagingRepository.getInstance().setCommunityChatHidden(
+			community.id,
+			userId,
+			true,
+		);
 	};
 }

@@ -3,6 +3,16 @@ import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { MessagingService } from "./messaging.service";
 
+/** @info - zValidator stores the parsed query under the request's validation
+ *          targets; the plain Context type does not expose that generic, so read
+ *          it through this narrow accessor instead of the raw query string. */
+const validatedQuery = <T>(c: Context): T => {
+	const req = c.req as unknown as {
+		valid: (target: "query") => T | undefined;
+	};
+	return (req.valid("query") ?? {}) as T;
+};
+
 export class MessagingController {
 	private static instance: MessagingController;
 
@@ -19,7 +29,8 @@ export class MessagingController {
 
 	listConversations = async (c: Context) => {
 		const authData = c.get("authData");
-		const data = await this.service.list(authData);
+		const { includeHidden } = validatedQuery<{ includeHidden?: boolean }>(c);
+		const data = await this.service.list(authData, { includeHidden });
 		return sendSuccessResponse(c, { message: "Conversations fetched", data });
 	};
 
@@ -74,6 +85,13 @@ export class MessagingController {
 		const id = Number(c.req.param("id"));
 		const data = await this.service.leaveConversation(authData, id);
 		return sendSuccessResponse(c, { message: "Conversation removed", data });
+	};
+
+	unhide = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = Number(c.req.param("id"));
+		const data = await this.service.unhideConversation(authData, id);
+		return sendSuccessResponse(c, { message: "Conversation restored", data });
 	};
 
 	remove = async (c: Context) => {

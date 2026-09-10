@@ -55,10 +55,10 @@ export class MessagingService {
 		});
 	};
 
-	list = async (authData: IAuthData) => {
+	list = async (authData: IAuthData, options?: { includeHidden?: boolean }) => {
 		/* Joined communities automatically get their group chat */
 		await this.ensureCommunityChats(authData.id);
-		const rows = await this.repo.listForUser(authData.id);
+		const rows = await this.repo.listForUser(authData.id, undefined, options);
 		return rows.map((r) => toConversationDto(r));
 	};
 
@@ -157,7 +157,7 @@ export class MessagingService {
 		/* Real-time fan-out: recipient + sender's other devices.
 		 * `peer` is the OTHER user from each receiver's perspective:
 		 * recipient sees the sender, sender sees the recipient. */
-		const messageDto = toMessageDto(message);
+		const messageDto = this.toSentMessageDto(message, authData);
 		const senderAsPeer = {
 			id: authData.id,
 			firstName: authData.firstName ?? "",
@@ -315,7 +315,7 @@ export class MessagingService {
 		});
 
 		const participants = await this.repo.getParticipantIds(conversation.id);
-		const messageDto = toMessageDto(message);
+		const messageDto = this.toSentMessageDto(message, authData);
 		const conversationForPayload = {
 			id: conversation.id,
 			communityId: conversation.communityId ?? body.communityId,
@@ -365,6 +365,22 @@ export class MessagingService {
 		await this.ensureParticipant(conversationId, authData.id);
 		await this.repo.leaveConversation(conversationId, authData.id);
 		return { conversationId };
+	};
+
+	/**
+	 * @info - Undo a hide from the Communities tab. Idempotent: unhiding a chat
+	 *          that is already visible just returns it. The backlog is left
+	 *          unread on purpose — restoring a chat is not reading it.
+	 */
+	unhideConversation = async (authData: IAuthData, conversationId: number) => {
+		const participant = await this.repo.getParticipant(
+			conversationId,
+			authData.id,
+		);
+		if (!participant) throwNotFoundError(MSG.NOT_FOUND);
+
+		await this.repo.unhideConversation(conversationId, authData.id);
+		return this.loadConversationDto(conversationId, authData.id);
 	};
 
 	/** @info - Create/backfill the group chat for every joined community. */
@@ -418,6 +434,24 @@ export class MessagingService {
 			lastMessage: null,
 		};
 	};
+
+	/**
+	 * @info - DTO for a message we just inserted. The INSERT's RETURNING row carries
+	 *          no sender join, so the acting user's identity is filled in from
+	 *          authData — this DTO leaves the server as both the send response and
+	 *          the socket payload, where a missing name renders as "undefined
+	 *          undefined" in the recipient's bubble. Read paths that join users keep
+	 *          using toMessageDto directly.
+	 */
+	private toSentMessageDto = (message: any, authData: IAuthData) =>
+		toMessageDto({
+			...message,
+			senderId: message?.senderId ?? authData.id,
+			senderFirstName: authData.firstName,
+			senderLastName: authData.lastName,
+			senderEmail: authData.email,
+			senderAvatarUrl: (authData as any).avatarUrl ?? null,
+		});
 }
 
 /** @info - Plain-text only: strip tags + control chars before persisting. */

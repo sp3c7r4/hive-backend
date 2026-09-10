@@ -12,6 +12,8 @@ type ConversationRow = {
 	lastMessageAt: Date | null;
 	createdAt: Date | null;
 	myLastReadAt?: Date | null;
+	/** @info - Set when the caller hid this chat (left_at); drives the DTO's `hidden`. */
+	myLeftAt?: Date | null;
 	peerLastReadAt?: Date | null;
 	peerId?: number | null;
 	peerFirstName?: string;
@@ -68,6 +70,9 @@ export const toConversationDto = (row: ConversationRow) => ({
 	lastMessageAt: row.lastMessageAt,
 	createdAt: row.createdAt,
 	unreadCount: row.unreadCount,
+	/** @info - Hidden = I left/cleared this chat; only returned when the caller
+	 *          asked for hidden rows (GET /conversations?includeHidden=1). */
+	hidden: !!row.myLeftAt,
 	peerLastReadAt: row.peerLastReadAt ?? null,
 	peer: row.type === "group" ? null : toPeerDto(row),
 	lastMessage: row.lastMessage

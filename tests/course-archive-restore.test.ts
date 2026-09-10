@@ -86,6 +86,7 @@ const modules = await (async () => {
 		communityModel,
 		enrollmentModel,
 		paymentModel,
+		messagingModel,
 	] = await Promise.all([
 		import("@/modules/courses/course.service"),
 		import("@/modules/enrollments/enrollment.service"),
@@ -96,6 +97,7 @@ const modules = await (async () => {
 		import("@/modules/communities/community.model"),
 		import("@/modules/enrollments/enrollment.model"),
 		import("@/modules/payment/payment.model"),
+		import("@/modules/messaging/message.model"),
 	]);
 	return {
 		CourseService,
@@ -107,6 +109,7 @@ const modules = await (async () => {
 		communities: communityModel.communities,
 		enrollmentsModel: enrollmentModel.enrollments,
 		payments: paymentModel.payments,
+		conversations: messagingModel.conversations,
 	};
 })();
 
@@ -650,9 +653,11 @@ describe("community permanent-delete guards", () => {
 		await expect(service.delete(5, true, OWNER)).resolves.toBeUndefined();
 
 		const deleteCalls = mocks.calls.filter((c) => c.prop === "delete");
-		expect(deleteCalls.length).toBe(2);
+		expect(deleteCalls.length).toBe(3);
 		expect(deleteCalls[0]!.args[0]).toBe(modules.courses);
-		expect(deleteCalls[1]!.args[0]).toBe(modules.communities);
+		/* The community chat goes with the community — no dangling conversation. */
+		expect(deleteCalls[1]!.args[0]).toBe(modules.conversations);
+		expect(deleteCalls[2]!.args[0]).toBe(modules.communities);
 	});
 });
 

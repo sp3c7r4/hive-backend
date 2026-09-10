@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => {
 		softDeleteMessage: vi.fn(),
 		getPeerId: vi.fn(),
 		getParticipantIds: vi.fn(),
+		getCommunityInfo: vi.fn(),
+		ensureCommunityConversation: vi.fn(),
+		findCommunityConversation: vi.fn(),
+		getMembershipStatus: vi.fn(),
 	};
 	const userRow = { id: 5, firstName: "Peer", lastName: "User", email: "peer@hive.test" };
 	const queryChain = { limit: vi.fn(async () => [userRow]) };
@@ -192,6 +196,97 @@ describe("MessagingService.send", () => {
 		expect(mocks.repo.insertMessage).toHaveBeenCalledWith(
 			expect.objectContaining({ conversationId: 9 }),
 		);
+	});
+
+	/**
+	 * @info - The DTO built from the INSERT row (no sender join) is what the socket
+	 *          pushes and what the send response returns. Leaving the sender fields
+	 *          empty made recipients render "undefined undefined" in the bubble.
+	 */
+	const senderAuth = {
+		id: 6,
+		firstName: "Ada",
+		lastName: "Okafor",
+		email: "ada@hive.test",
+		avatarUrl: null,
+	} as any;
+
+	it("carries the sender's name in the direct-message socket payload and response", async () => {
+		const service = await loadService();
+		mocks.publishUser.mockReset();
+		mocks.publishUser.mockResolvedValue(undefined);
+
+		const result = await service.send(senderAuth, {
+			recipientId: 5,
+			content: "hello",
+		});
+
+		expect(result.message!.sender).toMatchObject({
+			id: 6,
+			firstName: "Ada",
+			lastName: "Okafor",
+			email: "ada@hive.test",
+		});
+
+		const envelope = mocks.publishUser.mock.calls
+			.map(([, env]) => env)
+			.find((env) => env?.data?.type === "message:new");
+		expect(envelope.data.payload.message.sender).toMatchObject({
+			firstName: "Ada",
+			lastName: "Okafor",
+		});
+	});
+
+	it("carries the sender's name in the community-chat socket payload and response", async () => {
+		const service = await loadService();
+		mocks.publishUser.mockReset();
+		mocks.publishUser.mockResolvedValue(undefined);
+		mocks.repo.getCommunityInfo.mockResolvedValue({
+			name: "Test Community",
+			coverImageUrl: null,
+		});
+		mocks.repo.ensureCommunityConversation.mockResolvedValue({
+			id: 9,
+			communityId: 2,
+			title: "Test Community",
+		});
+		mocks.repo.findCommunityConversation.mockResolvedValue({
+			id: 9,
+			communityId: 2,
+			title: "Test Community",
+		});
+		mocks.repo.isParticipant.mockResolvedValue(true);
+		mocks.repo.getMembershipStatus.mockResolvedValue("active");
+		mocks.repo.getParticipantIds.mockResolvedValue([6, 5]);
+		mocks.repo.insertMessage.mockResolvedValue({
+			id: 11,
+			conversationId: 9,
+			senderId: 6,
+			type: "text",
+			content: "hi team",
+			attachmentUrl: null,
+			readAt: null,
+			createdAt: new Date(),
+			deletedAt: null,
+		});
+
+		const result = await service.send(senderAuth, {
+			communityId: 2,
+			content: "hi team",
+		});
+
+		expect(result.message!.sender).toMatchObject({
+			firstName: "Ada",
+			lastName: "Okafor",
+		});
+
+		const envelope = mocks.publishUser.mock.calls
+			.map(([, env]) => env)
+			.find((env) => env?.data?.type === "message:new");
+		expect(envelope.data.payload.message.sender).toMatchObject({
+			firstName: "Ada",
+			lastName: "Okafor",
+		});
 	});
 });
 

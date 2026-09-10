@@ -10,6 +10,8 @@ import { CommunityRepository } from "./community.repository";
 import type { NewCommunity } from "./community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { courses } from "@/modules/courses/course.model";
+import { conversations } from "@/modules/messaging/message.model";
+import { MessagingRepository } from "@/modules/messaging/messaging.repository";
 import { payments } from "@/modules/payment/payment.model";
 import { getDb } from "@/db/postgres.db";
 import { withPresignedUrl, withTransaction } from "@/helpers";
@@ -198,6 +200,16 @@ export class CommunityService {
 		this.assertOwnerOrAdmin(community as any, authData);
 		const updated = await this.repo.update(id, data as any);
 		if (!updated) throwNotFoundError(CommunityMessages.NOT_FOUND);
+
+		/* @info - The community chat is named after the community: keep it in step
+		 *         or members keep seeing the old name in Messages forever. */
+		if (typeof data.name === "string" && data.name !== community?.name) {
+			await MessagingRepository.getInstance().updateCommunityConversationTitle(
+				id,
+				data.name,
+			);
+		}
+
 		return toCommunityDto(withPresignedUrl(updated!, "coverImageUrl"));
 	};
 
@@ -265,9 +277,13 @@ export class CommunityService {
 
 		/* Delete the community's courses first, then the community, atomically.
 		 * Course deletion cascades to modules/lessons/enrollment rows (if any
-		 * non-money leftovers exist) and nulls course references on payments. */
+		 * non-money leftovers exist) and nulls course references on payments.
+		 * The community chat goes with them — a conversation pointing at a
+		 * community that no longer exists is a dangling row nothing can reach
+		 * (messages + participants cascade by FK). */
 		await withTransaction(async (tx) => {
 			await tx.delete(courses).where(eq(courses.communityId, id));
+			await tx.delete(conversations).where(eq(conversations.communityId, id));
 			await tx.delete(communities).where(eq(communities.id, id));
 		});
 		this.log.info(`Community ${id} permanently deleted`);

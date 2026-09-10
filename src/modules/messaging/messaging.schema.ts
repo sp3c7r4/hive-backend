@@ -20,3 +20,15 @@ export const messagesQuerySchema = z.object({
 	before: z.coerce.number().int().positive().optional(),
 	limit: z.coerce.number().int().min(1).max(100).optional(),
 });
+
+/**
+ * @info - GET /conversations query. `includeHidden=1` also returns the chats the
+ *          caller has hidden (the Communities tab's return path); every other
+ *          value, and omitting it, keeps the legacy list exactly as it was.
+ */
+export const listConversationsQuerySchema = z.object({
+	includeHidden: z
+		.enum(["0", "1", "true", "false"])
+		.optional()
+		.transform((value) => value === "1" || value === "true"),
+});

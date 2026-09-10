@@ -95,13 +95,26 @@ export class MessagingRepository {
 		return conversation;
 	};
 
-	/** My conversations with peer user, last-message preview and unread count. */
-	listForUser = async (userId: number, conversationId?: number) => {
+	/**
+	 * My conversations with peer user, last-message preview and unread count.
+	 * `includeHidden` also returns the chats I hid (left_at set) so the client can
+	 * offer them back in the Communities tab; they keep their unread counts.
+	 */
+	listForUser = async (
+		userId: number,
+		conversationId?: number,
+		options?: { includeHidden?: boolean },
+	) => {
 		const db = getDb();
 		const me = alias(conversationParticipants, "me");
 		const peer = alias(conversationParticipants, "peer");
+		const includeHidden = options?.includeHidden ?? false;
 
-		const where = and(eq(me.userId, userId), isNull(me.leftAt), isNull(peer.leftAt));
+		const where = and(
+			eq(me.userId, userId),
+			isNull(peer.leftAt),
+			includeHidden ? undefined : isNull(me.leftAt),
+		);
 		const whereWithId = conversationId ? and(where, eq(conversations.id, conversationId)) : where;
 
 		const rows = await db
@@ -113,6 +126,7 @@ export class MessagingRepository {
 				lastMessageAt: conversations.lastMessageAt,
 				createdAt: conversations.createdAt,
 				myLastReadAt: me.lastReadAt,
+				myLeftAt: me.leftAt,
 				peerLastReadAt: peer.lastReadAt,
 				peerId: peer.userId,
 				peerFirstName: users.firstName,
@@ -141,13 +155,14 @@ export class MessagingRepository {
 				coverImageUrl: communities.coverImageUrl,
 				lastMessageAt: conversations.lastMessageAt,
 				createdAt: conversations.createdAt,
+				myLeftAt: conversationParticipants.leftAt,
 			})
 			.from(conversationParticipants)
 			.innerJoin(conversations, eq(conversations.id, conversationParticipants.conversationId))
 			.leftJoin(communities, eq(communities.id, conversations.communityId))
 			.where(and(
 				eq(conversationParticipants.userId, userId),
-				isNull(conversationParticipants.leftAt),
+				includeHidden ? undefined : isNull(conversationParticipants.leftAt),
 				eq(conversations.type, "group"),
 				conversationId ? eq(conversations.id, conversationId) : undefined,
 			))
@@ -448,6 +463,24 @@ export class MessagingRepository {
 			));
 	};
 
+	/**
+	 * @info - Undo a hide: clear leftAt for the caller's own participant row.
+	 *          Idempotent (a visible chat stays visible) and never touches
+	 *          lastReadAt — restoring a chat must not swallow its backlog.
+	 */
+	unhideConversation = async (conversationId: number, userId: number) => {
+		const db = getDb();
+		const [row] = await db
+			.update(conversationParticipants)
+			.set({ leftAt: null })
+			.where(and(
+				eq(conversationParticipants.conversationId, conversationId),
+				eq(conversationParticipants.userId, userId),
+			))
+			.returning();
+		return row;
+	};
+
 	/** @info - Insert a system message (e.g. "X joined the community"). */
 	insertSystemMessage = async (conversationId: number, senderId: number, content: string) => {
 		const db = getDb();
@@ -540,6 +573,53 @@ export class MessagingRepository {
 	};
 
 	/**
+	 * @info - Keep a community chat's name in step with the community. Called on
+	 *          rename and from the ensure path, so a chat created before the
+	 *          community was renamed never keeps serving the stale name.
+	 */
+	updateCommunityConversationTitle = async (
+		communityId: number,
+		title: string,
+	) => {
+		const db = getDb();
+		const rows = await db
+			.update(conversations)
+			.set({ title })
+			.where(and(
+				eq(conversations.communityId, communityId),
+				eq(conversations.type, "group"),
+			))
+			.returning({ id: conversations.id });
+		return rows.length;
+	};
+
+	/**
+	 * @info - Tie a member's community-chat access to their membership: hiding sets
+	 *          leftAt on their existing participant row, restoring clears it. The
+	 *          row is never deleted, so a rejoin reactivates the same row with its
+	 *          history (and read state) intact. No chat yet → nothing to do.
+	 */
+	setCommunityChatHidden = async (
+		communityId: number,
+		userId: number,
+		hidden: boolean,
+	) => {
+		const conversation = await this.findCommunityConversation(communityId);
+		if (!conversation) return null;
+
+		const db = getDb();
+		const [row] = await db
+			.update(conversationParticipants)
+			.set({ leftAt: hidden ? new Date() : null })
+			.where(and(
+				eq(conversationParticipants.conversationId, conversation.id),
+				eq(conversationParticipants.userId, userId),
+			))
+			.returning({ id: conversationParticipants.id });
+		return row?.id ?? null;
+	};
+
+	/**
 	 * @info - Ensure a community's group chat exists and every active member is
 	 *          a participant. Safe to call on every list/send, and safe to call
 	 *          concurrently: the insert is guarded by the partial unique index
@@ -581,6 +661,16 @@ export class MessagingRepository {
 		const conversation =
 			inserted ?? (await this.findCommunityConversation(communityId));
 		if (!conversation) return conversation;
+
+		/* @info - The title is a snapshot from creation, so a renamed community
+		 *         would otherwise keep an outdated chat name forever. */
+		if (conversation.title !== title) {
+			await db
+				.update(conversations)
+				.set({ title })
+				.where(eq(conversations.id, conversation.id));
+			conversation.title = title;
+		}
 
 		if (!inserted && memberIds.length) {
 			/* New members may have joined since — backfill participants. */
