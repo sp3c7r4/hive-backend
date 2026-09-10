@@ -22,6 +22,12 @@ export class WithdrawalController {
 		return sendSuccessResponse(c, { message: "Withdrawal requested", data });
 	};
 
+	/** @info - Payout institutions for the withdrawal bank picker. */
+	listBanks = async (c: Context) => {
+		const data = await this.service.listBanks();
+		return sendSuccessResponse(c, { message: "Banks fetched", data });
+	};
+
 	verifyAccount = async (c: Context) => {
 		const authData = c.get("authData");
 		const body = await c.req.json();

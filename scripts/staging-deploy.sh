@@ -10,6 +10,14 @@ cd /home/ec2-user
 aws s3 cp "s3://${S3_BUCKET}/${ARTIFACT_KEY}" /tmp/release.tar.gz
 aws s3 cp "s3://${S3_BUCKET}/${ENV_KEY}" /tmp/env.staging
 
+# @info - Enforce an env var in place, whatever the secret-sourced env carried.
+set_env_var() {
+  local file="$1" key="$2" value="$3"
+  grep -v "^${key}=" "$file" > "${file}.tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "${file}.tmp"
+  mv "${file}.tmp" "$file"
+}
+
 rm -rf hive-backend.tmp && mkdir -p hive-backend.tmp
 tar -xzf /tmp/release.tar.gz -C hive-backend.tmp
 rm -f /tmp/release.tar.gz
@@ -21,6 +29,10 @@ rsync -a hive-backend.tmp/ /home/ec2-user/hive-backend/
 rm -rf hive-backend.tmp
 
 cp /tmp/env.staging /home/ec2-user/hive-backend/.env.staging
+# @info - Payout kill switch: staging shares the prod box and holds LIVE Paystack
+# keys, so an approve here must never fire a real transfer (see
+# WITHDRAWALS_TRANSFER_ENABLED in src/config/config.ts).
+set_env_var /home/ec2-user/hive-backend/.env.staging WITHDRAWALS_TRANSFER_ENABLED false
 chmod 600 /home/ec2-user/hive-backend/.env.staging
 chown ec2-user:ec2-user /home/ec2-user/hive-backend/.env.staging
 rm -f /tmp/env.staging

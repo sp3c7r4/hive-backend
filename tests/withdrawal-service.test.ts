@@ -53,9 +53,36 @@ const mocks = vi.hoisted(() => {
 		resolveAccountNumber: vi.fn(async () => ({ accountNumber: "0123456789", accountName: "SARAFTA SATAE" })),
 		createRecipient: vi.fn(async () => ({ recipientCode: "RCP_test" })),
 		transfer: vi.fn(async () => ({ status: "success", transferCode: "TRF_test" })),
+		listBanks: vi.fn(async () => [{ name: "GTBank", code: "058" }]),
 	};
 
-	return { db: chain, tx, paystack, results, records };
+	/* @info - Mutable paystack config so the kill switch and the test-key/live-key
+	 * branches are exercised deterministically (the ambient .env holds LIVE keys,
+	 * which is what made the old test-mode expectations fail). */
+	const paystackConfig = {
+		secret: "sk_test_x",
+		devResolveFallback: true,
+		withdrawalsTransferEnabled: true,
+	};
+
+	return { db: chain, tx, paystack, paystackConfig, results, records };
+});
+
+vi.mock("@/config", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/config")>();
+	const paystack = {
+		...actual.config.paystack,
+		get secret() {
+			return mocks.paystackConfig.secret;
+		},
+		get devResolveFallback() {
+			return mocks.paystackConfig.devResolveFallback;
+		},
+		get withdrawalsTransferEnabled() {
+			return mocks.paystackConfig.withdrawalsTransferEnabled;
+		},
+	};
+	return { config: { ...actual.config, paystack } };
 });
 
 vi.mock("@/db/postgres.db", () => ({ getDb: () => mocks.db }));
@@ -81,10 +108,15 @@ describe("WithdrawalService", () => {
 	beforeEach(() => {
 		mocks.results.length = 0;
 		mocks.records.length = 0;
+		mocks.paystackConfig.secret = "sk_test_x";
+		mocks.paystackConfig.devResolveFallback = true;
+		mocks.paystackConfig.withdrawalsTransferEnabled = true;
 		mocks.paystack.resolveBankCode.mockClear();
+		mocks.paystack.resolveBankCode.mockResolvedValue("044" as never);
 		mocks.paystack.resolveAccountNumber.mockClear();
 		mocks.paystack.createRecipient.mockClear();
 		mocks.paystack.transfer.mockClear();
+		mocks.paystack.listBanks.mockClear();
 	});
 
 	it("create: insufficient balance → 400, no rows", async () => {
@@ -210,6 +242,7 @@ describe("WithdrawalService", () => {
 			bankCode: "001",
 			accountNumber: "0123456789",
 			accountName: "TEST ACCOUNT 0123456789",
+			simulated: true,
 		});
 	});
 
@@ -221,6 +254,105 @@ describe("WithdrawalService", () => {
 			accountNumber: "0123456789",
 		});
 		expect(r.accountName).toBe("Test Account"); // dev fallback enabled
+		expect(r.simulated).toBe(true);
+	});
+
+	it("verifyAccount: bankCode goes straight to Paystack (no name lookup)", async () => {
+		const service = await loadService();
+		const r = await service.verifyAccount(auth, {
+			bankCode: "058",
+			accountNumber: "0123456789",
+		});
+
+		expect(mocks.paystack.resolveAccountNumber).toHaveBeenCalledWith(
+			"0123456789",
+			"058",
+		);
+		expect(mocks.paystack.resolveBankCode).not.toHaveBeenCalled();
+		expect(r).toMatchObject({
+			bankCode: "058",
+			accountNumber: "0123456789",
+			accountName: "SARAFTA SATAE",
+			simulated: true,
+		});
+	});
+
+	it("verifyAccount: live keys report simulated=false", async () => {
+		mocks.paystackConfig.secret = "sk_live_x";
+		const service = await loadService();
+		const r = await service.verifyAccount(auth, {
+			bankCode: "058",
+			accountNumber: "0123456789",
+		});
+		expect(r.simulated).toBe(false);
+	});
+
+	it("verifyAccount: missing bank → 400 (no Paystack call)", async () => {
+		const service = await loadService();
+		await expect(
+			service.verifyAccount(auth, { accountNumber: "0123456789" }),
+		).rejects.toThrow("Select a bank");
+		expect(mocks.paystack.resolveAccountNumber).not.toHaveBeenCalled();
+	});
+
+	it("approve (kill switch off): no Paystack call, row → processing + note", async () => {
+		mocks.paystackConfig.withdrawalsTransferEnabled = false;
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+
+		expect(res).toEqual({ status: "processing", transferSuppressed: true });
+		expect(mocks.paystack.createRecipient).not.toHaveBeenCalled();
+		expect(mocks.paystack.transfer).not.toHaveBeenCalled();
+		const statusUpdate = mocks.records.find(
+			(r) => r.kind === "update" && r.payload.status === "processing",
+		);
+		expect(statusUpdate?.payload).toMatchObject({
+			note: "transfer suppressed (non-prod)",
+		});
+		/* @info - Identical bookkeeping to prod, note apart. */
+		const withdrawnUpdate = mocks.records.find(
+			(r) => r.kind === "update" && r.payload.withdrawn === 100000,
+		);
+		expect(withdrawnUpdate).toBeDefined();
+	});
+
+	it("approve (kill switch off): second approve conflicts like prod", async () => {
+		mocks.paystackConfig.withdrawalsTransferEnabled = false;
+		mocks.results.push([
+			{ id: 7, instructorId: 5, amount: 100000, status: "processing", reference: "wd-1" },
+		]);
+		const service = await loadService();
+		await expect(service.approve(7)).rejects.toThrow("no longer pending");
+		expect(mocks.paystack.createRecipient).not.toHaveBeenCalled();
+		expect(mocks.paystack.transfer).not.toHaveBeenCalled();
+	});
+
+	it("approve: unresolvable bank fails the row instead of guessing a code", async () => {
+		mocks.paystackConfig.secret = "sk_live_x";
+		mocks.paystack.resolveBankCode.mockResolvedValueOnce(null as never);
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Ambiguous Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow, available: 400000 }],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+
+		expect(res.status).toBe("failed");
+		expect(String(res.transferError)).toContain("Could not resolve the bank");
+		expect(mocks.paystack.createRecipient).not.toHaveBeenCalled();
+		const last = mocks.records[mocks.records.length - 1];
+		expect(last.payload.category).toBe("withdrawal_refund");
+	});
+
+	it("listBanks: delegates to the cached upstream list", async () => {
+		const service = await loadService();
+		const banks = await service.listBanks();
+		expect(banks).toEqual([{ name: "GTBank", code: "058" }]);
+		expect(mocks.paystack.listBanks).toHaveBeenCalled();
 	});
 
 	it("listAdmin: returns queued withdrawals", async () => {

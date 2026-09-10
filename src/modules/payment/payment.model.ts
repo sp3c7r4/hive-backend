@@ -82,6 +82,9 @@ export const withdrawals = pgTable(
 		bankName: varchar("bank_name", { length: 255 }).notNull(),
 		accountNumber: varchar("account_number", { length: 20 }).notNull(),
 		accountName: varchar("account_name", { length: 255 }).notNull(),
+		/** @info - Operator note on the row: set when a non-prod kill switch
+		 * suppressed the payout (see WITHDRAWALS_TRANSFER_ENABLED). */
+		note: varchar("note", { length: 255 }),
 		status: withdrawalStatusEnum("status").default("pending").notNull(),
 		reference: varchar("reference", { length: 255 }).notNull(),
 		requestedAt: timestamp("requested_at").defaultNow().notNull(),

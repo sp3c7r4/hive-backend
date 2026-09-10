@@ -92,6 +92,11 @@ export const config = {
 	paystack: {
 		secret: env.PAYSTACK_SECRET_KEY,
 		devResolveFallback: env.PAYSTACK_DEV_RESOLVE_FALLBACK === "true",
+		/** @info - Payout kill switch: only an explicit "false" disables the
+		 * transfer. A missing value stays ENABLED so prod keeps paying out even
+		 * if the var never lands there. */
+		withdrawalsTransferEnabled:
+			(env.WITHDRAWALS_TRANSFER_ENABLED ?? "true").toLowerCase() !== "false",
 	},
 
 	certificates: {

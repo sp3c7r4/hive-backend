@@ -69,6 +69,10 @@ const EnvSchema = z.object({
 	PAYSTACK_SECRET_KEY: z.string(),
 	/** @info - Dev-only: fake account resolution when Paystack test-mode cannot resolve */
 	PAYSTACK_DEV_RESOLVE_FALLBACK: z.string().optional(),
+	/** @info - Kill switch for real payouts. Dev and staging hold LIVE Paystack
+	 * keys, so an admin approve there would move real money: set "false" in
+	 * non-prod envs. Absent/any other value = enabled. */
+	WITHDRAWALS_TRANSFER_ENABLED: z.string().optional(),
 
 	OPENAI_API_KEY: z.string(),
 	DEEPSEEK_API_KEY: z.string().optional(),

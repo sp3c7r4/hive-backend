@@ -25,15 +25,24 @@ const adminWithdrawalSchema = z.object({
 	action: z.enum(["approve", "reject"]),
 });
 
-const verifyBankSchema = z.object({
-	bankName: z.string().min(1).max(255),
-	accountNumber: z
-		.string()
-		.regex(/^\d{10}$/, "Account number must be 10 digits"),
-});
+const verifyBankSchema = z
+	.object({
+		bankName: z.string().min(1).max(255).optional(),
+		/* @info - The picker's identity: Paystack bank code from /bank. Kept
+		 *         optional so legacy callers can still send a bank name. */
+		bankCode: z.string().regex(/^\d{3,6}$/, "Invalid bank code").optional(),
+		accountNumber: z
+			.string()
+			.regex(/^\d{10}$/, "Account number must be 10 digits"),
+	})
+	.refine((v) => Boolean(v.bankCode ?? v.bankName), {
+		message: "A bank is required",
+		path: ["bankCode"],
+	});
 
 instructorWithdrawalRouter.use("*", jwt.validateToken, requireInstructor);
 instructorWithdrawalRouter.get("/", controller.listMine);
+instructorWithdrawalRouter.get("/banks", controller.listBanks);
 instructorWithdrawalRouter.post(
 	"/verify-account",
 	zod.validate.body(verifyBankSchema),
