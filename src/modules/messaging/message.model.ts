@@ -8,7 +8,7 @@ import {
 	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { users } from "@/modules/user/user.model";
 import { userRoleEnum } from "@/bases/models/base.user.model";
 import {
@@ -36,6 +36,12 @@ export const conversations = pgTable(
 	(table) => [
 		index("idx_conversations_type").on(table.type),
 		index("idx_conversations_community").on(table.communityId),
+		/* @info - One group chat per community (migration 0026). Partial so direct
+		 *         threads stay unaffected; ensureCommunityConversation inserts
+		 *         ON CONFLICT DO NOTHING against it. */
+		uniqueIndex("uq_conversations_community_group")
+			.on(table.communityId)
+			.where(sql`type = 'group' AND community_id IS NOT NULL`),
 	],
 );
 

@@ -38,7 +38,13 @@ export class MessagingRepository {
 		return row?.conversation;
 	};
 
-	/** Insert a direct conversation + its two participants in a transaction. */
+	/**
+	 * @info - Find-or-create the direct thread between two users, with both of them
+	 *          as participants. Serialized by a transaction-scoped advisory lock on
+	 *          the ordered user pair and re-checked inside that lock: two concurrent
+	 *          "New Message" taps used to insert two threads, the same race as the
+	 *          community group chats. Returns the existing thread when there is one.
+	 */
 	createDirect = async (
 		userIdA: number,
 		roleA: string,
@@ -46,7 +52,36 @@ export class MessagingRepository {
 		roleB: string,
 	) => {
 		const db = getDb();
+		const pairKey = `${Math.min(userIdA, userIdB)}-${Math.max(userIdA, userIdB)}`;
+
 		const conversation = await db.transaction(async (tx) => {
+			/* @info - xact lock: released on commit/rollback, so the re-check below
+			 *         sees any thread the racing request already committed. */
+			await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${pairKey}))`);
+
+			const p1 = alias(conversationParticipants, "p1");
+			const p2 = alias(conversationParticipants, "p2");
+			const [existing] = await tx
+				.select({ conversation: conversations })
+				.from(conversations)
+				.innerJoin(
+					p1,
+					and(eq(p1.conversationId, conversations.id), eq(p1.userId, userIdA)),
+				)
+				.innerJoin(
+					p2,
+					and(eq(p2.conversationId, conversations.id), eq(p2.userId, userIdB)),
+				)
+				.where(
+					and(
+						eq(conversations.type, "direct"),
+						isNull(p1.leftAt),
+						isNull(p2.leftAt),
+					),
+				)
+				.limit(1);
+			if (existing?.conversation) return existing.conversation;
+
 			const [inserted] = await tx
 				.insert(conversations)
 				.values({ type: "direct" })
@@ -506,44 +541,57 @@ export class MessagingRepository {
 
 	/**
 	 * @info - Ensure a community's group chat exists and every active member is
-	 *          a participant. Idempotent; safe to call on every list/send.
+	 *          a participant. Safe to call on every list/send, and safe to call
+	 *          concurrently: the insert is guarded by the partial unique index
+	 *          uq_conversations_community_group (migration 0026), so racing
+	 *          callers collapse onto one row instead of each creating a chat.
+	 *          A participant who has left is NOT re-joined — the unique
+	 *          (conversation, user) row already exists, so onConflictDoNothing
+	 *          leaves their left_at untouched.
 	 */
 	ensureCommunityConversation = async (communityId: number, title: string) => {
 		const db = getDb();
-		let conversation = await this.findCommunityConversation(communityId);
 		const memberIds = await this.getActiveMemberIds(communityId);
 
-		const db2 = db;
-		if (!conversation) {
-			conversation = await db2.transaction(async (tx) => {
-				const [inserted] = await tx
-					.insert(conversations)
-					.values({ type: "group", title, communityId })
-					.returning();
-				if (memberIds.length) {
-					await tx
-						.insert(conversationParticipants)
-						.values(
-							memberIds.map((uid) => ({
-								conversationId: inserted!.id,
-								userId: uid,
-								role: "student" as any,
-							})),
-						)
-						.onConflictDoNothing();
-				}
-				return inserted;
-			});
-		} else {
-			/* New members may have joined since — backfill participants. */
-			await db2
-				.insert(conversationParticipants)
-				.values(
-					memberIds.map((uid) => ({
-							conversationId: conversation!.id,
+		const inserted = await db.transaction(async (tx) => {
+			const [row] = await tx
+				.insert(conversations)
+				.values({ type: "group", title, communityId })
+				.onConflictDoNothing()
+				.returning();
+			if (!row) return null;
+
+			if (memberIds.length) {
+				await tx
+					.insert(conversationParticipants)
+					.values(
+						memberIds.map((uid) => ({
+							conversationId: row.id,
 							userId: uid,
 							role: "student" as any,
 						})),
+					)
+					.onConflictDoNothing();
+			}
+			return row;
+		});
+
+		/* @info - Lost the insert race (or the chat already existed): use the
+		 *         row that is actually in the table. */
+		const conversation =
+			inserted ?? (await this.findCommunityConversation(communityId));
+		if (!conversation) return conversation;
+
+		if (!inserted && memberIds.length) {
+			/* New members may have joined since — backfill participants. */
+			await db
+				.insert(conversationParticipants)
+				.values(
+					memberIds.map((uid) => ({
+						conversationId: conversation.id,
+						userId: uid,
+						role: "student" as any,
+					})),
 				)
 				.onConflictDoNothing();
 		}
