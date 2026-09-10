@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { getDb } from "@/db/postgres.db";
 import { LessonType, UserRole } from "@/enums";
@@ -24,12 +24,12 @@ import {
 } from "./course.message";
 import type { NewCourse, NewLesson, NewModule } from "./course.model";
 import { courses, lessons, modules } from "./course.model";
-import { updateCourseSchema } from "./course.schema";
 import {
 	CourseRepository,
 	LessonRepository,
 	ModuleRepository,
 } from "./course.repository";
+import { updateCourseSchema } from "./course.schema";
 
 /* @info - The HTTP layer sends scheduledAt as an ISO string (zod is only
  * used as a 400 gate in this codebase - controllers re-read raw bodies).
@@ -186,12 +186,6 @@ export class CourseService {
 		 * (authenticated strangers) gets a landing payload without content. */
 		const canRead = await this._canReadCourse(course, authData);
 
-		/* @info - Include the community so the UI can label + gate private
-		 * courses without a second lookup */
-		const enriched = { ...course } as Record<string, unknown>;
-		if (!canRead) {
-			enriched.description = null;
-		}
 		/* @info - Instructor profile for the detail page (name + avatar) */
 		const [instructorUser] = await db
 			.select({
@@ -202,7 +196,7 @@ export class CourseService {
 			.from(users)
 			.where(eq(users.id, course!.instructorId))
 			.limit(1);
-		enriched.instructor = instructorUser
+		const instructor = instructorUser
 			? {
 					id: course!.instructorId,
 					name: `${instructorUser.firstName ?? ""} ${instructorUser.lastName ?? ""}`.trim(),
@@ -214,6 +208,30 @@ export class CourseService {
 						: null,
 				}
 			: null;
+
+		if (!canRead) {
+			/* @info - Landing payload: hero fields only. No description, price,
+			 * status, community, or enrollment data leaks to strangers. */
+			return withPresignedUrl(
+				{
+					id: course!.id,
+					title: course!.title,
+					subtitle: course!.subtitle ?? null,
+					coverImageUrl: course!.coverImageUrl ?? null,
+					instructor,
+					access: "landing",
+				},
+				"coverImageUrl",
+			);
+		}
+
+		/* @info - Full payload (published OR enrolled OR owner/admin). Include
+		 * the community so the UI can label + gate private courses. */
+		const enriched = {
+			...course,
+			instructor,
+			access: "full",
+		} as Record<string, unknown>;
 		if (course!.communityId != null) {
 			const [comm] = await db
 				.select({ name: communities.name, slug: communities.slug })
@@ -223,7 +241,6 @@ export class CourseService {
 			enriched.communityName = comm?.name ?? null;
 			enriched.communitySlug = comm?.slug ?? null;
 		}
-		enriched.access = canRead ? "full" : "landing";
 		return withPresignedUrl(enriched, "coverImageUrl");
 	};
 
@@ -337,7 +354,9 @@ export class CourseService {
 		id: number,
 		data: Partial<NewCourse>,
 	) => {
-		const course = await this.coursesRepo.findById(id);
+		const course = await this.coursesRepo.findById(id, {
+			includeDeleted: true,
+		});
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 		this.assertCourseOwner(course as any, authData);
 
@@ -374,18 +393,14 @@ export class CourseService {
 		const parsed = updateCourseSchema.safeParse(coerced);
 		if (!parsed.success) {
 			const issue = parsed.error.issues[0];
-			throwBadRequestError(
-				issue?.message ?? "Invalid course update payload.",
-			);
+			throwBadRequestError(issue?.message ?? "Invalid course update payload.");
 		}
 		const allowed = parsed.data as Record<string, any>;
 
 		/* @info - Status transition matrix (owner/admin already asserted). */
 		if (allowed.status !== undefined) {
 			if (course!.deletedAt) {
-				throwBadRequestError(
-					"Restore this course before changing its status.",
-				);
+				throwBadRequestError("Restore this course before changing its status.");
 			}
 			const from = (course as any).status;
 			const to = allowed.status;
@@ -427,7 +442,9 @@ export class CourseService {
 	};
 
 	restoreCourse = async (authData: IAuthData, id: number) => {
-		const course = await this.coursesRepo.findById(id, { includeDeleted: true });
+		const course = await this.coursesRepo.findById(id, {
+			includeDeleted: true,
+		});
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 		this.assertCourseOwner(course as any, authData);
 

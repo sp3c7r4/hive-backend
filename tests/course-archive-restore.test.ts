@@ -57,27 +57,33 @@ const modules = await (async () => {
 		{ CourseService },
 		{ EnrollmentService },
 		{ CommunityService },
+		{ PaymentController },
 		errors,
 		courseModel,
 		communityModel,
 		enrollmentModel,
+		paymentModel,
 	] = await Promise.all([
 		import("@/modules/courses/course.service"),
 		import("@/modules/enrollments/enrollment.service"),
 		import("@/modules/communities/community.service"),
+		import("@/modules/payment/payment.controller"),
 		import("@/errors"),
 		import("@/modules/courses/course.model"),
 		import("@/modules/communities/community.model"),
 		import("@/modules/enrollments/enrollment.model"),
+		import("@/modules/payment/payment.model"),
 	]);
 	return {
 		CourseService,
 		EnrollmentService,
 		CommunityService,
+		PaymentController,
 		errors,
 		courses: courseModel.courses,
 		communities: communityModel.communities,
 		enrollmentsModel: enrollmentModel.enrollments,
+		payments: paymentModel.payments,
 	};
 })();
 
@@ -86,6 +92,7 @@ describe("course update — allowlist + transition matrix", () => {
 	const coursesRepo = { findById: vi.fn(), update: vi.fn() };
 
 	beforeEach(() => {
+		resetDb();
 		coursesRepo.findById.mockReset();
 		coursesRepo.update.mockReset();
 		(service as any).coursesRepo = coursesRepo;
@@ -102,6 +109,7 @@ describe("course update — allowlist + transition matrix", () => {
 		coursesRepo.update.mockResolvedValue({ ...course, title: "safe" });
 		await service.updateCourse(OWNER, 10, {
 			title: "safe",
+			monthlyPrice: 4900,
 			deletedAt: new Date(),
 			instructorId: 999,
 			communityId: 5,
@@ -110,6 +118,7 @@ describe("course update — allowlist + transition matrix", () => {
 
 		const payload = coursesRepo.update.mock.calls[0]![1];
 		expect(payload).toHaveProperty("title", "safe");
+		expect(payload).toHaveProperty("monthlyPrice", 4900);
 		expect(payload).not.toHaveProperty("deletedAt");
 		expect(payload).not.toHaveProperty("instructorId");
 		expect(payload).not.toHaveProperty("communityId");
@@ -189,6 +198,69 @@ describe("course update — allowlist + transition matrix", () => {
 		).rejects.toThrow(modules.errors.BadRequestError);
 		expect(coursesRepo.update).not.toHaveBeenCalled();
 	});
+
+	it("looks up soft-deleted rows with includeDeleted (400 not 404)", async () => {
+		coursesRepo.findById.mockResolvedValue({
+			id: 10,
+			instructorId: 1,
+			status: "draft",
+			deletedAt: new Date(),
+		});
+		await expect(
+			service.updateCourse(OWNER, 10, { status: "published" } as any),
+		).rejects.toThrow(modules.errors.BadRequestError);
+		expect(coursesRepo.findById).toHaveBeenCalledWith(10, {
+			includeDeleted: true,
+		});
+	});
+
+	it.each([
+		["draft", "draft"],
+		["published", "published"],
+		["archived", "archived"],
+		["published", "draft"],
+		["draft", "archived"],
+	] as const)("allows no-op/safe transition %s -> %s", async (from, to) => {
+		const course = { id: 10, instructorId: 1, status: from, deletedAt: null };
+		coursesRepo.findById.mockResolvedValue(course);
+		coursesRepo.update.mockResolvedValue({ ...course, status: to });
+		await expect(
+			service.updateCourse(OWNER, 10, { status: to } as any),
+		).resolves.toBeTruthy();
+		expect(coursesRepo.update).toHaveBeenCalledWith(
+			10,
+			expect.objectContaining({ status: to }),
+		);
+	});
+
+	it("rejects status transitions for non-owner, non-admin", async () => {
+		const course = {
+			id: 10,
+			instructorId: 1,
+			status: "draft",
+			deletedAt: null,
+		};
+		coursesRepo.findById.mockResolvedValue(course);
+		await expect(
+			service.updateCourse(STRANGER, 10, { status: "published" } as any),
+		).rejects.toThrow(modules.errors.ForbiddenError);
+		expect(coursesRepo.update).not.toHaveBeenCalled();
+	});
+
+	it("unarchive writes only the status field (no community-count side effect)", async () => {
+		const course = {
+			id: 10,
+			instructorId: 1,
+			status: "archived",
+			deletedAt: null,
+		};
+		coursesRepo.findById.mockResolvedValue(course);
+		coursesRepo.update.mockResolvedValue({ ...course, status: "draft" });
+		await service.updateCourse(OWNER, 10, { status: "draft" } as any);
+		expect(coursesRepo.update).toHaveBeenCalledTimes(1);
+		expect(coursesRepo.update).toHaveBeenCalledWith(10, { status: "draft" });
+		expect(mocks.calls.some((c) => c.prop === "update")).toBe(false);
+	});
 });
 
 describe("course restore", () => {
@@ -229,7 +301,16 @@ describe("course restore", () => {
 			{ includeDeleted: true },
 		);
 		expect(restored).toMatchObject({ status: "draft", deletedAt: null });
-		expect(mocks.calls.some((c) => c.prop === "update")).toBe(true);
+		/* courseCount +1 is precise: the communities row update's .set() carries
+		 * a courseCount key (the SQL GREATEST increment expression). */
+		const communityUpdate = mocks.calls.find(
+			(c) => c.prop === "update" && c.args[0] === modules.communities,
+		);
+		expect(communityUpdate).toBeTruthy();
+		const setCall = mocks.calls.find(
+			(c) => c.prop === "set" && c.args[0] && "courseCount" in c.args[0],
+		);
+		expect(setCall).toBeTruthy();
 	});
 
 	it("rejects restore for a non-owner", async () => {
@@ -276,6 +357,25 @@ describe("enrollment gate", () => {
 					communityId: null,
 					price: 0,
 					status: "archived",
+					deletedAt: null,
+				},
+			],
+			[],
+		);
+		await expect(service.enroll(STRANGER, 10)).rejects.toThrow(
+			modules.errors.BadRequestError,
+		);
+		expect(enrollments.create).not.toHaveBeenCalled();
+	});
+
+	it("blocks enrollment for a draft course (no prior payment)", async () => {
+		mocks.dbResults.push(
+			[
+				{
+					title: "x",
+					communityId: null,
+					price: 0,
+					status: "draft",
 					deletedAt: null,
 				},
 			],
@@ -347,7 +447,10 @@ describe("course read gate", () => {
 		);
 		const result: any = await service.getCourse(10, STRANGER);
 		expect(result.access).toBe("landing");
-		expect(result.description).toBeNull();
+		expect(result).not.toHaveProperty("description");
+		expect(result).not.toHaveProperty("price");
+		expect(result).not.toHaveProperty("status");
+		expect(result).not.toHaveProperty("communityName");
 	});
 
 	it("published course is full for strangers", async () => {
@@ -389,6 +492,43 @@ describe("course read gate", () => {
 		expect(result.access).toBe("full");
 		expect(result.description).toBe("full text");
 	});
+
+	it("enrolled student sees an archived course in full", async () => {
+		mocks.dbResults.push(
+			[
+				{
+					id: 10,
+					instructorId: 1,
+					status: "archived",
+					communityId: null,
+					title: "Archived",
+					description: "full text",
+					coverImageUrl: null,
+				},
+			],
+			[{ id: 7 }],
+			[{ firstName: "Ada", lastName: "L", avatarUrl: null }],
+		);
+		const result: any = await service.getCourse(10, STRANGER);
+		expect(result.access).toBe("full");
+		expect(result.description).toBe("full text");
+	});
+
+	it("stranger gets an empty module list for a draft course", async () => {
+		mocks.dbResults.push([{ id: 10, instructorId: 1, status: "draft" }], []);
+		const result: any = await service.listModules(10, STRANGER);
+		expect(result).toEqual([]);
+	});
+
+	it("stranger gets an empty lesson list for an archived course", async () => {
+		mocks.dbResults.push(
+			[{ courseId: 10 }],
+			[{ id: 10, instructorId: 1, status: "archived" }],
+			[],
+		);
+		const result: any = await service.listLessons(5, STRANGER);
+		expect(result).toEqual([]);
+	});
 });
 
 describe("community permanent-delete guards", () => {
@@ -417,6 +557,36 @@ describe("community permanent-delete guards", () => {
 		);
 	});
 
+	it("payment guard joins course-origin payments (community_id AND course_id)", async () => {
+		mocks.dbResults.push([{ value: 0 }], [{ value: 2 }]);
+		await expect(service.delete(5, true, OWNER)).rejects.toThrow(
+			modules.errors.BadRequestError,
+		);
+
+		const fromPaymentsIdx = mocks.calls.findIndex(
+			(c) => c.prop === "from" && c.args[0] === modules.payments,
+		);
+		expect(fromPaymentsIdx).toBeGreaterThanOrEqual(0);
+		const whereCall = mocks.calls
+			.slice(fromPaymentsIdx)
+			.find((c) => c.prop === "where");
+		expect(whereCall).toBeTruthy();
+		/* Walk the where-expression object graph for column names (drizzle
+		 * columns expose `.name`; circular table links are skipped). */
+		const collectNames = (obj: unknown, seen = new WeakSet()): string[] => {
+			if (!obj || typeof obj !== "object") return [];
+			if (seen.has(obj)) return [];
+			seen.add(obj);
+			const out: string[] = [];
+			if (typeof (obj as any).name === "string") out.push((obj as any).name);
+			for (const v of Object.values(obj)) out.push(...collectNames(v, seen));
+			return out;
+		};
+		const names = [...new Set(collectNames(whereCall!.args[0]))].join("|");
+		expect(names).toContain("community_id");
+		expect(names).toContain("course_id");
+	});
+
 	it("deletes courses then the community when only failed payments remain", async () => {
 		mocks.dbResults.push([{ value: 0 }], [{ value: 0 }]);
 		await expect(service.delete(5, true, OWNER)).resolves.toBeUndefined();
@@ -425,5 +595,48 @@ describe("community permanent-delete guards", () => {
 		expect(deleteCalls.length).toBe(2);
 		expect(deleteCalls[0]!.args[0]).toBe(modules.courses);
 		expect(deleteCalls[1]!.args[0]).toBe(modules.communities);
+	});
+});
+
+describe("checkout gate (payment initialize)", () => {
+	const controller = modules.PaymentController.getInstance();
+
+	const makeContext = () =>
+		({
+			get: (key: string) => (key === "authData" ? STRANGER : undefined),
+			req: {
+				json: async () => ({
+					type: "enrollment",
+					courseId: 10,
+					amount: 500000,
+				}),
+			},
+		}) as any;
+
+	beforeEach(() => resetDb());
+
+	it.each(["archived", "draft"] as const)(
+		"blocks checkout on a %s course",
+		async (status) => {
+			mocks.dbResults.push(
+				[{ id: 2, email: "s@x.com" }],
+				[{ role: "student" }],
+				[{ price: 500000, status, deletedAt: null }],
+			);
+			await expect(controller.initialize(makeContext())).rejects.toThrow(
+				modules.errors.BadRequestError,
+			);
+		},
+	);
+
+	it("blocks checkout on a soft-deleted course", async () => {
+		mocks.dbResults.push(
+			[{ id: 2, email: "s@x.com" }],
+			[{ role: "student" }],
+			[{ price: 500000, status: "published", deletedAt: new Date() }],
+		);
+		await expect(controller.initialize(makeContext())).rejects.toThrow(
+			modules.errors.BadRequestError,
+		);
 	});
 });

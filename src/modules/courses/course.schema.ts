@@ -118,6 +118,7 @@ export const updateCourseSchema = z.object({
 	minCompletionPercent: z.number().int().min(0).max(100).optional(),
 	minQuizScorePercent: z.number().int().min(0).max(100).optional(),
 	minAttendancePercent: z.number().int().min(0).max(100).optional(),
+	monthlyPrice: z.number().int().min(0).nullable().optional(),
 	coverImageUrl: z.string().max(500).optional(),
 	status: z.nativeEnum(CourseStatus).optional(),
 });
