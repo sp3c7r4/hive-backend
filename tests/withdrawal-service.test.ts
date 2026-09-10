@@ -65,7 +65,37 @@ const mocks = vi.hoisted(() => {
 		withdrawalsTransferEnabled: true,
 	};
 
-	return { db: chain, tx, paystack, paystackConfig, results, records };
+	/* @info - Email queue + in-app notify are fire-and-forget side effects. The
+	 * notify mock also keeps the mocked DB result queue deterministic: the real
+	 * one selects a role row and would race our own user lookup for a result. */
+	const emailAdd = vi.fn(async (_jobName: string, _data: any) => undefined);
+	const emailQueue = { add: emailAdd };
+	const notify = vi.fn(async () => undefined);
+
+	return {
+		db: chain,
+		tx,
+		paystack,
+		paystackConfig,
+		results,
+		records,
+		emailAdd,
+		emailQueue,
+		notify,
+	};
+});
+
+vi.mock("@/services/queues/email.queue.service", () => ({
+	EmailQueueService: { getInstance: () => mocks.emailQueue },
+}));
+
+vi.mock("@/modules/notifications", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("@/modules/notifications")>();
+	return {
+		...actual,
+		NotificationService: { getInstance: () => ({ notify: mocks.notify }) },
+	};
 });
 
 vi.mock("@/config", async (importOriginal) => {
@@ -117,6 +147,8 @@ describe("WithdrawalService", () => {
 		mocks.paystack.createRecipient.mockClear();
 		mocks.paystack.transfer.mockClear();
 		mocks.paystack.listBanks.mockClear();
+		mocks.emailAdd.mockClear();
+		mocks.notify.mockClear();
 	});
 
 	const payoutRow = {
@@ -126,6 +158,10 @@ describe("WithdrawalService", () => {
 		accountName: "SARAFTA SATAE",
 		verifiedAt: null,
 	};
+
+	/* @info - The approve email is fire-and-forget, so let its microtasks settle
+	 * before asserting on the queue (and before asserting it stayed silent). */
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 	it("create: insufficient balance → 400, no rows", async () => {
 		mocks.results.push([{ ...payoutRow }], [{ ...balanceRow, available: 100000 }]);
@@ -388,6 +424,92 @@ describe("WithdrawalService", () => {
 		await expect(service.approve(7)).rejects.toThrow("no longer pending");
 		expect(mocks.paystack.createRecipient).not.toHaveBeenCalled();
 		expect(mocks.paystack.transfer).not.toHaveBeenCalled();
+	});
+
+	it("approve: emails the instructor that the payout is on its way", async () => {
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+			[{ firstName: "Sarafa", email: "sarafa@example.com" }],
+		);
+		const service = await loadService();
+		await service.approve(7);
+		await flush();
+
+		expect(mocks.emailAdd).toHaveBeenCalledTimes(1);
+		const [jobName, data] = mocks.emailAdd.mock.calls[0] as any;
+		expect(jobName).toBe("withdrawal-processed");
+		expect(data.template).toBe("withdrawal-processed");
+		expect(data.message.to).toBe("sarafa@example.com");
+		expect(data.message.subject).toBe(
+			"Your ₦1,000 withdrawal is on its way",
+		);
+		expect(data.locals).toMatchObject({
+			instructorName: "Sarafa",
+			amount: "1,000",
+			bankName: "Access Bank",
+			accountLast4: "6789",
+			reference: "wd-1",
+		});
+		expect(data.locals.processedAt).toMatch(/^\d{1,2} \w+ \d{4}$/);
+		expect(data.locals.dashboardUrl).toContain("/dashboard/earnings");
+		expect(data.idempotencyKey).toBe("withdrawal-processed:7");
+		/* @info - Only the last 4 digits of the account travel in an email. */
+		expect(JSON.stringify(data)).not.toContain("0123456789");
+	});
+
+	it("approve (kill switch off): still emails the instructor", async () => {
+		mocks.paystackConfig.withdrawalsTransferEnabled = false;
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+			[{ firstName: "Sarafa", email: "sarafa@example.com" }],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+		await flush();
+
+		expect(res).toEqual({ status: "processing", transferSuppressed: true });
+		expect(mocks.emailAdd).toHaveBeenCalledTimes(1);
+	});
+
+	it("approve: instructor without an email on file still approves, no email sent", async () => {
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+			[],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+		await flush();
+
+		expect(res.status).toBe("completed");
+		expect(mocks.emailAdd).not.toHaveBeenCalled();
+	});
+
+	it("approve: a failed transfer sends no email", async () => {
+		mocks.paystack.transfer.mockRejectedValueOnce(new Error("bank down"));
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow, available: 400000 }],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+		await flush();
+
+		expect(res.status).toBe("failed");
+		expect(mocks.emailAdd).not.toHaveBeenCalled();
+	});
+
+	it("reject: sends no processed email", async () => {
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow, available: 400000 }],
+		);
+		const service = await loadService();
+		await service.reject(7);
+		await flush();
+		expect(mocks.emailAdd).not.toHaveBeenCalled();
 	});
 
 	it("approve: unresolvable bank fails the row instead of guessing a code", async () => {

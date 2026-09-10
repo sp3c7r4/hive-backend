@@ -25,4 +25,5 @@ export enum EmailJobNames {
 	COMMUNITY_INVITE = "community-invite",
 	MEMBERSHIP_APPROVED = "membership-approved",
 	ASSIGNMENT_GRADED = "assignment-graded",
+	WITHDRAWAL_PROCESSED = "withdrawal-processed",
 }

@@ -9,7 +9,13 @@ import {
 	throwConflictError,
 } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { LedgerTransactionCategory, LedgerTransactionType } from "@/enums";
+import {
+	EmailJobNames,
+	EmailTemplates,
+	LedgerTransactionCategory,
+	LedgerTransactionType,
+} from "@/enums";
+import { EmailQueueService } from "@/services/queues/email.queue.service";
 import { instructorBalance, instructorTransaction } from "./ledger.model";
 import { withdrawals, type Withdrawal } from "./payment.model";
 import { users } from "@/modules/user/user.model";
@@ -57,6 +63,7 @@ export const TRANSFER_SUPPRESSED_NOTE = "transfer suppressed (non-prod)";
 export class WithdrawalService {
 	private static instance: WithdrawalService;
 	private readonly paystack = PaystackService.getInstance();
+	private readonly emailQueue = EmailQueueService.getInstance();
 
 	static getInstance(): WithdrawalService {
 		if (!this.instance) this.instance = new WithdrawalService();
@@ -354,6 +361,7 @@ export class WithdrawalService {
 				reference: w!.reference,
 			});
 			await this.settle(w!, "processing", TRANSFER_SUPPRESSED_NOTE);
+			void this.sendProcessedEmail(w!);
 			return { status: "processing", transferSuppressed: true };
 		}
 
@@ -387,6 +395,7 @@ export class WithdrawalService {
 						: "completed";
 
 			await this.settle(w!, status);
+			void this.sendProcessedEmail(w!);
 			return { status, transferCode: transfer.transferCode };
 		} catch (e) {
 			/* Paystack failure → failed + refund the hold; surface the outcome
@@ -550,6 +559,62 @@ export class WithdrawalService {
 				description: `Withdrawal ${reason} — refund`,
 			});
 		});
+	};
+
+	/** @info - Tell the instructor their payout went out. Fire-and-forget: an
+	 *         email problem must never fail or delay the approve response. The
+	 *         recipient is looked up here (approve only reads the withdrawal row)
+	 *         and a missing email is skipped, never thrown. */
+	private sendProcessedEmail = async (w: Withdrawal) => {
+		try {
+			const db = getDb();
+			const [instructor] = await db
+				.select({ firstName: users.firstName, email: users.email })
+				.from(users)
+				.where(eq(users.id, w.instructorId))
+				.limit(1);
+
+			if (!instructor?.email) {
+				logger.warn("Withdrawal email skipped: no email on file", {
+					withdrawalId: w.id,
+					instructorId: w.instructorId,
+				});
+				return;
+			}
+
+			const amount = Math.round(Number(w.amount ?? 0) / 100).toLocaleString(
+				"en-US",
+			);
+
+			await this.emailQueue.add(EmailJobNames.WITHDRAWAL_PROCESSED, {
+				message: {
+					to: instructor.email,
+					subject: `Your ₦${amount} withdrawal is on its way`,
+				},
+				template: EmailTemplates.WITHDRAWAL_PROCESSED,
+				locals: {
+					instructorName: instructor.firstName ?? "there",
+					amount,
+					bankName: w.bankName,
+					/* @info - Last 4 digits only: the full number never leaves the app. */
+					accountLast4: String(w.accountNumber ?? "").slice(-4),
+					reference: w.reference,
+					processedAt: new Date().toLocaleDateString("en-GB", {
+						day: "numeric",
+						month: "long",
+						year: "numeric",
+					}),
+					dashboardUrl: `${config.server.rootDomain}/dashboard/earnings`,
+				},
+				/* @info - One email per withdrawal, even if approve is retried. */
+				idempotencyKey: `withdrawal-processed:${w.id}`,
+			});
+		} catch (error) {
+			logger.error("Failed to queue withdrawal-processed email", {
+				withdrawalId: w.id,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
 	};
 
 	private failAndRefund = async (
