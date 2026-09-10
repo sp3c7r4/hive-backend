@@ -22,6 +22,34 @@ import { logger } from "@/utils";
 /** @info - Minimum withdrawal: ₦1,000 (kobo). */
 export const MIN_WITHDRAWAL_KOBO = 100_000;
 
+/** @info - Paystack NGN transfer pricing (kobo). These are the PLATFORM's costs:
+ *         Paystack deducts them from the platform balance, not from the
+ *         instructor's payout (decision: fees are absorbed), so they are
+ *         reported in the admin list for cost tracking, never subtracted. */
+export const PAYSTACK_TRANSFER_FEE_KOBO = {
+	upTo5k: 1_000,
+	upTo50k: 2_500,
+	above50k: 5_000,
+} as const;
+export const PAYSTACK_STAMP_DUTY_KOBO = 5_000;
+export const PAYSTACK_STAMP_DUTY_THRESHOLD_KOBO = 1_000_000;
+
+/** @info - Estimated Paystack cost of paying out `amountKobo` (fee tiers by
+ *         amount + the ₦50 stamp duty on transfers of ₦10,000 and above). */
+export const paystackTransferCost = (amountKobo: number) => {
+	const fee =
+		amountKobo <= 500_000
+			? PAYSTACK_TRANSFER_FEE_KOBO.upTo5k
+			: amountKobo <= 5_000_000
+				? PAYSTACK_TRANSFER_FEE_KOBO.upTo50k
+				: PAYSTACK_TRANSFER_FEE_KOBO.above50k;
+	const stampDuty =
+		amountKobo >= PAYSTACK_STAMP_DUTY_THRESHOLD_KOBO
+			? PAYSTACK_STAMP_DUTY_KOBO
+			: 0;
+	return { fee, stampDuty, total: fee + stampDuty };
+};
+
 /** @info - Note written when the kill switch suppresses a payout: the row still
  * advances, but no Paystack recipient/transfer was created. */
 export const TRANSFER_SUPPRESSED_NOTE = "transfer suppressed (non-prod)";
@@ -37,18 +65,21 @@ export class WithdrawalService {
 
 	private constructor() {}
 
-	/* @info - Hold the balance: withdraw amount out of `available` inside a tx. */
-	create = async (
-		authData: IAuthData,
-		body: { amount: number; bankName: string; accountNumber: string; accountName: string },
-	) => {
+	/* @info - Hold the balance: withdraw amount out of `available` inside a tx.
+	 *         The bank details are snapshotted from the user's VERIFIED payout
+	 *         account — the request carries no bank fields, so a caller cannot
+	 *         inject a destination or an account name. */
+	create = async (authData: IAuthData, body: { amount: number }) => {
 		const userId = Number(authData.id);
-		const { amount, bankName, accountNumber, accountName } = body;
+		const { amount } = body;
 
 		if (amount < MIN_WITHDRAWAL_KOBO)
 			throwBadRequestError(`Minimum withdrawal is ₦${MIN_WITHDRAWAL_KOBO / 100}`);
-		if (!/^\d{10}$/.test(accountNumber))
-			throwBadRequestError("Account number must be 10 digits");
+
+		const account = await this.getPayoutAccount(userId);
+		/* @info - A real throw (not the helper) so TS narrows `account` below. */
+		if (!account)
+			throw new BadRequestError("Add a payout account before withdrawing.");
 
 		const reference = `wd-${uuidv4()}`;
 
@@ -74,9 +105,10 @@ export class WithdrawalService {
 				.values({
 					instructorId: userId,
 					amount,
-					bankName,
-					accountNumber,
-					accountName,
+					bankName: account.bankName,
+					bankCode: account.bankCode,
+					accountNumber: account.accountNumber,
+					accountName: account.accountName,
 					status: "pending" as any,
 					reference,
 				})
@@ -151,6 +183,94 @@ export class WithdrawalService {
 	/** @info - Payout institutions for the withdrawal picker (upstream cached). */
 	listBanks = async () => this.paystack.listBanks();
 
+	/** @info - The stored payout account, or null when none is verified yet. */
+	payoutAccount = async (authData: IAuthData) =>
+		this.getPayoutAccount(Number(authData.id));
+
+	/** @info - Save/replace the payout account. The account name and the bank
+	 *         name are resolved SERVER-side (Paystack /bank/resolve + the cached
+	 *         bank list) — the request carries no names, so an invented payee
+	 *         cannot be stored. */
+	savePayoutAccount = async (
+		authData: IAuthData,
+		body: { bankCode: string; accountNumber: string },
+	) => {
+		const userId = Number(authData.id);
+		const { bankCode, accountNumber } = body;
+
+		if (!/^\d{3,6}$/.test(bankCode))
+			throwBadRequestError("Pick a bank from the list");
+		if (!/^\d{10}$/.test(accountNumber))
+			throwBadRequestError("Account number must be 10 digits");
+
+		const bank = (await this.paystack.listBanks()).find(
+			(b) => b.code === bankCode,
+		);
+		/* @info - A real throw so TS narrows `bank` below (the helper is not
+		 *         typed as `never`). */
+		if (!bank)
+			throw new BadRequestError("Unknown bank. Pick a bank from the list.");
+
+		const resolved = await this.paystack.resolveAccountNumber(
+			accountNumber,
+			bankCode,
+		);
+		let accountName: string;
+		let simulated = false;
+		if (!resolved) {
+			/* @info - Dev-only fallback (test keys cannot resolve NUBANs). A
+			 *         fabricated name is never stored outside development. */
+			if (!config.paystack.devResolveFallback)
+				throwBadRequestError(
+					"Could not verify this account. Check the bank and account number.",
+				);
+			accountName = "Test Account";
+			simulated = true;
+		} else {
+			accountName = resolved.accountName;
+			simulated = this.isTestMode();
+		}
+
+		const verifiedAt = new Date();
+		const db = getDb();
+		await db
+			.update(users)
+			.set({
+				payoutBankName: bank.name,
+				payoutBankCode: bankCode,
+				payoutAccountNumber: accountNumber,
+				payoutAccountName: accountName,
+				payoutAccountVerifiedAt: verifiedAt,
+			})
+			.where(eq(users.id, userId));
+
+		return {
+			bankName: bank.name,
+			bankCode,
+			accountNumber,
+			accountName,
+			verifiedAt,
+			simulated,
+		};
+	};
+
+	/** @info - Forget the payout account: withdrawal create then refuses until a
+	 *         new account is verified. */
+	deletePayoutAccount = async (authData: IAuthData) => {
+		const db = getDb();
+		await db
+			.update(users)
+			.set({
+				payoutBankName: null,
+				payoutBankCode: null,
+				payoutAccountNumber: null,
+				payoutAccountName: null,
+				payoutAccountVerifiedAt: null,
+			})
+			.where(eq(users.id, Number(authData.id)));
+		return { removed: true };
+	};
+
 	listMine = async (authData: IAuthData, params?: { page?: number; limit?: number }) => {
 		const db = getDb();
 		const page = Math.max(1, Number(params?.page) || 1);
@@ -185,9 +305,12 @@ export class WithdrawalService {
 				email: users.email,
 				amount: withdrawals.amount,
 				bankName: withdrawals.bankName,
+				bankCode: withdrawals.bankCode,
 				accountNumber: withdrawals.accountNumber,
+				accountName: withdrawals.accountName,
 				status: withdrawals.status,
 				reference: withdrawals.reference,
+				note: withdrawals.note,
 				requestedAt: withdrawals.requestedAt,
 				processedAt: withdrawals.processedAt,
 			})
@@ -198,7 +321,16 @@ export class WithdrawalService {
 			.limit(limit)
 			.offset((page - 1) * limit);
 
-		return { items: rows, meta: { page, limit } };
+		/* @info - Paystack's fee + stamp duty are the PLATFORM's cost (absorbed,
+		 *         deducted from the platform balance): reported per row so the real
+		 *         cost stays visible, never subtracted from the payout. */
+		return {
+			items: rows.map((r) => ({
+				...r,
+				paystackCost: paystackTransferCost(Number(r.amount ?? 0)),
+			})),
+			meta: { page, limit },
+		};
 	};
 
 	/** @info - Admin approve: resolve bank → recipient → transfer (idempotent by
@@ -226,7 +358,8 @@ export class WithdrawalService {
 		}
 
 		try {
-			const bankCode = await this.bankCodeFor(w!.bankName);
+			const bankCode =
+				w!.bankCode ?? (await this.bankCodeFor(w!.bankName));
 			/* @info - No bank, no payout: a guessed code silently pays the wrong
 			 *         destination, so fail the row and refund the hold instead. */
 			if (!bankCode) {
@@ -339,6 +472,34 @@ export class WithdrawalService {
 	};
 
 	/* ── Internals ──────────────────────────────────────────── */
+
+	/** @info - The stored payout account. A partial row counts as absent: a
+	 *         half-written destination must never become a payout target. */
+	private getPayoutAccount = async (userId: number) => {
+		const db = getDb();
+		const [row] = await db
+			.select({
+				bankName: users.payoutBankName,
+				bankCode: users.payoutBankCode,
+				accountNumber: users.payoutAccountNumber,
+				accountName: users.payoutAccountName,
+				verifiedAt: users.payoutAccountVerifiedAt,
+			})
+			.from(users)
+			.where(eq(users.id, userId))
+			.limit(1);
+
+		if (!row?.bankName || !row.bankCode || !row.accountNumber || !row.accountName)
+			return null;
+
+		return {
+			bankName: row.bankName,
+			bankCode: row.bankCode,
+			accountNumber: row.accountNumber,
+			accountName: row.accountName,
+			verifiedAt: row.verifiedAt ?? null,
+		};
+	};
 
 	/** @info - Paystack test mode cannot resolve real NUBANs; use test bank code
 	 *         001 there (resolves any account as TEST ACCOUNT x). Production

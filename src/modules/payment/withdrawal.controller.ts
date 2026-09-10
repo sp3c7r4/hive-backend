@@ -28,6 +28,28 @@ export class WithdrawalController {
 		return sendSuccessResponse(c, { message: "Banks fetched", data });
 	};
 
+	/** @info - The instructor's stored payout account (null until verified). */
+	getPayoutAccount = async (c: Context) => {
+		const authData = c.get("authData");
+		const data = await this.service.payoutAccount(authData);
+		return sendSuccessResponse(c, { message: "Payout account fetched", data });
+	};
+
+	/** @info - Save the payout account. The account/bank NAMES come from Paystack,
+	 *         never from the request body. */
+	savePayoutAccount = async (c: Context) => {
+		const authData = c.get("authData");
+		const body = await c.req.json();
+		const data = await this.service.savePayoutAccount(authData, body);
+		return sendSuccessResponse(c, { message: "Payout account saved", data });
+	};
+
+	deletePayoutAccount = async (c: Context) => {
+		const authData = c.get("authData");
+		const data = await this.service.deletePayoutAccount(authData);
+		return sendSuccessResponse(c, { message: "Payout account removed", data });
+	};
+
 	verifyAccount = async (c: Context) => {
 		const authData = c.get("authData");
 		const body = await c.req.json();

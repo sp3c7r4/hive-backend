@@ -80,6 +80,9 @@ export const withdrawals = pgTable(
 			.references(() => users.id, { onDelete: "restrict" }),
 		amount: integer("amount").notNull(),
 		bankName: varchar("bank_name", { length: 255 }).notNull(),
+		/** @info - Snapshot of the Paystack bank code used at request time: the
+		 *         payout resolves the recipient from this, not from the name. */
+		bankCode: varchar("bank_code", { length: 20 }),
 		accountNumber: varchar("account_number", { length: 20 }).notNull(),
 		accountName: varchar("account_name", { length: 255 }).notNull(),
 		/** @info - Operator note on the row: set when a non-prod kill switch

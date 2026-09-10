@@ -119,29 +119,27 @@ describe("WithdrawalService", () => {
 		mocks.paystack.listBanks.mockClear();
 	});
 
+	const payoutRow = {
+		bankName: "GTBank",
+		bankCode: "058",
+		accountNumber: "0123456789",
+		accountName: "SARAFTA SATAE",
+		verifiedAt: null,
+	};
+
 	it("create: insufficient balance → 400, no rows", async () => {
-		mocks.results.push([{ ...balanceRow, available: 100000 }]);
+		mocks.results.push([{ ...payoutRow }], [{ ...balanceRow, available: 100000 }]);
 		const service = await loadService();
-		await expect(
-			service.create(auth, {
-				amount: 200000,
-				bankName: "Access Bank",
-				accountNumber: "0123456789",
-				accountName: "Sarafa Satae",
-			}),
-		).rejects.toThrow("Insufficient balance");
+		await expect(service.create(auth, { amount: 200000 })).rejects.toThrow(
+			"Insufficient balance",
+		);
 		expect(mocks.records).toHaveLength(0);
 	});
 
 	it("create: holds balance + writes withdrawal + ledger debit", async () => {
-		mocks.results.push([{ ...balanceRow }], [{ id: 7 }]);
+		mocks.results.push([{ ...payoutRow }], [{ ...balanceRow }], [{ id: 7 }]);
 		const service = await loadService();
-		const w = await service.create(auth, {
-			amount: 100000,
-			bankName: "Access Bank",
-			accountNumber: "0123456789",
-			accountName: "Sarafa Satae",
-		});
+		const w = await service.create(auth, { amount: 100000 });
 
 		expect(w!.id).toBe(7);
 		const updates = mocks.records.filter((r) => r.kind === "update");
@@ -154,6 +152,67 @@ describe("WithdrawalService", () => {
 			balanceAfter: 400000,
 		});
 		expect(String(inserts[inserts.length - 1]!.payload.reference).startsWith("wd-")).toBe(true);
+	});
+
+	it("create: without a payout account → 400, nothing held", async () => {
+		mocks.results.push([]);
+		const service = await loadService();
+		await expect(service.create(auth, { amount: 100000 })).rejects.toThrow(
+			"Add a payout account before withdrawing.",
+		);
+		expect(mocks.records).toHaveLength(0);
+	});
+
+	it("create: snapshots the stored account and ignores injected bank fields", async () => {
+		mocks.results.push([{ ...payoutRow }], [{ ...balanceRow }], [{ id: 7 }]);
+		const service = await loadService();
+		/* @info - The request body carries no bank fields any more; even if a caller
+		 *         injects them they must not reach the row. */
+		await service.create(auth, {
+			amount: 100000,
+			bankName: "Attacker Bank",
+			accountName: "Attacker Name",
+			accountNumber: "9999999999",
+		} as any);
+
+		const withdrawalInsert = mocks.records.find(
+			(r) => r.kind === "insert" && r.payload.status === "pending",
+		);
+		expect(withdrawalInsert!.payload).toMatchObject({
+			bankName: "GTBank",
+			bankCode: "058",
+			accountNumber: "0123456789",
+			accountName: "SARAFTA SATAE",
+		});
+	});
+
+	it("approve: snapshot bank code wins over name resolution", async () => {
+		mocks.paystackConfig.secret = "sk_live_x";
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "GTBank", bankCode: "058", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+		);
+		const service = await loadService();
+		const res = await service.approve(7);
+
+		expect(res.status).toBe("completed");
+		expect(mocks.paystack.resolveBankCode).not.toHaveBeenCalled();
+		expect(mocks.paystack.createRecipient).toHaveBeenCalledWith({
+			bankCode: "058",
+			accountNumber: "0123456789",
+			accountName: "Sarafa",
+		});
+	});
+
+	it("approve: legacy row without a bank code still resolves by name", async () => {
+		mocks.paystackConfig.secret = "sk_live_x";
+		mocks.results.push(
+			[{ id: 7, instructorId: 5, amount: 100000, bankName: "Access Bank", accountNumber: "0123456789", accountName: "Sarafa", status: "pending", reference: "wd-1" }],
+			[{ ...balanceRow }],
+		);
+		const service = await loadService();
+		await service.approve(7);
+		expect(mocks.paystack.resolveBankCode).toHaveBeenCalledWith("Access Bank");
 	});
 
 	it("approve: transfers with the withdrawal reference + marks completed", async () => {
@@ -361,5 +420,148 @@ describe("WithdrawalService", () => {
 		const list = await service.listAdmin({ status: "pending" });
 		expect(list.items).toHaveLength(1);
 		expect(list.items[0]!.firstName).toBe("Sarafa");
+	});
+
+	it("listAdmin: reports the platform's Paystack cost + suppression note per row", async () => {
+		mocks.results.push([
+			{ id: 8, amount: 5_000_000, status: "completed", note: null },
+			{
+				id: 9,
+				amount: 200_000,
+				status: "processing",
+				note: "transfer suppressed (non-prod)",
+			},
+		]);
+		const service = await loadService();
+		const list = await service.listAdmin();
+
+		expect(list.items[0]!.paystackCost).toEqual({
+			fee: 2_500,
+			stampDuty: 5_000,
+			total: 7_500,
+		});
+		expect(list.items[1]!.paystackCost).toEqual({
+			fee: 1_000,
+			stampDuty: 0,
+			total: 1_000,
+		});
+		expect(list.items[1]!.note).toBe("transfer suppressed (non-prod)");
+	});
+
+	it("paystackTransferCost: fee tiers + ₦50 stamp duty at ₦10,000", async () => {
+		const { paystackTransferCost } = await import(
+			"@/modules/payment/withdrawal.service"
+		);
+
+		/* ₦4,999 */ expect(paystackTransferCost(499_900)).toEqual({
+			fee: 1_000,
+			stampDuty: 0,
+			total: 1_000,
+		});
+		/* ₦5,000 */ expect(paystackTransferCost(500_000)).toEqual({
+			fee: 1_000,
+			stampDuty: 0,
+			total: 1_000,
+		});
+		/* ₦5,001 */ expect(paystackTransferCost(500_100)).toEqual({
+			fee: 2_500,
+			stampDuty: 0,
+			total: 2_500,
+		});
+		/* ₦9,999 */ expect(paystackTransferCost(999_900)).toEqual({
+			fee: 2_500,
+			stampDuty: 0,
+			total: 2_500,
+		});
+		/* ₦10,000 */ expect(paystackTransferCost(1_000_000)).toEqual({
+			fee: 2_500,
+			stampDuty: 5_000,
+			total: 7_500,
+		});
+		/* ₦50,001 */ expect(paystackTransferCost(5_000_100)).toEqual({
+			fee: 5_000,
+			stampDuty: 5_000,
+			total: 10_000,
+		});
+	});
+
+	it("savePayoutAccount: resolves server-side and stores the Paystack name", async () => {
+		const service = await loadService();
+		const saved = await service.savePayoutAccount(auth, {
+			bankCode: "058",
+			accountNumber: "0123456789",
+		});
+
+		expect(mocks.paystack.resolveAccountNumber).toHaveBeenCalledWith(
+			"0123456789",
+			"058",
+		);
+		expect(saved).toMatchObject({
+			bankName: "GTBank",
+			bankCode: "058",
+			accountNumber: "0123456789",
+			accountName: "SARAFTA SATAE",
+			simulated: true,
+		});
+		const update = mocks.records.find((r) => r.kind === "update");
+		expect(update!.payload).toMatchObject({
+			payoutBankName: "GTBank",
+			payoutBankCode: "058",
+			payoutAccountNumber: "0123456789",
+			payoutAccountName: "SARAFTA SATAE",
+		});
+	});
+
+	it("savePayoutAccount: unknown bank code → 400, nothing resolved or stored", async () => {
+		const service = await loadService();
+		await expect(
+			service.savePayoutAccount(auth, {
+				bankCode: "999",
+				accountNumber: "0123456789",
+			}),
+		).rejects.toThrow("Unknown bank");
+		expect(mocks.paystack.resolveAccountNumber).not.toHaveBeenCalled();
+		expect(mocks.records).toHaveLength(0);
+	});
+
+	it("savePayoutAccount: resolve failure without the dev fallback → 400, nothing stored", async () => {
+		mocks.paystackConfig.devResolveFallback = false;
+		mocks.paystack.resolveAccountNumber.mockResolvedValueOnce(null as any);
+		const service = await loadService();
+		await expect(
+			service.savePayoutAccount(auth, {
+				bankCode: "058",
+				accountNumber: "0123456789",
+			}),
+		).rejects.toThrow("Could not verify this account");
+		expect(mocks.records).toHaveLength(0);
+	});
+
+	it("deletePayoutAccount: clears every payout field", async () => {
+		const service = await loadService();
+		await service.deletePayoutAccount(auth);
+
+		const update = mocks.records.find((r) => r.kind === "update");
+		expect(update!.payload).toEqual({
+			payoutBankName: null,
+			payoutBankCode: null,
+			payoutAccountNumber: null,
+			payoutAccountName: null,
+			payoutAccountVerifiedAt: null,
+		});
+	});
+
+	it("payoutAccount: a partial row reads as absent", async () => {
+		mocks.results.push([
+			{
+				bankName: "GTBank",
+				bankCode: null,
+				accountNumber: null,
+				accountName: null,
+				verifiedAt: null,
+			},
+		]);
+		const service = await loadService();
+		expect(await service.payoutAccount(auth)).toBeNull();
 	});
 });

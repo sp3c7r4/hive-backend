@@ -12,13 +12,18 @@ const jwt = JwtService.getInstance();
 const zod = ZodEngine.getInstance();
 const controller = WithdrawalController.getInstance();
 
+/* @info - Bank details are NOT part of this request: the withdrawal snapshots
+ *         the verified payout account server-side, so a caller cannot choose a
+ *         payout destination or an account name. */
 const createWithdrawalSchema = z.object({
 	amount: z.number().int().positive(),
-	bankName: z.string().min(1).max(255),
+});
+
+const payoutAccountSchema = z.object({
+	bankCode: z.string().regex(/^\d{3,6}$/, "Invalid bank code"),
 	accountNumber: z
 		.string()
 		.regex(/^\d{10}$/, "Account number must be 10 digits"),
-	accountName: z.string().min(1).max(255),
 });
 
 const adminWithdrawalSchema = z.object({
@@ -43,6 +48,16 @@ const verifyBankSchema = z
 instructorWithdrawalRouter.use("*", jwt.validateToken, requireInstructor);
 instructorWithdrawalRouter.get("/", controller.listMine);
 instructorWithdrawalRouter.get("/banks", controller.listBanks);
+instructorWithdrawalRouter.get("/payout-account", controller.getPayoutAccount);
+instructorWithdrawalRouter.put(
+	"/payout-account",
+	zod.validate.body(payoutAccountSchema),
+	controller.savePayoutAccount,
+);
+instructorWithdrawalRouter.delete(
+	"/payout-account",
+	controller.deletePayoutAccount,
+);
 instructorWithdrawalRouter.post(
 	"/verify-account",
 	zod.validate.body(verifyBankSchema),
