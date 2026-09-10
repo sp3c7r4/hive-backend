@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Pool } from "pg";
 import { config } from "@/config";
 import { connectPostgresDB, getDb } from "@/db/postgres.db";
@@ -373,6 +373,80 @@ describe("Messaging × community chat lifecycle", () => {
 		await repo.setCommunityChatHidden(communityB, member, true);
 		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
 		await repo.setCommunityChatHidden(communityB, member, false);
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).toBeNull();
+	});
+
+	it("rolls a rejoin back with its chat restore when either half fails", async () => {
+		/* Normalise: the member is out of community B, with the chat hidden. */
+		const existing = await db.execute(
+			`SELECT id FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		if (existing.rows.length) {
+			await memberService.removeMember(ownerAuth(), slugB, member);
+		}
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
+
+		/* The chat half fails after the membership half already ran. */
+		const spy = vi
+			.spyOn(repo, "setCommunityChatHidden")
+			.mockRejectedValueOnce(new Error("chat restore probe"));
+		await expect(
+			memberService.joinCommunity(memberAuth(), slugB),
+		).rejects.toThrow("chat restore probe");
+		spy.mockRestore();
+
+		/* The membership rolled back with it — no member left without their chat. */
+		const afterFailure = await db.execute(
+			`SELECT id FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		expect(afterFailure.rows.length).toBe(0);
+		/* ... and the chat stayed hidden, so nothing granted access either. */
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
+
+		/* Both halves land together on the happy path. */
+		await memberService.joinCommunity(memberAuth(), slugB);
+		const joined = await db.execute(
+			`SELECT status FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		expect(joined.rows.length).toBe(1);
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).toBeNull();
+	});
+
+	it("rolls an approval back with its chat restore when either half fails", async () => {
+		/* Normalise: no membership, chat hidden, then a fresh pending application. */
+		const existing = await db.execute(
+			`SELECT id FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		if (existing.rows.length) {
+			await memberService.removeMember(ownerAuth(), slugB, member);
+		}
+		await db.execute(
+			`INSERT INTO community_members (community_id, user_id, role, member_role, status)
+			 VALUES (${communityB}, ${member}, 'student', 'member', 'pending')`,
+		);
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
+
+		const spy = vi
+			.spyOn(repo, "setCommunityChatHidden")
+			.mockRejectedValueOnce(new Error("chat restore probe"));
+		await expect(
+			memberService.approveMember(ownerAuth(), slugB, member),
+		).rejects.toThrow("chat restore probe");
+		spy.mockRestore();
+
+		/* Still pending: the approval did not land without its chat half. */
+		const afterFailure = await db.execute(
+			`SELECT status FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		expect((afterFailure.rows[0] as { status: string }).status).toBe("pending");
+		expect((await repo.getParticipant(conversationB, member))!.leftAt).not.toBeNull();
+
+		/* Both halves land together on the happy path. */
+		await memberService.approveMember(ownerAuth(), slugB, member);
+		const approved = await db.execute(
+			`SELECT status FROM community_members WHERE community_id = ${communityB} AND user_id = ${member}`,
+		);
+		expect((approved.rows[0] as { status: string }).status).toBe("active");
 		expect((await repo.getParticipant(conversationB, member))!.leftAt).toBeNull();
 	});
 
