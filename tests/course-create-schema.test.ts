@@ -55,3 +55,44 @@ describe("createCourseFormSchema — content toggles", () => {
 		expect(parsed.dripContent).toBe(true);
 	});
 });
+
+/**
+ * @info - The create page's pricing card collects a monthly subscription
+ * (naira, formatted with commas, sent as kobo like `price`). Declared so the
+ * allowlisted create contract keeps it; omitted stays undefined so the column
+ * default (null) applies.
+ */
+describe("createCourseFormSchema — monthlyPrice", () => {
+	it("coerces the kobo string the create page sends", () => {
+		const parsed = createCourseFormSchema.parse({
+			...base,
+			monthlyPrice: "4900",
+		});
+
+		expect(parsed.monthlyPrice).toBe(4900);
+	});
+
+	it("keeps zero as a real value (free monthly option)", () => {
+		const parsed = createCourseFormSchema.parse({
+			...base,
+			monthlyPrice: "0",
+		});
+
+		expect(parsed.monthlyPrice).toBe(0);
+	});
+
+	it("leaves an omitted monthlyPrice undefined", () => {
+		const parsed = createCourseFormSchema.parse(base);
+
+		expect(parsed.monthlyPrice).toBeUndefined();
+	});
+
+	it("rejects junk and negative amounts", () => {
+		expect(
+			createCourseFormSchema.safeParse({ ...base, monthlyPrice: "abc" }).success,
+		).toBe(false);
+		expect(
+			createCourseFormSchema.safeParse({ ...base, monthlyPrice: "-100" }).success,
+		).toBe(false);
+	});
+});

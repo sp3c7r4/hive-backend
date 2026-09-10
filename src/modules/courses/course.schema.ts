@@ -49,6 +49,13 @@ export const createCourseFormSchema = z.object({
 	difficulty: z.nativeEnum(CourseDifficulty).optional(),
 	visibility: z.nativeEnum(CourseVisibility).optional(),
 	price: z.preprocess(coerceInt, z.number().int().optional()),
+	/* @info - Monthly subscription price, same kobo unit as `price`. The create
+	 * page collects it, so the create contract must declare it (undeclared keys
+	 * are dropped); nullable/optional mirrors updateCourseSchema. */
+	monthlyPrice: z.preprocess(
+		coerceInt,
+		z.number().int().min(0).nullable().optional(),
+	),
 	isFree: z.preprocess(coerceBool, z.boolean().optional()),
 	sequentialAccess: z.preprocess(coerceBool, z.boolean().optional()),
 	dripContent: z.preprocess(coerceBool, z.boolean().optional()),
