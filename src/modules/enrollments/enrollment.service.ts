@@ -53,11 +53,40 @@ export class EnrollmentService {
 
 		const db = getDb();
 		const [courseRow] = await db
-			.select({ title: courses.title, communityId: courses.communityId, price: courses.price })
+			.select({
+				title: courses.title,
+				communityId: courses.communityId,
+				price: courses.price,
+				status: courses.status,
+				deletedAt: courses.deletedAt,
+			})
 			.from(courses)
 			.where(eq(courses.id, courseId))
 			.limit(1);
 		if (!courseRow) throwNotFoundError("Course not found");
+
+		/* @info - Enrollment gate: draft/archived/soft-deleted courses are
+		 * closed to NEW enrollments. A success payment for THIS user + course
+		 * still admits (grace path) so paid-but-unseated buyers aren't locked
+		 * out when a course is retired between checkout and enrollment. */
+		if (courseRow!.deletedAt || courseRow!.status !== "published") {
+			const [paid] = await db
+				.select({ id: payments.id })
+				.from(payments)
+				.where(
+					and(
+						eq(payments.payerId, Number(authData.id)),
+						eq(payments.courseId, courseId),
+						eq(payments.status, "success" as any),
+					)!,
+				)
+				.limit(1);
+			if (!paid) {
+				throwBadRequestError(
+					"This course isn't currently accepting enrollments.",
+				);
+			}
+		}
 
 		/* @info - Paid-course gate: a success payment for THIS course + user is required */
 		let payment: { id: number } | undefined;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
 	CourseDifficulty,
+	CourseStatus,
 	CourseVisibility,
 	LessonMeetingType,
 	LessonType,
@@ -100,7 +101,26 @@ export const createLessonSchema = z.object({
 	settings: z.record(z.string(), z.any()).optional(),
 });
 
-export const updateCourseSchema = createCourseSchema.partial();
+export const updateCourseSchema = z.object({
+	title: z.string().min(1).max(255).optional(),
+	subtitle: z.string().max(500).optional(),
+	description: z.string().optional(),
+	category: z.string().max(255).optional(),
+	difficulty: z.nativeEnum(CourseDifficulty).optional(),
+	visibility: z.nativeEnum(CourseVisibility).optional(),
+	price: z.number().int().min(0).optional(),
+	isFree: z.boolean().optional(),
+	sequentialAccess: z.boolean().optional(),
+	dripContent: z.boolean().optional(),
+	allowComments: z.boolean().optional(),
+	allowDownloads: z.boolean().optional(),
+	offerCertificate: z.boolean().optional(),
+	minCompletionPercent: z.number().int().min(0).max(100).optional(),
+	minQuizScorePercent: z.number().int().min(0).max(100).optional(),
+	minAttendancePercent: z.number().int().min(0).max(100).optional(),
+	coverImageUrl: z.string().max(500).optional(),
+	status: z.nativeEnum(CourseStatus).optional(),
+});
 export const updateModuleSchema = createModuleSchema.partial();
 export const updateLessonSchema = createLessonSchema.partial();
 

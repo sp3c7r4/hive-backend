@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { getDb } from "@/db/postgres.db";
 import { LessonType, UserRole } from "@/enums";
@@ -24,6 +24,7 @@ import {
 } from "./course.message";
 import type { NewCourse, NewLesson, NewModule } from "./course.model";
 import { courses, lessons, modules } from "./course.model";
+import { updateCourseSchema } from "./course.schema";
 import {
 	CourseRepository,
 	LessonRepository,
@@ -102,6 +103,36 @@ export class CourseService {
 		return this.assertOwnedCourse(courseId as number, authData);
 	};
 
+	/** @info - Is the requester enrolled in this course? */
+	private _isEnrolled = async (courseId: number, userId: number) => {
+		const db = getDb();
+		const [enr] = await db
+			.select({ id: enrollments.id })
+			.from(enrollments)
+			.where(
+				and(eq(enrollments.courseId, courseId), eq(enrollments.userId, userId)),
+			)
+			.limit(1);
+		return !!enr;
+	};
+
+	/** @info - Read-gate predicate: published OR enrolled OR owner/admin. */
+	private _canReadCourse = async (
+		course: { id: number; instructorId: number; status: string },
+		authData?: IAuthData,
+	): Promise<boolean> => {
+		if (course.status === "published") return true;
+		const isOwner = Number(course.instructorId) === Number(authData?.id);
+		const isAdmin =
+			Array.isArray(authData?.roles) &&
+			(authData as any).roles.includes("admin");
+		if (isOwner || isAdmin) return true;
+		if (authData?.id) {
+			return this._isEnrolled(course.id, Number(authData.id));
+		}
+		return false;
+	};
+
 	createCourse = async (authData: IAuthData, data: NewCourse) => {
 		const db = getDb();
 		const slug = await this._uniqueCourseSlug(data.title, authData.id);
@@ -124,7 +155,7 @@ export class CourseService {
 		});
 	};
 
-	getCourse = async (idOrSlug: number | string) => {
+	getCourse = async (idOrSlug: number | string, authData?: IAuthData) => {
 		const db = getDb();
 		const isNumericId =
 			typeof idOrSlug === "number" || /^\d+$/.test(String(idOrSlug));
@@ -150,9 +181,17 @@ export class CourseService {
 
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 
+		/* @info - Read gate: content is visible only to published courses,
+		 * enrolled students, the owning instructor, or admins. Everyone else
+		 * (authenticated strangers) gets a landing payload without content. */
+		const canRead = await this._canReadCourse(course, authData);
+
 		/* @info - Include the community so the UI can label + gate private
 		 * courses without a second lookup */
 		const enriched = { ...course } as Record<string, unknown>;
+		if (!canRead) {
+			enriched.description = null;
+		}
 		/* @info - Instructor profile for the detail page (name + avatar) */
 		const [instructorUser] = await db
 			.select({
@@ -184,6 +223,7 @@ export class CourseService {
 			enriched.communityName = comm?.name ?? null;
 			enriched.communitySlug = comm?.slug ?? null;
 		}
+		enriched.access = canRead ? "full" : "landing";
 		return withPresignedUrl(enriched, "coverImageUrl");
 	};
 
@@ -220,7 +260,7 @@ export class CourseService {
 	/** @info Returns courses the authenticated user is enrolled in */
 	/** @info - Returns courses for the authenticated user:
 	 *          instructor → courses they created; student → courses they enrolled in */
-	listMine = async (authData: IAuthData) => {
+	listMine = async (authData: IAuthData, deleted = false) => {
 		const db = getDb();
 
 		const selectFields = {
@@ -267,16 +307,18 @@ export class CourseService {
 
 		let rows: any[];
 		if (isInstructor) {
-			/* Instructor: courses they created */
+			/* Instructor: courses they created (deleted=true → trash view) */
+			const deletedFilter = deleted
+				? isNotNull(courses.deletedAt)
+				: isNull(courses.deletedAt);
 			rows = await db
 				.select(selectFields)
 				.from(courses)
-				.where(
-					and(eq(courses.instructorId, authData.id), isNull(courses.deletedAt)),
-				)
+				.where(and(eq(courses.instructorId, authData.id), deletedFilter))
 				.orderBy(desc(courses.updatedAt));
 		} else {
-			/* Student: enrolled courses */
+			/* Student: enrolled courses (trash is owner-only — always live rows) */
+			if (deleted) return [];
 			rows = await db
 				.select(selectFields)
 				.from(courses)
@@ -326,7 +368,41 @@ export class CourseService {
 				coerced.monthlyPrice === "" ? null : Number(coerced.monthlyPrice);
 		if (coerced.price === "") coerced.price = 0;
 
-		const updated = await this.coursesRepo.update(id, coerced as any);
+		/* @info - Allowlist: only whitelisted fields reach the DB. deletedAt /
+		 * instructorId / communityId / id are stripped by the schema, closing
+		 * the previous mass-assignment hole. */
+		const parsed = updateCourseSchema.safeParse(coerced);
+		if (!parsed.success) {
+			const issue = parsed.error.issues[0];
+			throwBadRequestError(
+				issue?.message ?? "Invalid course update payload.",
+			);
+		}
+		const allowed = parsed.data as Record<string, any>;
+
+		/* @info - Status transition matrix (owner/admin already asserted). */
+		if (allowed.status !== undefined) {
+			if (course!.deletedAt) {
+				throwBadRequestError(
+					"Restore this course before changing its status.",
+				);
+			}
+			const from = (course as any).status;
+			const to = allowed.status;
+			if (from === "archived" && to === "published") {
+				throwBadRequestError(
+					"Republish from Drafts: unarchive first, then publish.",
+				);
+			}
+			if (to === "archived" && from === "published") {
+				this.log.info(`Course ${id} archived`);
+			}
+			if (to === "draft" && from === "archived") {
+				this.log.info(`Course ${id} unarchived to draft`);
+			}
+		}
+
+		const updated = await this.coursesRepo.update(id, allowed as any);
 		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
 
 		return withPresignedUrl(updated!, "coverImageUrl");
@@ -348,6 +424,32 @@ export class CourseService {
 			.where(eq(communities.id, course!.communityId));
 
 		this.log.info(`Course ${id} soft-deleted`);
+	};
+
+	restoreCourse = async (authData: IAuthData, id: number) => {
+		const course = await this.coursesRepo.findById(id, { includeDeleted: true });
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+		this.assertCourseOwner(course as any, authData);
+
+		/* @info - Restore ALWAYS lands in draft, regardless of the status the
+		 * course was frozen at when deleted. Re-publish is a separate click. */
+		const updated = await this.coursesRepo.update(
+			id,
+			{ deletedAt: null, status: "draft" } as any,
+			{ includeDeleted: true },
+		);
+		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Symmetric with delete's decrement: a restored row re-enters
+		 * the non-deleted set. */
+		const db = getDb();
+		await db
+			.update(communities)
+			.set({ courseCount: sql`${communities.courseCount} + 1` })
+			.where(eq(communities.id, course!.communityId));
+
+		this.log.info(`Course ${id} restored to draft`);
+		return withPresignedUrl(updated!, "coverImageUrl");
 	};
 
 	private _slugify = (title: string, instructorId: number): string => {
@@ -401,8 +503,23 @@ export class CourseService {
 		return this.modulesRepo.create({ ...data, courseId } as any);
 	};
 
-	listModules = async (courseId: number) => {
+	listModules = async (courseId: number, authData?: IAuthData) => {
 		const db = getDb();
+		const [course] = await db
+			.select({
+				id: courses.id,
+				instructorId: courses.instructorId,
+				status: courses.status,
+			})
+			.from(courses)
+			.where(and(eq(courses.id, courseId), isNull(courses.deletedAt)))
+			.limit(1);
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Read gate: strangers on draft/archived get no curriculum. */
+		const canRead = await this._canReadCourse(course as any, authData);
+		if (!canRead) return [];
+
 		return db
 			.select()
 			.from(modules)
@@ -476,8 +593,32 @@ export class CourseService {
 		return lesson;
 	};
 
-	listLessons = async (moduleId: number) => {
+	listLessons = async (moduleId: number, authData?: IAuthData) => {
 		const db = getDb();
+		const [mod] = await db
+			.select({ courseId: modules.courseId })
+			.from(modules)
+			.where(eq(modules.id, moduleId))
+			.limit(1);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+
+		const [course] = await db
+			.select({
+				id: courses.id,
+				instructorId: courses.instructorId,
+				status: courses.status,
+			})
+			.from(courses)
+			.where(
+				and(eq(courses.id, Number(mod!.courseId)), isNull(courses.deletedAt)),
+			)
+			.limit(1);
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Read gate: strangers on draft/archived get no curriculum. */
+		const canRead = await this._canReadCourse(course as any, authData);
+		if (!canRead) return [];
+
 		return db
 			.select()
 			.from(lessons)

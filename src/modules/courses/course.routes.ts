@@ -9,7 +9,6 @@ import {
 	createCourseFormSchema,
 	createModuleSchema,
 	createLessonSchema,
-	updateCourseSchema,
 	updateModuleSchema,
 	updateLessonSchema,
 	generateMeetingSchema,
@@ -53,6 +52,7 @@ courseRouter.patch(
 	controller.update,
 );
 courseRouter.delete("/:id", requireInstructor, controller.delete);
+courseRouter.post("/:id/restore", requireInstructor, controller.restore);
 
 /** @info - Module routes nested under courses */
 courseRouter.get("/:courseId/modules", controller.listModules);

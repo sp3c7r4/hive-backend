@@ -218,31 +218,58 @@ export class CommunityService {
 			return;
 		}
 
-		/* Permanent delete — DB cascades members/invites/feed, but courses and
-		 * payments reference the community with restrict/no-action. */
+		/* Permanent delete — DB cascades members/invites/feed. Courses are
+		 * deleted first in the same transaction; money-relevant payments and
+		 * any enrollment history block the operation. Payment rows themselves
+		 * use ON DELETE SET NULL, so surviving rows are nulled, never deleted. */
 		const db = getDb();
 
-		const [courseRows] = await db
+		/* Enrollment history guard: any enrollment under any of the
+		 * community's courses blocks permanent delete. */
+		const [enrollmentRows] = await db
 			.select({ value: count() })
-			.from(courses)
+			.from(enrollments)
+			.innerJoin(courses, eq(courses.id, enrollments.courseId))
 			.where(eq(courses.communityId, id));
-		if (Number(courseRows?.value ?? 0) > 0) {
+		if (Number(enrollmentRows?.value ?? 0) > 0) {
 			throwBadRequestError(
-				"Cannot permanently delete this community: it has courses. Delete or move the courses first.",
+				"Cannot permanently delete this community: enrollment history exists.",
 			);
 		}
 
+		/* Money guard: block on any money-relevant payment (success / pending /
+		 * refunded) that references the community directly or one of its
+		 * courses. Terminal non-money states (failed) do not block. */
+		const blockingStatuses = ["success", "pending", "refunded"];
+		const communityCourseIds = db
+			.select({ id: courses.id })
+			.from(courses)
+			.where(eq(courses.communityId, id));
 		const [paymentRows] = await db
 			.select({ value: count() })
 			.from(payments)
-			.where(eq(payments.communityId, id));
+			.where(
+				and(
+					or(
+						eq(payments.communityId, id),
+						inArray(payments.courseId, communityCourseIds),
+					),
+					inArray(payments.status, blockingStatuses as any),
+				),
+			);
 		if (Number(paymentRows?.value ?? 0) > 0) {
 			throwBadRequestError(
 				"Cannot permanently delete this community: payment records exist.",
 			);
 		}
 
-		await db.delete(communities).where(eq(communities.id, id));
+		/* Delete the community's courses first, then the community, atomically.
+		 * Course deletion cascades to modules/lessons/enrollment rows (if any
+		 * non-money leftovers exist) and nulls course references on payments. */
+		await withTransaction(async (tx) => {
+			await tx.delete(courses).where(eq(courses.communityId, id));
+			await tx.delete(communities).where(eq(communities.id, id));
+		});
 		this.log.info(`Community ${id} permanently deleted`);
 	};
 

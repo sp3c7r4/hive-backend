@@ -55,7 +55,8 @@ export class CourseController {
 
 	mine = async (c: Context) => {
 		const authData = c.get("authData");
-		const data = await this.service.listMine(authData);
+		const deleted = c.req.query("deleted") === "true";
+		const data = await this.service.listMine(authData, deleted);
 		return sendSuccessResponse(c, {
 			message: "My courses fetched successfully",
 			data,
@@ -64,7 +65,8 @@ export class CourseController {
 
 	get = async (c: Context) => {
 		const idOrSlug = c.req.param("idOrSlug") as string;
-		const data = await this.service.getCourse(idOrSlug);
+		const authData = c.get("authData");
+		const data = await this.service.getCourse(idOrSlug, authData);
 		return sendSuccessResponse(c, {
 			message: "Course fetched successfully",
 			data,
@@ -111,6 +113,19 @@ export class CourseController {
 		});
 	};
 
+	restore = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = c.req.param("id");
+		const data = await this.service.restoreCourse(
+			authData,
+			id as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Course restored successfully",
+			data,
+		});
+	};
+
 	/* Modules */
 
 	createModule = async (c: Context) => {
@@ -133,7 +148,11 @@ export class CourseController {
 
 	listModules = async (c: Context) => {
 		const courseId = c.req.param("courseId");
-		const data = await this.service.listModules(courseId as unknown as number);
+		const authData = c.get("authData");
+		const data = await this.service.listModules(
+			courseId as unknown as number,
+			authData,
+		);
 		return sendSuccessResponse(c, {
 			message: "Modules fetched successfully",
 			data,
@@ -185,7 +204,11 @@ export class CourseController {
 
 	listLessons = async (c: Context) => {
 		const moduleId = c.req.param("moduleId");
-		const data = await this.service.listLessons(moduleId as unknown as number);
+		const authData = c.get("authData");
+		const data = await this.service.listLessons(
+			moduleId as unknown as number,
+			authData,
+		);
 		return sendSuccessResponse(c, {
 			message: "Lessons fetched successfully",
 			data,
