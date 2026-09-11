@@ -27,6 +27,10 @@ const TOKEN_RATE_LIMIT = 5;
 /** @info - A removed participant is told why, in plain words (spec section 5) */
 const REMOVED = "You were removed from this session.";
 /** @info - Mute with nothing to mute: the honest fallback, never a 200 that did nothing */
+/** @info - Muting always works; unmuting remotely needs a LiveKit room option this project
+ *  does not enable, so the honest answer is "ask them" (D-P3-8). */
+const REMOTE_UNMUTE_UNAVAILABLE =
+	"LiveKit will not unmute that participant remotely. Ask them to unmute instead.";
 const NO_MIC_TRACK =
 	"That participant has no microphone published. Ask them to unmute instead.";
 const NOT_IN_ROOM = "That participant is not in this session.";
@@ -321,12 +325,24 @@ export class LiveService {
 		const mic = found?.mic ?? null;
 		if (!mic) throwConflictError(NO_MIC_TRACK);
 
-		await getRoomServiceClient().mutePublishedTrack(
-			roomName,
-			identity,
-			mic!.sid,
-			muted,
-		);
+		/* @info - LiveKit refuses a server-side unmute unless the room enables remote
+		 * unmute ("remote unmute not enabled"), which this project does not. Muting always
+		 * works; unmuting is therefore an ask, which is exactly what a 409 already means to
+		 * the frontend - so translate it rather than surfacing a 500 for a known condition. */
+		try {
+			await getRoomServiceClient().mutePublishedTrack(
+				roomName,
+				identity,
+				mic!.sid,
+				muted,
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (!muted && /remote unmute/i.test(message)) {
+				throwConflictError(REMOTE_UNMUTE_UNAVAILABLE);
+			}
+			throw error;
+		}
 		return { identity, muted };
 	};
 
