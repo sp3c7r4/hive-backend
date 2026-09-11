@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { redactLog } from "@/helpers/log-redact.helper";
 import { StatusCodes } from "http-status-codes";
 import type { z } from "zod";
 import type { ZodIssue } from "zod/v3";
@@ -46,10 +47,12 @@ export class ZodEngine {
 				const { path, message } = issue;
 				errorMessages[path.join(".")] = message;
 			});
-			console.log(issues, result);
+			console.log(issues, redactLog(result));
 			return sendErrorResponse(c, errorMessages, StatusCodes.BAD_REQUEST);
 		}
-		this.log.info(`Serialized result: ${JSON.stringify(result)}`);
+		/* @info - redacted: this line logged login bodies (plaintext password) and
+		 * token-bearing responses until it was found in the box logs. */
+		this.log.info(`Serialized result: ${JSON.stringify(redactLog(result))}`);
 	};
 
 	/** @private */
