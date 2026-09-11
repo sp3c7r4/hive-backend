@@ -320,8 +320,7 @@ communityInvites  >── communities       (belongs-to)
 | `status` | `lesson_status` enum | DEFAULT `draft` |
 | `video_url` | `varchar(1000)` | |
 | `pdf_url` | `varchar(1000)` | |
-| `live_meeting_link` | `varchar(1000)` | |
-| `live_meeting_date` | `varchar(255)` | |
+| `live_session_id` | `integer` | FK → `live_sessions.id`, SET NULL (unique, partial). The lesson's live class — see below |
 | `attachment_url` | `varchar(1000)` | |
 | `created_at`, `updated_at` | `timestamp` | |
 
@@ -330,6 +329,34 @@ communityInvites  >── communities       (belongs-to)
 | `idx_lessons_module` | `module_id` |
 | `idx_lessons_type` | `type` |
 | `idx_lessons_status` | `status` |
+| `idx_lessons_scheduled_at` | dropped with the column in `0028` |
+
+**Table:** `live_sessions`
+
+| Column | Type | Attributes |
+|---|---|---|
+| `id` | `integer` | PK, identity |
+| `kind` | `live_session_kind` enum | `native` (Hive room) or `external` (a link) |
+| `community_id` | `integer` | FK → `communities.id`, CASCADE, NOT NULL |
+| `course_id` | `integer` | FK → `courses.id`, CASCADE — NULL for an event that is not a lesson |
+| `host_id` | `integer` | FK → `users.id`, RESTRICT, NOT NULL |
+| `title` | `varchar(255)` | NOT NULL |
+| `description` | `text` | |
+| `meeting_url` | `varchar(1000)` | external meetings only |
+| `starts_at` | `timestamp with time zone` | the schedule (was `lessons.scheduled_at`) |
+| `duration_minutes` | `integer` | NOT NULL, DEFAULT 60 |
+| `status` | `live_session_status` enum | DEFAULT `scheduled`: `scheduled` / `live` / `ended` / `cancelled` |
+| `deleted_at` | `timestamp` | soft delete |
+| `created_at`, `updated_at` | `timestamp` | |
+
+A live class is a session. A live lesson points at one through `lessons.live_session_id`; an event that is not a lesson is a session with a NULL `course_id`. Migration `0028` moved every meeting lesson onto a session and dropped the lesson-side columns (`meeting_type`, `meeting_url`, `scheduled_at`, `live_status`, `duration_minutes`, `live_meeting_link`, `live_meeting_date`).
+
+| Index / Constraint | Columns |
+|---|---|
+| `idx_live_sessions_community_starts` | `community_id`, `starts_at` |
+| `idx_live_sessions_host_starts` | `host_id`, `starts_at` |
+| `idx_live_sessions_course` | `course_id` |
+| `uq_lessons_live_session` | `lessons.live_session_id` (partial, unique) |
 
 **Drizzle Relations:**
 ```
@@ -346,6 +373,10 @@ lessons   ──< quizQuestions     (has-many)
 lessons   ──< quizAttempts      (has-many)
 lessons   ──< assignmentSubmissions (has-many)
 lessons   ──< lessonProgress    (has-many)
+lessons   >── liveSessions      (belongs-to)
+liveSessions >── communities    (belongs-to)
+liveSessions >── courses        (belongs-to)
+liveSessions >── users          (belongs-to, host)
 ```
 
 ---
