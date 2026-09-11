@@ -733,7 +733,14 @@ export class CourseService {
 			lessonData.type ?? existing!.type,
 			lessonData.driveUrl ?? existing!.driveUrl,
 		);
-		const lesson = await this.lessonsRepo.update(id, lessonData as any);
+		const lessonFields =
+			Object.keys(lessonData).length > 0 ? lessonData : null;
+		/* @info - Meeting fields (schedule, url, kind, clearing) live on the session now, so a
+		 * save that carries only those has no lesson columns to write: skip the row update
+		 * instead of handing Postgres an empty SET ("No values to set" -> 500). */
+		const lesson = lessonFields
+			? await this.lessonsRepo.update(id, lessonFields as any)
+			: existing;
 		/* @info - Meeting edits (schedule, url, kind, clearing) land on the session;
 		 * syncLessonMeeting also re-arms an ended session when it is rescheduled, which
 		 * is what made a reschedule look like it never committed. */
@@ -741,7 +748,7 @@ export class CourseService {
 		/* @info - A published lesson that was edited gets re-embedded so the
 		 * tutor never serves stale content */
 		const merged = { ...existing, ...lessonData };
-		if (lesson && merged.status === "published") {
+		if (lessonFields && merged.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
 				"@/services/queues/lesson-chunk.queue.service"
 			);

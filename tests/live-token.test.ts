@@ -431,6 +431,22 @@ describe("LiveService session access", () => {
 		expect(updated!.meetingUrl).toBe("https://meet.example/ext");
 	});
 
+	it("accepts a meeting-only lesson save (no lesson columns to write)", async () => {
+		/* @info - Regression, found by the staging smoke: meeting fields no longer live on
+		 * lessons, so a save carrying ONLY meeting fields produced an empty lesson update
+		 * and Postgres rejected it ("No values to set") - a 500 on a legitimate partial
+		 * update. The lesson row must be left alone while the session still syncs. */
+		const updateLesson = CourseService.getInstance();
+
+		const updated = await updateLesson.updateLesson(auth(hostUserId), nativeLessonId, {
+			meetingType: LessonMeetingType.NATIVE,
+			scheduledAt: new Date(Date.now() + 60 * 60 * 1000),
+		});
+
+		expect(updated.id).toBe(nativeLessonId);
+		expect(updated.liveSessionId).toBe(nativeSessionId);
+	});
+
 	it("refuses to change a session's kind and leaves the row untouched", async () => {
 		const sessions = LiveSessionService.getInstance();
 
