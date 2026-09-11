@@ -3,6 +3,11 @@ import { config } from "@/config";
 import { throwRateLimitError } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CacheService } from "@/services";
+import type {
+	CommunitySessionScope,
+	CreateLiveSessionInput,
+	UpdateLiveSessionInput,
+} from "./live-session.service";
 import { LiveSessionService } from "./live-session.service";
 
 /** @info - Live join tokens are short-lived joins, not sessions */
@@ -127,4 +132,35 @@ export class LiveService {
 		const updated = await this.sessions.markEnded(session.id);
 		return { sessionId: updated.id, status: updated.status };
 	};
+
+	/* ── Standalone community events (phase 2) ───────────────────────── */
+
+	/** @info - GET /live/communities/:communityId/sessions?scope=upcoming|past */
+	listCommunitySessions = async (
+		authData: IAuthData,
+		communityId: number,
+		scope: CommunitySessionScope,
+	) => this.sessions.listCommunitySessions(authData, communityId, scope);
+
+	/** @info - POST /live/communities/:communityId/sessions */
+	createSession = async (
+		authData: IAuthData,
+		communityId: number,
+		input: CreateLiveSessionInput,
+	) => this.sessions.createSession(authData, communityId, input);
+
+	/** @info - PATCH /live/sessions/:sessionId */
+	updateSession = async (
+		authData: IAuthData,
+		sessionId: number,
+		input: UpdateLiveSessionInput,
+	) => this.sessions.updateSession(authData, sessionId, input);
+
+	/** @info - POST /live/sessions/:sessionId/cancel */
+	cancelSession = async (authData: IAuthData, sessionId: number) =>
+		this.sessions.cancelSession(authData, sessionId);
+
+	/** @info - DELETE /live/sessions/:sessionId */
+	deleteSession = async (authData: IAuthData, sessionId: number) =>
+		this.sessions.deleteSession(authData, sessionId);
 }

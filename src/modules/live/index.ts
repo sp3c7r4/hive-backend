@@ -1,17 +1,25 @@
 export { liveRouter } from "./live.routes";
 export { LiveService, roomNameForSession } from "./live.service";
 export {
-	LiveSessionService,
-	type LiveSessionAccess,
-	type LessonMeetingInput,
-} from "./live-session.service";
-export {
 	decorateLessonsWithSessions,
-	toLiveSessionFields,
 	type LiveSessionFields,
+	toLiveSessionFields,
 } from "./live-session.mapper";
 export {
-	liveSessions,
 	type LiveSession,
+	liveSessions,
 	type NewLiveSession,
 } from "./live-session.model";
+export {
+	createLiveSessionSchema,
+	updateLiveSessionSchema,
+} from "./live-session.schema";
+export {
+	type CommunitySessionScope,
+	type CreateLiveSessionInput,
+	type LessonMeetingInput,
+	type LiveSessionAccess,
+	LiveSessionService,
+	type LiveSessionView,
+	type UpdateLiveSessionInput,
+} from "./live-session.service";
