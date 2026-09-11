@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { getDb } from "@/db/postgres.db";
-import { LessonType, UserRole } from "@/enums";
+import { LessonMeetingType, LessonType, UserRole } from "@/enums";
 import { withPresignedUrl, withTransaction } from "@/helpers";
 import {
 	throwBadRequestError,
@@ -12,6 +12,12 @@ import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { communities } from "@/modules/communities/community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
+import {
+	decorateLessonsWithSessions,
+	type LessonMeetingInput,
+	LiveSessionService,
+	toLiveSessionFields,
+} from "@/modules/live";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
@@ -31,17 +37,42 @@ import {
 } from "./course.repository";
 import { createCourseFormSchema, updateCourseSchema } from "./course.schema";
 
-/* @info - The HTTP layer sends scheduledAt as an ISO string (course create
- * consumes the validated form; scheduledAt still arrives raw, since zod is a
- * 400 gate for it). Drizzle timestamp columns need a Date, so coerce at the
- * service edge. */
-const normalizeScheduledAt = <T extends { scheduledAt?: unknown }>(
+/* @info - A lesson save carries meeting fields that are stored on the lesson's
+ * live session, not on the lesson (migration 0028 dropped the lessons columns), so
+ * they are split off before the lesson insert/update. scheduledAt arrives as an ISO
+ * string and needs a Date. */
+const splitLessonMeeting = <T extends Record<string, any>>(
 	data: T,
-): T => {
-	if (typeof data.scheduledAt === "string") {
-		return { ...data, scheduledAt: new Date(data.scheduledAt) } as T;
-	}
-	return data;
+): {
+	lessonData: Omit<T, keyof LessonMeetingInput>;
+	meeting: LessonMeetingInput;
+} => {
+	const {
+		meetingType,
+		meetingUrl,
+		scheduledAt,
+		durationMinutes,
+		...lessonData
+	} = data;
+	return {
+		lessonData: lessonData as Omit<T, keyof LessonMeetingInput>,
+		meeting: {
+			meetingType,
+			meetingUrl,
+			scheduledAt:
+				typeof scheduledAt === "string"
+					? new Date(scheduledAt)
+					: (scheduledAt ?? undefined),
+			durationMinutes,
+		},
+	};
+};
+
+/** @info - Provider meeting times arrive as strings; an unparseable one is ignored. */
+const parseMeetingDate = (value?: string): Date | undefined => {
+	if (!value) return undefined;
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
 export class CourseService {
@@ -52,6 +83,7 @@ export class CourseService {
 
 	/** @info - Services */
 	private paginationService: PaginationService<typeof courses>;
+	private liveSessions = LiveSessionService.getInstance();
 
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Course");
@@ -618,16 +650,22 @@ export class CourseService {
 	createLesson = async (
 		authData: IAuthData,
 		moduleId: number,
-		data: NewLesson,
+		data: NewLesson & LessonMeetingInput,
 	) => {
 		const mod = await this.modulesRepo.findById(moduleId);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
 		this.assertDriveLink(data.type, data.driveUrl);
+		const { lessonData, meeting } = splitLessonMeeting(data);
 		const lesson = await this.lessonsRepo.create({
-			...normalizeScheduledAt(data),
+			...lessonData,
 			moduleId,
 		} as any);
+		/* @info - The meeting lives on the lesson's live session, not on the lesson */
+		const session = await this.liveSessions.syncLessonMeeting(
+			lesson.id,
+			meeting,
+		);
 		/* @info - Publish immediately? Index it for the AI tutor */
 		if (lesson.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
@@ -635,7 +673,7 @@ export class CourseService {
 			);
 			await enqueueLessonForIndexing(lesson.id);
 		}
-		return lesson;
+		return { ...lesson, ...toLiveSessionFields(session) };
 	};
 
 	listLessons = async (moduleId: number, authData?: IAuthData) => {
@@ -664,17 +702,20 @@ export class CourseService {
 		const canRead = await this._canReadCourse(course as any, authData);
 		if (!canRead) return [];
 
-		return db
+		const rows = await db
 			.select()
 			.from(lessons)
 			.where(eq(lessons.moduleId, moduleId))
 			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
+
+		/* @info - Meeting fields on a lesson payload come from its session now */
+		return decorateLessonsWithSessions(rows);
 	};
 
 	updateLesson = async (
 		authData: IAuthData,
 		id: number,
-		data: Partial<NewLesson>,
+		data: Partial<NewLesson> & LessonMeetingInput,
 	) => {
 		const db = getDb();
 		const [existing] = await db
@@ -686,34 +727,28 @@ export class CourseService {
 		const mod = await this.modulesRepo.findById(Number(existing!.moduleId));
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
-		data = normalizeScheduledAt(data);
+		const { lessonData, meeting } = splitLessonMeeting(data);
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
 		this.assertDriveLink(
-			data.type ?? existing!.type,
-			data.driveUrl ?? existing!.driveUrl,
+			lessonData.type ?? existing!.type,
+			lessonData.driveUrl ?? existing!.driveUrl,
 		);
-		/* @info - Re-arming: editing the time of an ended session brings it
-		 * back to the calendar (ended sessions are hidden by design, which
-		 * made reschedules look like they 'didn't commit'). */
-		if (
-			data.scheduledAt &&
-			existing!.liveStatus === "ended" &&
-			existing!.meetingType &&
-			existing!.meetingType !== "none"
-		) {
-			data = { ...data, liveStatus: "scheduled" };
-		}
-		const lesson = await this.lessonsRepo.update(id, data as any);
+		const lesson = await this.lessonsRepo.update(id, lessonData as any);
+		/* @info - Meeting edits (schedule, url, kind, clearing) land on the session;
+		 * syncLessonMeeting also re-arms an ended session when it is rescheduled, which
+		 * is what made a reschedule look like it never committed. */
+		const session = await this.liveSessions.syncLessonMeeting(id, meeting);
 		/* @info - A published lesson that was edited gets re-embedded so the
 		 * tutor never serves stale content */
-		const merged = { ...existing, ...data };
+		const merged = { ...existing, ...lessonData };
 		if (lesson && merged.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
 				"@/services/queues/lesson-chunk.queue.service"
 			);
 			await enqueueLessonForIndexing(id);
 		}
-		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
+		const updated = lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
+		return { ...updated, ...toLiveSessionFields(session) };
 	};
 
 	deleteLesson = async (authData: IAuthData, id: number): Promise<void> => {
@@ -724,8 +759,14 @@ export class CourseService {
 		);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
+		/* @info - Read the session link before the row goes: lessons have no
+		 * deleted_at, so softDelete hard-deletes and the link goes with it. Without
+		 * this the session row would keep rendering in the calendar and stay
+		 * reachable at /live/s/<id> with its lesson gone. */
+		const sessionId = ((lesson as any).liveSessionId as number | null) ?? null;
 		const deleted = await this.lessonsRepo.softDelete(id);
 		if (!deleted) throwNotFoundError(LessonMessages.NOT_FOUND);
+		if (sessionId) await this.liveSessions.discardSession(sessionId);
 		this.log.info(`Lesson ${id} soft-deleted`);
 	};
 
@@ -766,11 +807,14 @@ export class CourseService {
 			autoRecord: options.autoRecord,
 		});
 
-		/* Store the meeting link on the lesson */
-		await this.lessonsRepo.update(lessonId, {
-			liveMeetingLink: result.joinLink,
-			liveMeetingDate: options.startTime,
-		} as any);
+		/* @info - The generated link is an external meeting under the session model:
+		 * the legacy lessons columns it used to write were dropped in migration 0028. */
+		await this.liveSessions.syncLessonMeeting(lessonId, {
+			meetingType: LessonMeetingType.EXTERNAL,
+			meetingUrl: result.joinLink,
+			scheduledAt: parseMeetingDate(options.startTime),
+			durationMinutes: options.duration,
+		});
 
 		return result;
 	};

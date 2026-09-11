@@ -5,10 +5,12 @@ import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CalendarService } from "@/modules/calendar";
 
 /**
- * @info - Instructor teaching calendar (spec 19): CalendarEvent-shaped
- * payloads for live sessions in a month window. Verifies scoping (own
- * courses only, ended/none meetings excluded), month filtering, and the
- * start/end/color/data mapping.
+ * @info - Instructor teaching calendar: CalendarEvent-shaped payloads for live
+ * sessions in a month window. Sessions are the single source for both kinds
+ * (native rooms and external meeting links) since migration 0028, so this verifies
+ * scoping (own sessions only, ended/cancelled excluded), month filtering, the
+ * start/end/color/data mapping, and that two sessions sharing a title and a start
+ * time stay distinguishable.
  */
 describe("CalendarService teaching events", () => {
 	const service = CalendarService.getInstance();
@@ -21,17 +23,19 @@ describe("CalendarService teaching events", () => {
 		Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 12),
 	);
 	const month = anchor.toISOString().slice(0, 7);
+	const inMonth = anchor.toISOString();
 
 	let ownerA: number;
 	let ownerB: number;
 	let courseA: number;
 	let courseB: number;
 	let moduleA: number;
-	let moduleB: number;
-	let nativeLesson: number;
-	let externalLesson: number;
-	let endedLesson: number;
-	let otherLesson: number;
+	let sessionA: number;
+	let sessionExternal: number;
+	let sessionEnded: number;
+	let sessionCancelled: number;
+	let sessionOther: number;
+	let lessonA: number;
 
 	beforeAll(async () => {
 		await connectPostgresDB(() => {});
@@ -70,38 +74,93 @@ describe("CalendarService teaching events", () => {
 		moduleA = a.moduleId;
 		const b = await makeCourse(ownerB, "b");
 		courseB = b.courseId;
-		moduleB = b.moduleId;
+		const moduleB = b.moduleId;
 
-		const inMonth = anchor.toISOString();
-
-		const insert = async (
-			moduleId: number,
-			meetingType: string,
-			liveStatus: string,
-			at: string,
+		const makeSession = async (
+			hostId: number,
+			courseIdValue: number,
+			kind: string,
+			title: string,
+			status: string,
+			startsAt: string,
 		) => {
 			const r = await db.execute(
-				`INSERT INTO lessons (module_id, title, type, status, sort_order, meeting_type, meeting_url, scheduled_at, live_status, duration_minutes)
-				 VALUES (${moduleId}, 'Session', 'live', 'published', 0, '${meetingType}', NULL, '${at}', '${liveStatus}', 60) RETURNING id`,
+				`INSERT INTO live_sessions (kind, community_id, course_id, host_id, title, starts_at, duration_minutes, status)
+				 SELECT '${kind}', community_id, id, ${hostId}, '${title}', '${startsAt}', 60, '${status}'
+				 FROM courses WHERE id = ${courseIdValue}
+				 RETURNING id`,
 			);
 			return (r.rows[0] as { id: number }).id;
 		};
 
-		nativeLesson = await insert(moduleA, "native", "scheduled", inMonth);
-		externalLesson = await insert(moduleA, "external", "scheduled", inMonth);
-		endedLesson = await insert(moduleA, "native", "ended", inMonth);
-		otherLesson = await insert(moduleB, "native", "scheduled", inMonth);
+		/* @info - the same-title/same-time pair: both must survive as distinct events */
+		sessionA = await makeSession(
+			ownerA,
+			courseA,
+			"native",
+			"Session",
+			"scheduled",
+			inMonth,
+		);
+		sessionExternal = await makeSession(
+			ownerA,
+			courseA,
+			"external",
+			"Session",
+			"scheduled",
+			inMonth,
+		);
+		sessionEnded = await makeSession(
+			ownerA,
+			courseA,
+			"native",
+			"Ended Session",
+			"ended",
+			inMonth,
+		);
+		sessionCancelled = await makeSession(
+			ownerA,
+			courseA,
+			"native",
+			"Cancelled Session",
+			"cancelled",
+			inMonth,
+		);
+		sessionOther = await makeSession(
+			ownerB,
+			courseB,
+			"native",
+			"Other Session",
+			"scheduled",
+			inMonth,
+		);
+
+		const lessonRows = await db.execute(
+			`INSERT INTO lessons (module_id, title, type, status, sort_order, live_session_id)
+			 VALUES (${moduleA}, 'Session', 'live', 'published', 0, ${sessionA})
+			 RETURNING id`,
+		);
+		lessonA = (lessonRows.rows[0] as { id: number }).id;
+
+		/* no lesson points at the external session, so its event carries lessonId: null */
+		void moduleB;
+		await db.execute(
+			`UPDATE live_sessions SET meeting_url = 'https://meet.example/cal' WHERE id = ${sessionExternal}`,
+		);
 	});
 
 	afterAll(async () => {
-		const wipe = async (moduleId: number, courseId: number) => {
-			await db.execute(`DELETE FROM lessons WHERE module_id = ${moduleId}`);
-			await db.execute(`DELETE FROM modules WHERE id = ${moduleId}`);
+		await db.execute(`DELETE FROM lessons WHERE module_id = ${moduleA}`);
+		await db.execute(
+			`DELETE FROM live_sessions WHERE id IN (${sessionA}, ${sessionExternal}, ${sessionEnded}, ${sessionCancelled}, ${sessionOther})`,
+		);
+		const wipe = async (courseId: number) => {
+			await db.execute(`DELETE FROM modules WHERE course_id = ${courseId}`);
 			await db.execute(`DELETE FROM enrollments WHERE course_id = ${courseId}`);
 			await db.execute(`DELETE FROM courses WHERE id = ${courseId}`);
 		};
-		await wipe(moduleA, courseA);
-		await wipe(moduleB, courseB);
+		await wipe(courseA);
+		await wipe(courseB);
 		await db.execute(
 			`DELETE FROM communities WHERE owner_id IN (${ownerA}, ${ownerB})`,
 		);
@@ -121,10 +180,10 @@ describe("CalendarService teaching events", () => {
 
 		const ids = events.map((e) => e.id).sort();
 		expect(ids).toEqual(
-			[`lesson-${externalLesson}`, `lesson-${nativeLesson}`].sort(),
+			[`session-${sessionA}`, `session-${sessionExternal}`].sort(),
 		);
 
-		const native = events.find((e) => e.id === `lesson-${nativeLesson}`)!;
+		const native = events.find((e) => e.id === `session-${sessionA}`)!;
 		expect(native.title).toBe("Session");
 		expect(native.start).toBe(anchor.toISOString());
 		expect(
@@ -132,6 +191,8 @@ describe("CalendarService teaching events", () => {
 		).toBe(60 * 60_000);
 		expect(native.color).toBe("#6366F1");
 		expect(native.data).toMatchObject({
+			sessionId: sessionA,
+			lessonId: lessonA,
 			courseId: courseA,
 			courseTitle: "Cal Course a",
 			moduleTitle: "Cal Module a",
@@ -139,15 +200,26 @@ describe("CalendarService teaching events", () => {
 			liveStatus: "scheduled",
 		});
 
-		const external = events.find((e) => e.id === `lesson-${externalLesson}`)!;
+		/* the same title and the same start time must not collapse or swap */
+		const external = events.find(
+			(e) => e.id === `session-${sessionExternal}`,
+		)!;
 		expect(external.color).toBe("#059669");
-		expect(external.data.meetingType).toBe("external");
+		expect(external.data).toMatchObject({
+			sessionId: sessionExternal,
+			lessonId: null,
+			meetingType: "external",
+			meetingUrl: "https://meet.example/cal",
+		});
 	});
 
-	it("excludes ended sessions and other instructors' courses", async () => {
+	it("excludes ended and cancelled sessions, and other instructors' sessions", async () => {
 		const events = await service.listEvents(auth(ownerA), month);
-		expect(events.some((e) => e.id === `lesson-${endedLesson}`)).toBe(false);
-		expect(events.some((e) => e.id === `lesson-${otherLesson}`)).toBe(false);
+		expect(events.some((e) => e.id === `session-${sessionEnded}`)).toBe(false);
+		expect(events.some((e) => e.id === `session-${sessionCancelled}`)).toBe(
+			false,
+		);
+		expect(events.some((e) => e.id === `session-${sessionOther}`)).toBe(false);
 	});
 
 	it("returns nothing outside the requested month", async () => {

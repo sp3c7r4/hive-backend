@@ -1,4 +1,4 @@
-import { eq, count, sql, desc, and, gte, lte } from "drizzle-orm";
+import { eq, count, sql, desc, and, gte, lte, isNull } from "drizzle-orm";
 import { serviceLogger } from "@/utils";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { InstructorMessages } from "./instructor.message";
@@ -7,6 +7,7 @@ import { lessons } from "@/modules/courses/course.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { CourseRepository } from "@/modules/courses/course.repository";
 import { getDb } from "@/db/postgres.db";
+import { liveSessions } from "@/modules/live/live-session.model";
 
 export class InstructorService {
 	private static instance: InstructorService;
@@ -94,32 +95,39 @@ export class InstructorService {
 	) => {
 		const db = getDb();
 
-		const conditions = [
-			eq(courses.instructorId as any, authData.id),
-			eq(lessons.type, "live" as any),
+		/* @info - Live sessions are the source (phase 1): the two legacy lesson
+		 * columns this used to read are gone, and the previous join matched
+		 * lessons.module_id against courses.id. */
+		const conditions: any[] = [
+			eq(liveSessions.hostId, Number(authData.id)),
+			isNull(liveSessions.deletedAt),
 		];
 
-		const now = new Date().toISOString();
+		const now = new Date();
 		if (params?.filter === "upcoming") {
-			conditions.push(gte(lessons.liveMeetingDate as any, now));
+			conditions.push(gte(liveSessions.startsAt, now));
 		} else if (params?.filter === "past") {
-			conditions.push(lte(lessons.liveMeetingDate as any, now));
+			conditions.push(lte(liveSessions.startsAt, now));
 		}
 
 		const data = await db
 			.select({
-				id: lessons.id,
-				title: lessons.title,
-				liveMeetingLink: lessons.liveMeetingLink,
-				liveMeetingDate: lessons.liveMeetingDate,
-				duration: lessons.duration,
+				id: liveSessions.id,
+				title: liveSessions.title,
+				kind: liveSessions.kind,
+				meetingUrl: liveSessions.meetingUrl,
+				scheduledAt: liveSessions.startsAt,
+				durationMinutes: liveSessions.durationMinutes,
+				status: liveSessions.status,
+				lessonId: lessons.id,
 				courseId: courses.id,
 				courseTitle: courses.title,
 			})
-			.from(lessons)
-			.innerJoin(courses as any, eq(lessons.moduleId, courses.id as any))
-			.where(and(...(conditions as any)))
-			.orderBy(desc(lessons.liveMeetingDate))
+			.from(liveSessions)
+			.leftJoin(courses, eq(courses.id, liveSessions.courseId))
+			.leftJoin(lessons, eq(lessons.liveSessionId, liveSessions.id))
+			.where(and(...conditions))
+			.orderBy(desc(liveSessions.startsAt))
 			.limit(params?.limit ?? 5)
 			.offset(((params?.page ?? 1) - 1) * (params?.limit ?? 5));
 

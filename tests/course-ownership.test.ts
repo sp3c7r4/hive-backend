@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError } from "@/errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CourseService } from "@/modules/courses/course.service";
+import { LiveSessionService } from "@/modules/live";
 import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
 
 /**
@@ -23,6 +24,18 @@ const lessonOf = (mod: { id: number }) => ({
 	id: 1000,
 	moduleId: mod.id,
 	status: "draft",
+});
+
+/* @info - Lesson saves sync the lesson's live session now (migration 0028 moved the
+ * meeting off the lesson). These tests stub repositories and must not touch the
+ * database, so the session sync is stubbed here and asserted per test. */
+const sessionSync = () =>
+	vi
+		.spyOn(LiveSessionService.getInstance(), "syncLessonMeeting")
+		.mockResolvedValue(null as any);
+
+beforeEach(() => {
+	sessionSync();
 });
 
 function buildService() {
@@ -370,6 +383,14 @@ describe("course ownership — lessons", () => {
 		f.lessonsRepo.findById.mockResolvedValue(lesson);
 		f.modulesRepo.findById.mockResolvedValue(mod);
 		f.coursesRepo.findById.mockResolvedValue(otherCourse);
+		/* @info - generateMeeting no longer writes the lesson row (the meeting lives on
+		 * the lesson's live session), so "it did nothing" is asserted on the side
+		 * effects that would still exist: scheduling and the session sync. */
+		const schedSpy = vi.spyOn(
+			MeetingSchedulerService.getInstance(),
+			"scheduleMeeting",
+		);
+		schedSpy.mockClear();
 		await expect(
 			f.service.generateMeeting(STRANGER, lesson.id, {
 				provider: "google",
@@ -378,7 +399,8 @@ describe("course ownership — lessons", () => {
 				endTime: "2026-09-10T11:00:00Z",
 			} as any),
 		).rejects.toThrow(ForbiddenError);
-		expect(f.lessonsRepo.update).not.toHaveBeenCalled();
+		expect(schedSpy).not.toHaveBeenCalled();
+		schedSpy.mockRestore();
 	});
 
 	it("owner can generate a meeting for their own lesson", async () => {
@@ -395,10 +417,6 @@ describe("course ownership — lessons", () => {
 				calendarEventId: "evt_1",
 				calendarHtmlLink: "https://cal.example/evt_1",
 			});
-		f.lessonsRepo.update.mockResolvedValue({
-			...lesson,
-			liveMeetingLink: "https://meet.example/abc",
-		});
 		const result = await f.service.generateMeeting(OWNER, lesson.id, {
 			provider: "google",
 			summary: "s",
@@ -409,10 +427,13 @@ describe("course ownership — lessons", () => {
 		expect(schedSpy).toHaveBeenCalledWith(
 			expect.objectContaining({ summary: "s", provider: "google" }),
 		);
-		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+		expect(
+			LiveSessionService.getInstance().syncLessonMeeting,
+		).toHaveBeenCalledWith(
 			lesson.id,
 			expect.objectContaining({
-				liveMeetingLink: "https://meet.example/abc",
+				meetingType: "external",
+				meetingUrl: "https://meet.example/abc",
 			}),
 		);
 		schedSpy.mockRestore();
@@ -432,10 +453,6 @@ describe("course ownership — lessons", () => {
 				calendarEventId: "evt_2",
 				calendarHtmlLink: "https://cal.example/evt_2",
 			});
-		f.lessonsRepo.update.mockResolvedValue({
-			...lesson,
-			liveMeetingLink: "https://meet.example/xyz",
-		});
 		const result = await f.service.generateMeeting(ADMIN, lesson.id, {
 			provider: "google",
 			summary: "s",
@@ -446,10 +463,13 @@ describe("course ownership — lessons", () => {
 		expect(schedSpy).toHaveBeenCalledWith(
 			expect.objectContaining({ summary: "s", provider: "google" }),
 		);
-		expect(f.lessonsRepo.update).toHaveBeenCalledWith(
+		expect(
+			LiveSessionService.getInstance().syncLessonMeeting,
+		).toHaveBeenCalledWith(
 			lesson.id,
 			expect.objectContaining({
-				liveMeetingLink: "https://meet.example/xyz",
+				meetingType: "external",
+				meetingUrl: "https://meet.example/xyz",
 			}),
 		);
 		schedSpy.mockRestore();

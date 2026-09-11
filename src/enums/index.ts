@@ -5,6 +5,7 @@ export * from "./commerce";
 export * from "./community";
 export * from "./course";
 export * from "./file-types";
+export * from "./live";
 export * from "./messaging";
 export * from "./notification";
 export * from "./payment";

@@ -100,9 +100,10 @@ export const createLessonSchema = z.object({
 	videoUrl: z.string().max(1000).optional(),
 	pdfUrl: z.string().max(1000).optional(),
 	driveUrl: z.string().max(1000).optional(),
-	/* @info - Live lesson scheduling (spec 19). meetingUrl + scheduledAt
-	 * replace the legacy liveMeetingLink/liveMeetingDate fields for new
-	 * rows; legacy fields are still accepted for the transition. */
+	/* @info - Live meeting input. These four are stored on the lesson's live
+	 * session (migration 0028 dropped the matching lessons columns), so they are
+	 * accepted here and split off before the lesson insert. The legacy
+	 * liveMeetingLink/liveMeetingDate fields are gone from the API entirely. */
 	meetingType: z.nativeEnum(LessonMeetingType).optional(),
 	meetingUrl: z.string().max(1000).optional(),
 	/* @info - Drizzle timestamp columns need Date objects; the client sends
@@ -110,8 +111,6 @@ export const createLessonSchema = z.object({
 	 * it every schedule save died on value.toISOString(). */
 	scheduledAt: z.coerce.date().optional(),
 	durationMinutes: z.number().int().min(5).max(600).optional(),
-	liveMeetingLink: z.string().max(1000).optional(),
-	liveMeetingDate: z.string().max(255).optional(),
 	attachmentUrl: z.string().max(1000).optional(),
 	/** @info - Lesson-type-specific settings (e.g. assignment rubric/due date) */
 	settings: z.record(z.string(), z.any()).optional(),

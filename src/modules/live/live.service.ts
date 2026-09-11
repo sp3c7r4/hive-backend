@@ -1,60 +1,33 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { StatusCodes } from "http-status-codes";
 import { AccessToken } from "livekit-server-sdk";
 import { config } from "@/config";
-import { getDb } from "@/db/postgres.db";
-import {
-	throwBadRequestError,
-	throwForbiddenError,
-	throwNotFoundError,
-	throwRateLimitError,
-} from "@/helpers/errors/throw-errors";
+import { throwRateLimitError } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { courses, lessons, modules } from "@/modules/courses/course.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { CacheService } from "@/services";
+import { LiveSessionService } from "./live-session.service";
 
-/** @info - Live session tokens are short-lived joins, not sessions */
+/** @info - Live join tokens are short-lived joins, not sessions */
 const TOKEN_TTL_SECONDS = 2 * 60 * 60;
-/** @info - Spec 19: 5 token requests/min/user */
+/** @info - 5 token requests/min/user */
 const TOKEN_RATE_LIMIT = 5;
 
-/** @info - Loads a lesson with its course. Throws 404 when missing. */
-async function loadLessonWithCourse(lessonId: number) {
-	const db = getDb();
-	const [row] = await db
-		.select({
-			id: lessons.id,
-			type: lessons.type,
-			meetingType: lessons.meetingType,
-			meetingUrl: lessons.meetingUrl,
-			scheduledAt: lessons.scheduledAt,
-			liveStatus: lessons.liveStatus,
-			courseId: modules.courseId,
-			instructorId: courses.instructorId,
-		})
-		.from(lessons)
-		.innerJoin(modules, eq(lessons.moduleId, modules.id))
-		.innerJoin(courses, eq(modules.courseId, courses.id))
-		.where(eq(lessons.id, lessonId))
-		.limit(1);
-	if (!row) throwNotFoundError("Lesson not found.");
-	return row!;
-}
+/**
+ * @info - LiveKit room name for a session. Derived from the immutable session id and
+ * never stored: staging and production share one LiveKit project and are separated
+ * only by LIVEKIT_ROOM_PREFIX, so every participant and every deploy composes the
+ * same name for the same session.
+ */
+export const roomNameForSession = (sessionId: number): string =>
+	`${config.livekit.roomPrefix}session-${sessionId}`;
 
-/** @info - Instructor of the course owns the lesson's live session */
-function assertInstructorOwns(authData: IAuthData, instructorId: number) {
-	if (Number(authData.id) !== instructorId) {
-		throwForbiddenError("You do not own this lesson.");
-	}
-}
-
-/** @info - LiveKit room name for a lesson (spec 19: room = lesson-<id>) */
-export const roomNameForLesson = (lessonId: number): string =>
-	`${config.livekit.roomPrefix}lesson-${lessonId}`;
-
+/**
+ * @info - Live session endpoints, session-keyed. Every subsystem (token, room,
+ * moderation, recording, links) keys on one session id; a lesson points at its
+ * session through lessons.live_session_id. The lesson-keyed endpoints were deleted
+ * in phase 1, not deprecated.
+ */
 export class LiveService {
 	private static instance: LiveService;
+	private readonly sessions = LiveSessionService.getInstance();
 
 	static getInstance(): LiveService {
 		if (!this.instance) this.instance = new LiveService();
@@ -74,41 +47,24 @@ export class LiveService {
 		}
 	};
 
+	/** @info - GET /live/sessions/:sessionId */
+	getSession = async (authData: IAuthData, sessionId: number) =>
+		this.sessions.getSessionView(authData, sessionId);
+
 	/**
-	 * @info - POST /lessons/:id/live-token
-	 * Issues a LiveKit join token. Instructors AND enrolled students may
-	 * publish (camera + mic + chat data) so every participant can speak
-	 * and share video in the live class. Enrollment check mirrors the AI
-	 * tutor gate (deletedAt is null).
+	 * @info - POST /live/sessions/:sessionId/token
+	 * Issues a LiveKit join token. Everyone who passes the access gate may publish
+	 * (camera + mic + chat data) so a live class is a conversation; the host also gets
+	 * roomAdmin for server-side moderation (phase 3 uses it).
 	 */
-	issueToken = async (authData: IAuthData, lessonId: number) => {
+	issueToken = async (authData: IAuthData, sessionId: number) => {
 		await this.enforceTokenRateLimit(Number(authData.id));
-		const lesson = await loadLessonWithCourse(lessonId);
+		const { session, access } = await this.sessions.loadForJoin(
+			authData,
+			sessionId,
+		);
 
-		if (lesson.meetingType !== "native") {
-			throwBadRequestError("This lesson has no LiveKit session.");
-		}
-
-		const isInstructor = Number(authData.id) === lesson.instructorId;
-		if (!isInstructor) {
-			const db = getDb();
-			const [enrollment] = await db
-				.select({ id: enrollments.id })
-				.from(enrollments)
-				.where(
-					and(
-						eq(enrollments.userId, Number(authData.id)),
-						eq(enrollments.courseId, lesson.courseId),
-						isNull(enrollments.deletedAt),
-					),
-				)
-				.limit(1);
-			if (!enrollment) {
-				throwForbiddenError("You are not enrolled in this course.");
-			}
-		}
-
-		const roomName = roomNameForLesson(lessonId);
+		const roomName = roomNameForSession(session.id);
 		const displayName = [authData.firstName, authData.lastName]
 			.filter(Boolean)
 			.join(" ")
@@ -128,6 +84,7 @@ export class LiveService {
 			canPublish: true,
 			canSubscribe: true,
 			canPublishData: true,
+			roomAdmin: access.canModerate,
 		});
 
 		return {
@@ -135,43 +92,39 @@ export class LiveService {
 			roomName,
 			url: config.livekit.publicUrl,
 			expiresIn: TOKEN_TTL_SECONDS,
+			session: {
+				id: session.id,
+				status: session.status,
+				isHost: access.isHost,
+			},
 		};
 	};
 
-	/** @info - POST /lessons/:id/go-live — instructor marks the session live */
-	goLive = async (authData: IAuthData, lessonId: number) => {
-		const lesson = await loadLessonWithCourse(lessonId);
-		assertInstructorOwns(authData, lesson.instructorId);
-		if (lesson.meetingType !== "native") {
-			throwBadRequestError("This lesson has no LiveKit session.");
+	/** @info - POST /live/sessions/:sessionId/go-live — the host starts the session */
+	goLive = async (authData: IAuthData, sessionId: number) => {
+		const { session } = await this.sessions.loadForHostAction(
+			authData,
+			sessionId,
+		);
+		if (session.status === "live") {
+			return { sessionId: session.id, status: session.status };
 		}
 
-		const db = getDb();
-		await db
-			.update(lessons)
-			.set({
-				liveStatus: "live",
-				scheduledAt: lesson.scheduledAt ?? new Date(),
-			})
-			.where(eq(lessons.id, lessonId));
-
-		return { lessonId, liveStatus: "live" as const };
+		const updated = await this.sessions.markLive(session.id);
+		return { sessionId: updated.id, status: updated.status };
 	};
 
-	/** @info - POST /lessons/:id/end-live — instructor ends the session */
-	endLive = async (authData: IAuthData, lessonId: number) => {
-		const lesson = await loadLessonWithCourse(lessonId);
-		assertInstructorOwns(authData, lesson.instructorId);
-		if (lesson.meetingType !== "native") {
-			throwBadRequestError("This lesson has no LiveKit session.");
+	/** @info - POST /live/sessions/:sessionId/end-live — the host ends the session */
+	endLive = async (authData: IAuthData, sessionId: number) => {
+		const { session } = await this.sessions.loadForHostAction(
+			authData,
+			sessionId,
+		);
+		if (session.status === "ended") {
+			return { sessionId: session.id, status: session.status };
 		}
 
-		const db = getDb();
-		await db
-			.update(lessons)
-			.set({ liveStatus: "ended" })
-			.where(eq(lessons.id, lessonId));
-
-		return { lessonId, liveStatus: "ended" as const };
+		const updated = await this.sessions.markEnded(session.id);
+		return { sessionId: updated.id, status: updated.status };
 	};
 }

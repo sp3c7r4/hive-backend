@@ -1,19 +1,24 @@
 import { Hono } from "hono";
-import { requireInstructor } from "@/middlewares/auth";
 import { JwtService } from "@/services";
 import { LiveController } from "./live.controller";
 
+/** @info - Live sessions (phase 1): session-keyed, mounted at /live. The lesson-keyed
+ *  endpoints that used to live at /lessons were deleted, not deprecated. */
 export const liveRouter = new Hono({ strict: true });
 
 const jwt = JwtService.getInstance();
 const controller = LiveController.getInstance();
 
-/** @info - All live routes require an authenticated user */
+/** @info - Every live route requires an authenticated user; the service then applies
+ *  the access rule (host / enrolled / active member) per session. */
 liveRouter.use("*", jwt.validateToken);
 
-/** @info - Join token: instructor (owner) publishes; enrolled students subscribe */
-liveRouter.post("/:lessonId/live-token", controller.liveToken);
+/** @info - Session detail for the room page (access-checked; a finished session still renders) */
+liveRouter.get("/sessions/:sessionId", controller.getSession);
 
-/** @info - Session state transitions: instructor owns the course's lesson */
-liveRouter.post("/:lessonId/go-live", requireInstructor, controller.goLive);
-liveRouter.post("/:lessonId/end-live", requireInstructor, controller.endLive);
+/** @info - Join token: entitlement is checked per session by the service */
+liveRouter.post("/sessions/:sessionId/token", controller.liveToken);
+
+/** @info - Session state transitions: the host (or a standalone event's owner/admin) */
+liveRouter.post("/sessions/:sessionId/go-live", controller.goLive);
+liveRouter.post("/sessions/:sessionId/end-live", controller.endLive);
