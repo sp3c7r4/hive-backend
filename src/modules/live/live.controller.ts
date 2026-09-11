@@ -22,6 +22,16 @@ const parseCommunityId = (c: Context): number => {
 	return communityId;
 };
 
+/** @info - Participant identities are `user-<id>`. The API treats them as opaque, but
+ *  one of them becomes a Redis hash field, so bound it rather than accepting anything. */
+const parseIdentity = (c: Context): string => {
+	const identity = c.req.param("identity") ?? "";
+	if (!identity || identity.length > 64) {
+		throwBadRequestError("Invalid participant identity.");
+	}
+	return identity;
+};
+
 export class LiveController {
 	private static instance: LiveController;
 	private readonly service = LiveService.getInstance();
@@ -109,6 +119,51 @@ export class LiveController {
 	deleteSession = async (c: Context) => {
 		const authData = c.get("authData");
 		const result = await this.service.deleteSession(
+			authData,
+			parseSessionId(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - POST /live/sessions/:sessionId/participants/:identity/mute */
+	muteParticipant = async (c: Context) => {
+		const authData = c.get("authData");
+		const body = (await c.req.json()) as { muted: boolean };
+		const result = await this.service.muteParticipant(
+			authData,
+			parseSessionId(c),
+			parseIdentity(c),
+			body.muted,
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - POST /live/sessions/:sessionId/participants/:identity/remove */
+	removeParticipant = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.removeParticipant(
+			authData,
+			parseSessionId(c),
+			parseIdentity(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - POST /live/sessions/:sessionId/participants/:identity/readmit */
+	readmitParticipant = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.readmitParticipant(
+			authData,
+			parseSessionId(c),
+			parseIdentity(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - GET /live/sessions/:sessionId/participants/removed */
+	listRemovedParticipants = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.listRemovedParticipants(
 			authData,
 			parseSessionId(c),
 		);

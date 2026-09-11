@@ -21,6 +21,12 @@ export const createLiveSessionSchema = z.object({
 	meetingUrl: z.string().max(1000).nullish(),
 });
 
+/** @info - Mute/unmute body (phase 3). `false` is a real server-side unmute, so the
+ *  boolean is the whole request: the API decides what can be acted on, not the client. */
+export const muteParticipantSchema = z.object({
+	muted: z.boolean(),
+});
+
 export const updateLiveSessionSchema = z.object({
 	kind: z.nativeEnum(LiveSessionKind).optional(),
 	title: z.string().trim().min(1).max(255).optional(),

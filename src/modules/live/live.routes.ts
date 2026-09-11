@@ -3,6 +3,7 @@ import { JwtService, ZodEngine } from "@/services";
 import { LiveController } from "./live.controller";
 import {
 	createLiveSessionSchema,
+	muteParticipantSchema,
 	updateLiveSessionSchema,
 } from "./live-session.schema";
 
@@ -49,3 +50,28 @@ liveRouter.patch(
 );
 liveRouter.post("/sessions/:sessionId/cancel", controller.cancelSession);
 liveRouter.delete("/sessions/:sessionId", controller.deleteSession);
+
+/**
+ * @info - In-room moderation (phase 3). Same reason as phase 2 for the missing
+ * `requireInstructor`: a community owner/admin moderates a standalone event and need
+ * not be an instructor, so authorization lives in the service. The gate order there -
+ * access, then moderator, then room kind and live status, and only then the target
+ * identity - is what keeps a non-moderator from learning anything from these routes.
+ */
+liveRouter.post(
+	"/sessions/:sessionId/participants/:identity/mute",
+	zod.validate.body(muteParticipantSchema),
+	controller.muteParticipant,
+);
+liveRouter.post(
+	"/sessions/:sessionId/participants/:identity/remove",
+	controller.removeParticipant,
+);
+liveRouter.post(
+	"/sessions/:sessionId/participants/:identity/readmit",
+	controller.readmitParticipant,
+);
+liveRouter.get(
+	"/sessions/:sessionId/participants/removed",
+	controller.listRemovedParticipants,
+);

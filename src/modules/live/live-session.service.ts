@@ -34,6 +34,11 @@ const NOT_OWNER_OR_ADMIN =
 	"Only community owners and admins can schedule a live class.";
 const ONLY_HOST =
 	"Only the host or a community owner/admin can change this session.";
+/* @info - Phase 3 moderation. The message is deliberately the same for everyone who is
+ * not a moderator, whatever identity they name (D-P3-18). */
+const ONLY_MODERATORS =
+	"Only the host or a community owner/admin can moderate this session.";
+const NOT_LIVE = "This session has not started yet.";
 const NEEDS_LINK = "An external session needs a meeting link.";
 const NO_LINK_ON_HIVE_ROOM = "A Hive room session has no meeting link.";
 const LESSON_OWNED_FIELDS =
@@ -307,6 +312,22 @@ export class LiveSessionService {
 			throwForbiddenError("Only the host can change this session.");
 		}
 		if (session.kind !== "native") throwBadRequestError(NO_HIVE_ROOM);
+		return { session, access };
+	};
+
+	/**
+	 * @info - Moderation gate (phase 3). The order is the point (D-P3-18): the session,
+	 * then the caller's access, then the moderator check, then the room kind, then the
+	 * live status - and only after all of that may a caller name a target identity. A
+	 * non-moderator therefore gets one identical 403 whatever identity they send, and no
+	 * LiveKit call is ever made on their behalf.
+	 */
+	loadForModeration = async (authData: IAuthData, sessionId: number) => {
+		const session = await this.loadById(sessionId);
+		const access = await this.resolveAccess(session, authData);
+		if (!access.canModerate) throwForbiddenError(ONLY_MODERATORS);
+		if (session.kind !== "native") throwBadRequestError(NO_HIVE_ROOM);
+		if (session.status !== "live") throwBadRequestError(NOT_LIVE);
 		return { session, access };
 	};
 
