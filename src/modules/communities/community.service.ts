@@ -7,6 +7,7 @@ import { CommunityMessages } from "./community.message";
 import { communities, communityMembers } from "./community.model";
 import { users } from "@/modules/user/user.model";
 import { CommunityRepository } from "./community.repository";
+import { publishableCommunitiesWhere } from "./community-publish-target";
 import type { NewCommunity } from "./community.model";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { courses } from "@/modules/courses/course.model";
@@ -159,20 +160,10 @@ export class CommunityService {
 			/* Owned only — used by the instructor Members filter dropdown (excludes joined-only) */
 			where = and(eq(communities.ownerId, params.userId), isNull(communities.deletedAt));
 		} else if (params?.scope === "mine" && params.userId) {
-			/* My Communities: owned OR actively a member of. Owner's archived ones included. */
-			const memberIds = db
-				.select({ communityId: communityMembers.communityId })
-				.from(communityMembers)
-				.where(
-					and(
-						eq(communityMembers.userId, params.userId),
-						eq(communityMembers.status, "active"),
-					),
-				);
-			where = and(
-				or(eq(communities.ownerId, params.userId), inArray(communities.id, memberIds)),
-				or(isNull(communities.deletedAt), eq(communities.ownerId, params.userId)),
-			);
+			/* My Communities: owned OR actively a member of. Owner's archived ones included.
+			 * The rule itself lives in community-publish-target so the course create and
+			 * move paths enforce exactly the set this listing offers as publish targets. */
+			where = publishableCommunitiesWhere(db, params.userId);
 		} else {
 			/* Explore: public + live communities only */
 			where = and(

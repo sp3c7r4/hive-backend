@@ -12,6 +12,7 @@ import {
 	updateModuleSchema,
 	updateLessonSchema,
 	generateMeetingSchema,
+	moveCourseCommunitySchema,
 } from "./course.schema";
 
 export const courseRouter = new Hono({ strict: true });
@@ -53,6 +54,16 @@ courseRouter.patch(
 );
 courseRouter.delete("/:id", requireInstructor, controller.delete);
 courseRouter.post("/:id/restore", requireInstructor, controller.restore);
+
+/** @info - Moving a course between communities is its own route: the PATCH /:id
+ * allowlist strips communityId (the mass-assignment hole), so the one column
+ * that decides which community owns the course gets an explicit contract. */
+courseRouter.patch(
+	"/:id/community",
+	requireInstructor,
+	zod.validate.body(moveCourseCommunitySchema),
+	controller.moveCommunity,
+);
 
 /** @info - Module routes nested under courses */
 courseRouter.get("/:courseId/modules", controller.listModules);

@@ -11,6 +11,7 @@ import {
 import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { communities } from "@/modules/communities/community.model";
+import { assertPublishTarget } from "@/modules/communities/community-publish-target";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import {
 	decorateLessonsWithSessions,
@@ -185,6 +186,13 @@ export class CourseService {
 			throwBadRequestError(issue?.message ?? "Invalid course payload.");
 		}
 		const allowed = parsed.data as Record<string, any>;
+
+		/* @info - Publish target: the create contract declares communityId, but the
+		 * form alone cannot prove the author may publish into that community — the
+		 * create UI only ever offers scope=mine. Enforce the same rule here so the
+		 * API cannot be handed a community the author has no standing in. */
+		await assertPublishTarget(authData, Number(allowed.communityId));
+
 		const slug = await this._uniqueCourseSlug(allowed.title, authData.id);
 
 		return withTransaction(async (tx) => {
@@ -480,6 +488,73 @@ export class CourseService {
 		const updated = await this.coursesRepo.update(id, allowed as any);
 		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
 
+		return withPresignedUrl(updated!, "coverImageUrl");
+	};
+
+	/**
+	 * @info - Moves a course to another community. This is a dedicated endpoint
+	 * because `updateCourseSchema` strips communityId on purpose (the
+	 * mass-assignment hole), and it changes exactly that one column: instructor,
+	 * status, curriculum and enrolments are untouched, so a move re-labels where
+	 * the course is discovered without touching anyone's access to it.
+	 */
+	moveCourseCommunity = async (
+		authData: IAuthData,
+		courseId: number,
+		communityId: number,
+	) => {
+		/* @info - assertOwnedCourse is the takeover guard: 404 for an unknown or
+		 * soft-deleted course, and 403 for anyone who does not own it — which
+		 * includes an admin of the community the course is leaving. */
+		const course = (await this.assertOwnedCourse(
+			Number(courseId),
+			authData,
+		)) as { id: number; communityId: number | null; instructorId: number };
+
+		/* @info - The target must be a community the caller may publish into (the
+		 * same rule the create path and the scope=mine list use). Validation of the id
+		 * itself lives in that assertion. */
+		await assertPublishTarget(authData, Number(communityId));
+
+		const targetCommunityId = Number(communityId);
+		const fromCommunityId =
+			course.communityId == null ? null : Number(course.communityId);
+
+		/* @info - Idempotent: the course already lives there, so the response is
+		 * the unchanged course and nothing is written. */
+		if (fromCommunityId === targetCommunityId) {
+			return withPresignedUrl(course as any, "coverImageUrl");
+		}
+
+		await withTransaction(async (tx) => {
+			await tx
+				.update(courses)
+				.set({ communityId: targetCommunityId } as any)
+				.where(eq(courses.id, Number(courseId)));
+
+			/* @info - communities.course_count is displayed on the community pages,
+			 * so it has to follow the move or both communities report a wrong total.
+			 * The decrement is floored at 0 exactly like deleteCourse's. */
+			if (fromCommunityId != null) {
+				await tx
+					.update(communities)
+					.set({
+						courseCount: sql`GREATEST(${communities.courseCount} - 1, 0)`,
+					})
+					.where(eq(communities.id, fromCommunityId));
+			}
+			await tx
+				.update(communities)
+				.set({ courseCount: sql`${communities.courseCount} + 1` })
+				.where(eq(communities.id, targetCommunityId));
+		});
+
+		const updated = await this.coursesRepo.findById(Number(courseId));
+		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		this.log.info(
+			`Course ${courseId} moved from community ${fromCommunityId} to ${targetCommunityId}`,
+		);
 		return withPresignedUrl(updated!, "coverImageUrl");
 	};
 

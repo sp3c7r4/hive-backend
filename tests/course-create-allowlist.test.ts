@@ -70,7 +70,10 @@ describe("POST /courses — create allowlist", () => {
 	beforeEach(() => {
 		mocks.dbResults.length = 0;
 		mocks.calls.length = 0;
-		mocks.dbResults.push([{ id: 99 }]);
+		/* Two results: the publish-target check resolves the community before the
+		 * insert, then the insert itself. The allowlist is what is under test, so a
+		 * matching community row is all the check needs to let the write through. */
+		mocks.dbResults.push([{ id: 99 }], [{ id: 99 }]);
 		/* Slug generation reads the db; the allowlist is what is under test. */
 		(service as any)._uniqueCourseSlug = vi
 			.fn()

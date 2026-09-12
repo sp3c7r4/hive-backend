@@ -39,6 +39,13 @@ export const createCourseSchema = z.object({
 	coverImageUrl: z.string().max(500).optional(),
 });
 
+/** @info - Body of PATCH /courses/:id/community. Its own contract because the
+ * general update allowlist deliberately strips communityId (mass-assignment), so
+ * moving a course declares that one column explicitly here. */
+export const moveCourseCommunitySchema = z.object({
+	communityId: z.preprocess(coerceInt, z.number().int().positive()),
+});
+
 /** @info - FormData variant: all fields are strings, booleans/ints need coercion */
 export const createCourseFormSchema = z.object({
 	communityId: z.preprocess(coerceInt, z.number().int()),

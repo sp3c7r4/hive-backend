@@ -120,6 +120,24 @@ export class CourseController {
 		});
 	};
 
+	/** @info - Move a course to another community. Separate from `update` because
+	 * the update allowlist strips communityId (mass-assignment), so the one column
+	 * that decides which community the course belongs to gets its own contract. */
+	moveCommunity = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = c.req.param("id");
+		const body = (await c.req.json()) as { communityId?: unknown };
+		const data = await this.service.moveCourseCommunity(
+			authData,
+			id as unknown as number,
+			Number(body?.communityId),
+		);
+		return sendSuccessResponse(c, {
+			message: "Course moved successfully",
+			data,
+		});
+	};
+
 	delete = async (c: Context) => {
 		const authData = c.get("authData");
 		const id = c.req.param("id");
