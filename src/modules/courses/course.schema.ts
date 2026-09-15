@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
 	CourseDifficulty,
+	CourseStatus,
 	CourseVisibility,
 	LessonMeetingType,
 	LessonType,
@@ -38,6 +39,13 @@ export const createCourseSchema = z.object({
 	coverImageUrl: z.string().max(500).optional(),
 });
 
+/** @info - Body of PATCH /courses/:id/community. Its own contract because the
+ * general update allowlist deliberately strips communityId (mass-assignment), so
+ * moving a course declares that one column explicitly here. */
+export const moveCourseCommunitySchema = z.object({
+	communityId: z.preprocess(coerceInt, z.number().int().positive()),
+});
+
 /** @info - FormData variant: all fields are strings, booleans/ints need coercion */
 export const createCourseFormSchema = z.object({
 	communityId: z.preprocess(coerceInt, z.number().int()),
@@ -48,9 +56,21 @@ export const createCourseFormSchema = z.object({
 	difficulty: z.nativeEnum(CourseDifficulty).optional(),
 	visibility: z.nativeEnum(CourseVisibility).optional(),
 	price: z.preprocess(coerceInt, z.number().int().optional()),
+	/* @info - Monthly subscription price, same kobo unit as `price`. The create
+	 * page collects it, so the create contract must declare it (undeclared keys
+	 * are dropped); nullable/optional mirrors updateCourseSchema. */
+	monthlyPrice: z.preprocess(
+		coerceInt,
+		z.number().int().min(0).nullable().optional(),
+	),
 	isFree: z.preprocess(coerceBool, z.boolean().optional()),
 	sequentialAccess: z.preprocess(coerceBool, z.boolean().optional()),
 	dripContent: z.preprocess(coerceBool, z.boolean().optional()),
+	/* @info - Declared so the create contract matches PATCH (updateCourseSchema)
+	 * and the page's FormData; omitted stays undefined so the model defaults
+	 * (both true) stay authoritative. */
+	allowComments: z.preprocess(coerceBool, z.boolean().optional()),
+	allowDownloads: z.preprocess(coerceBool, z.boolean().optional()),
 	offerCertificate: z.preprocess(coerceBool, z.boolean().optional()),
 	minCompletionPercent: z.preprocess(
 		coerceInt,
@@ -64,6 +84,10 @@ export const createCourseFormSchema = z.object({
 		coerceInt,
 		z.number().int().min(0).max(100).optional(),
 	),
+	/* @info - Upload-path cover key (set by the upload middleware / the file
+	 * field). Declared so the create allowlist keeps it, mirroring
+	 * createCourseSchema and PATCH's updateCourseSchema. */
+	coverImageUrl: z.string().max(500).optional(),
 });
 
 export const createModuleSchema = z.object({
@@ -83,9 +107,10 @@ export const createLessonSchema = z.object({
 	videoUrl: z.string().max(1000).optional(),
 	pdfUrl: z.string().max(1000).optional(),
 	driveUrl: z.string().max(1000).optional(),
-	/* @info - Live lesson scheduling (spec 19). meetingUrl + scheduledAt
-	 * replace the legacy liveMeetingLink/liveMeetingDate fields for new
-	 * rows; legacy fields are still accepted for the transition. */
+	/* @info - Live meeting input. These four are stored on the lesson's live
+	 * session (migration 0028 dropped the matching lessons columns), so they are
+	 * accepted here and split off before the lesson insert. The legacy
+	 * liveMeetingLink/liveMeetingDate fields are gone from the API entirely. */
 	meetingType: z.nativeEnum(LessonMeetingType).optional(),
 	meetingUrl: z.string().max(1000).optional(),
 	/* @info - Drizzle timestamp columns need Date objects; the client sends
@@ -93,14 +118,32 @@ export const createLessonSchema = z.object({
 	 * it every schedule save died on value.toISOString(). */
 	scheduledAt: z.coerce.date().optional(),
 	durationMinutes: z.number().int().min(5).max(600).optional(),
-	liveMeetingLink: z.string().max(1000).optional(),
-	liveMeetingDate: z.string().max(255).optional(),
 	attachmentUrl: z.string().max(1000).optional(),
 	/** @info - Lesson-type-specific settings (e.g. assignment rubric/due date) */
 	settings: z.record(z.string(), z.any()).optional(),
 });
 
-export const updateCourseSchema = createCourseSchema.partial();
+export const updateCourseSchema = z.object({
+	title: z.string().min(1).max(255).optional(),
+	subtitle: z.string().max(500).optional(),
+	description: z.string().optional(),
+	category: z.string().max(255).optional(),
+	difficulty: z.nativeEnum(CourseDifficulty).optional(),
+	visibility: z.nativeEnum(CourseVisibility).optional(),
+	price: z.number().int().min(0).optional(),
+	isFree: z.boolean().optional(),
+	sequentialAccess: z.boolean().optional(),
+	dripContent: z.boolean().optional(),
+	allowComments: z.boolean().optional(),
+	allowDownloads: z.boolean().optional(),
+	offerCertificate: z.boolean().optional(),
+	minCompletionPercent: z.number().int().min(0).max(100).optional(),
+	minQuizScorePercent: z.number().int().min(0).max(100).optional(),
+	minAttendancePercent: z.number().int().min(0).max(100).optional(),
+	monthlyPrice: z.number().int().min(0).nullable().optional(),
+	coverImageUrl: z.string().max(500).optional(),
+	status: z.nativeEnum(CourseStatus).optional(),
+});
 export const updateModuleSchema = createModuleSchema.partial();
 export const updateLessonSchema = createLessonSchema.partial();
 

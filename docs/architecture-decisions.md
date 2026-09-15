@@ -372,8 +372,8 @@ Add per-type toggles:
 
 ## 14. Live class meetings
 
-### Schema says:**
-`lessons` table stores `live_meeting_link` (varchar) and `live_meeting_date` (varchar). This is a **manual link** — the instructor pastes a URL.
+### Schema (updated for migration 0028)
+A live class is a row in **`live_sessions`**; a lesson points at it through `lessons.live_session_id`. The lesson-side columns (`live_meeting_link`, `live_meeting_date`, `meeting_type`, `meeting_url`, `scheduled_at`, `live_status`, `duration_minutes`) were **dropped in 0028**. The equivalents are `live_sessions.meeting_url` (the pasted link), `kind` (`native` room or `external` link), `starts_at` and `status`.
 
 ### OAuth integration
 
@@ -385,10 +385,10 @@ Add per-type toggles:
 **What's needed:**
 1. Service account credentials stored as env vars (`GOOGLE_SERVICE_ACCOUNT_KEY`, `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`). No per-instructor token storage.
 2. A meeting factory service (`GoogleMeetService`, `ZoomService` implementing a shared `MeetingProvider` interface).
-3. On lesson creation with `type = "live"`, the service calls the provider API with the scheduled date/time, creates the meeting, and stores the returned join link in `lessons.live_meeting_link`.
+3. On lesson creation with `type = "live"`, the service calls the provider API with the scheduled date/time, creates the meeting, and stores the returned join link on the lesson's session (`live_sessions.meeting_url`, kind `external`) via `LiveSessionService.syncLessonMeeting`.
 4. Token management is simple: Google service account JWTs are short-lived and auto-generated per API call; Zoom Server-to-Server tokens auto-refresh.
 
-**Schema impact:** `lessons.live_meeting_link` and `lessons.live_meeting_date` are already suitable. Add a `meeting_provider` column (enum: `google_meet` | `zoom`) and a `meeting_id` column to store the provider's internal meeting ID for updates/cancellations. Add env vars to `EnvSchema`.
+**Schema impact:** these columns belong on `live_sessions` now (it already carries `meeting_url`; add `meeting_provider` and `meeting_id` there). Note a session's `kind` is immutable once created, so moving a class between a Hive room and a provider meeting means setting the type to None (which discards the session) and creating the new one. Add env vars to `EnvSchema`.
 
 ---
 

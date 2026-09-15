@@ -567,10 +567,10 @@ Cascades to lessons.
 
 **POST /api/v1/courses/:courseId/modules/:moduleId/lessons/:lessonId/generate-meeting**
 
-| Body | `{ provider: "google_meet" | "zoom", attendees: [{ entityId, entityType }] }` |
+| Body | `{ provider: "google" | "zoom", summary, startTime, endTime, attendees?: [{ entityId, entityType }] }` |
 |---|---|
 | Auth | Instructor |
-| Side effect | Calls Google Calendar API or Zoom API; stores `live_meeting_link` on lesson; sends calendar invite emails to attendees |
+| Side effect | Calls Google Calendar API or Zoom API; stores the join link on the lesson's session (`live_sessions.meeting_url`, kind `external` — the lesson columns were dropped in migration 0028); sends calendar invite emails to attendees |
 | Response | `{ meetingLink, meetingDate }` |
 
 | Used by | Live Class editor drawer — after instructor selects attendees |

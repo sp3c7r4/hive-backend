@@ -45,6 +45,14 @@ export const users = pgTable(
 				},
 			}),
 		suspendedAt: timestamp("suspended_at"),
+		/** @info - Last verified payout destination (one per instructor). Written
+		 *         only by the withdrawal service, which re-resolves the account
+		 *         name with Paystack first — never from client input. */
+		payoutBankName: varchar("payout_bank_name", { length: 255 }),
+		payoutBankCode: varchar("payout_bank_code", { length: 20 }),
+		payoutAccountNumber: varchar("payout_account_number", { length: 20 }),
+		payoutAccountName: varchar("payout_account_name", { length: 255 }),
+		payoutAccountVerifiedAt: timestamp("payout_account_verified_at"),
 		...softDelete,
 		...timestamps,
 	},

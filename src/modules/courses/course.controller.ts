@@ -4,6 +4,16 @@ import { sendSuccessResponse } from "@/helpers";
 import { formDataToObject } from "@/helpers/middleware";
 import { CourseService } from "./course.service";
 
+/** @info - zValidator stores the parsed form under the request's validation
+ * targets; the plain Context type does not expose that generic, so read it
+ * through this narrow accessor instead of the raw body. */
+const validatedForm = (c: Context): Record<string, unknown> => {
+	const req = c.req as unknown as {
+		valid: (target: "form") => Record<string, unknown> | undefined;
+	};
+	return req.valid("form") ?? {};
+};
+
 export class CourseController {
 	private static instance: CourseController;
 	private service: CourseService;
@@ -22,10 +32,16 @@ export class CourseController {
 	create = async (c: Context) => {
 		const authData = c.get("authData");
 
-		/* FormData path — file handled by upload middleware */
-		const formData = await c.req.formData();
-		const data: Record<string, any> = formDataToObject(formData);
-		data.coverImageUrl = c.get("uploadedFile")?.key;
+		/* @info - The validated form is the create contract. Reading it back
+		 * (instead of the raw FormData) is what keeps a stray form key from
+		 * reaching the insert; the upload middleware's key is the only value
+		 * merged from outside the schema. */
+		const validated = validatedForm(c);
+		const data: Record<string, unknown> = Object.fromEntries(
+			Object.entries(validated).filter(([, value]) => value !== undefined),
+		);
+		const coverImageUrl = c.get("uploadedFile")?.key;
+		if (coverImageUrl) data.coverImageUrl = coverImageUrl;
 
 		const result = await this.service.createCourse(authData, data as any);
 		return sendSuccessResponse(
@@ -58,7 +74,8 @@ export class CourseController {
 
 	mine = async (c: Context) => {
 		const authData = c.get("authData");
-		const data = await this.service.listMine(authData);
+		const deleted = c.req.query("deleted") === "true";
+		const data = await this.service.listMine(authData, deleted);
 		return sendSuccessResponse(c, {
 			message: "My courses fetched successfully",
 			data,
@@ -67,7 +84,8 @@ export class CourseController {
 
 	get = async (c: Context) => {
 		const idOrSlug = c.req.param("idOrSlug") as string;
-		const data = await this.service.getCourse(idOrSlug);
+		const authData = c.get("authData");
+		const data = await this.service.getCourse(idOrSlug, authData);
 		return sendSuccessResponse(c, {
 			message: "Course fetched successfully",
 			data,
@@ -105,12 +123,43 @@ export class CourseController {
 		});
 	};
 
+	/** @info - Move a course to another community. Separate from `update` because
+	 * the update allowlist strips communityId (mass-assignment), so the one column
+	 * that decides which community the course belongs to gets its own contract. */
+	moveCommunity = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = c.req.param("id");
+		const body = (await c.req.json()) as { communityId?: unknown };
+		const data = await this.service.moveCourseCommunity(
+			authData,
+			id as unknown as number,
+			Number(body?.communityId),
+		);
+		return sendSuccessResponse(c, {
+			message: "Course moved successfully",
+			data,
+		});
+	};
+
 	delete = async (c: Context) => {
 		const authData = c.get("authData");
 		const id = c.req.param("id");
 		await this.service.deleteCourse(authData, id as unknown as number);
 		return sendSuccessResponse(c, {
 			message: "Course deleted successfully",
+		});
+	};
+
+	restore = async (c: Context) => {
+		const authData = c.get("authData");
+		const id = c.req.param("id");
+		const data = await this.service.restoreCourse(
+			authData,
+			id as unknown as number,
+		);
+		return sendSuccessResponse(c, {
+			message: "Course restored successfully",
+			data,
 		});
 	};
 
@@ -136,7 +185,11 @@ export class CourseController {
 
 	listModules = async (c: Context) => {
 		const courseId = c.req.param("courseId");
-		const data = await this.service.listModules(courseId as unknown as number);
+		const authData = c.get("authData");
+		const data = await this.service.listModules(
+			courseId as unknown as number,
+			authData,
+		);
 		return sendSuccessResponse(c, {
 			message: "Modules fetched successfully",
 			data,
@@ -188,7 +241,11 @@ export class CourseController {
 
 	listLessons = async (c: Context) => {
 		const moduleId = c.req.param("moduleId");
-		const data = await this.service.listLessons(moduleId as unknown as number);
+		const authData = c.get("authData");
+		const data = await this.service.listLessons(
+			moduleId as unknown as number,
+			authData,
+		);
 		return sendSuccessResponse(c, {
 			message: "Lessons fetched successfully",
 			data,

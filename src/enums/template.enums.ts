@@ -8,6 +8,7 @@ export enum EmailTemplates {
 	CERTIFICATE_ISSUED = "certificate-issued",
 	COMMUNITY_INVITE = "community-invite",
 	ASSIGNMENT_GRADED = "assignment-graded",
+	WITHDRAWAL_PROCESSED = "withdrawal-processed",
 }
 
 export enum Templates {

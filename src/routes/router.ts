@@ -52,7 +52,7 @@ router.route("/modules", moduleRouter);
 router.route("/quiz", quizRouter);
 router.route("/submissions", submissionRouter);
 router.route("/test", testRouter);
-router.route("/lessons", liveRouter);
+router.route("/live", liveRouter);
 router.route("/calendar", calendarRouter);
 router.route("/payment", paymentRouter);
 router.route("/notifications", notificationRouter);

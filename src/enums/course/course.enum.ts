@@ -30,17 +30,12 @@ export enum LessonStatus {
 	PUBLISHED = "published",
 }
 
-/** @info - Meeting kinds for LIVE lessons. 'none' means the lesson is not
- * a scheduled meeting. Legacy rows pre-0021 are backfilled as external
- * when they carried a meeting link. */
+/** @info - API-level meeting discriminator on a lesson payload. Storage moved to
+ * live_sessions.kind in migration 0028 (a lesson points at its session through
+ * live_session_id), so this enum now describes the request/response shape only:
+ * 'none' means the lesson has no session. */
 export enum LessonMeetingType {
 	NONE = "none",
 	NATIVE = "native",
 	EXTERNAL = "external",
-}
-
-export enum LessonLiveStatus {
-	SCHEDULED = "scheduled",
-	LIVE = "live",
-	ENDED = "ended",
 }

@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { RelationalRepository } from "@/bases";
 import { getDb } from "@/db/postgres.db";
-import { LessonType, UserRole } from "@/enums";
+import { LessonMeetingType, LessonType, UserRole } from "@/enums";
 import { withPresignedUrl, withTransaction } from "@/helpers";
 import {
 	throwBadRequestError,
@@ -11,7 +11,14 @@ import {
 import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { communities } from "@/modules/communities/community.model";
+import { assertPublishTarget } from "@/modules/communities/community-publish-target";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
+import {
+	decorateLessonsWithSessions,
+	type LessonMeetingInput,
+	LiveSessionService,
+	toLiveSessionFields,
+} from "@/modules/live";
 import { users } from "@/modules/user/user.model";
 import { user_roles } from "@/modules/user/user-role.model";
 import { MeetingSchedulerService } from "@/services/meeting-scheduler.service";
@@ -29,17 +36,44 @@ import {
 	LessonRepository,
 	ModuleRepository,
 } from "./course.repository";
+import { createCourseFormSchema, updateCourseSchema } from "./course.schema";
 
-/* @info - The HTTP layer sends scheduledAt as an ISO string (zod is only
- * used as a 400 gate in this codebase - controllers re-read raw bodies).
- * Drizzle timestamp columns need a Date, so coerce at the service edge. */
-const normalizeScheduledAt = <T extends { scheduledAt?: unknown }>(
+/* @info - A lesson save carries meeting fields that are stored on the lesson's
+ * live session, not on the lesson (migration 0028 dropped the lessons columns), so
+ * they are split off before the lesson insert/update. scheduledAt arrives as an ISO
+ * string and needs a Date. */
+const splitLessonMeeting = <T extends Record<string, any>>(
 	data: T,
-): T => {
-	if (typeof data.scheduledAt === "string") {
-		return { ...data, scheduledAt: new Date(data.scheduledAt) } as T;
-	}
-	return data;
+): {
+	lessonData: Omit<T, keyof LessonMeetingInput>;
+	meeting: LessonMeetingInput;
+} => {
+	const {
+		meetingType,
+		meetingUrl,
+		scheduledAt,
+		durationMinutes,
+		...lessonData
+	} = data;
+	return {
+		lessonData: lessonData as Omit<T, keyof LessonMeetingInput>,
+		meeting: {
+			meetingType,
+			meetingUrl,
+			scheduledAt:
+				typeof scheduledAt === "string"
+					? new Date(scheduledAt)
+					: (scheduledAt ?? undefined),
+			durationMinutes,
+		},
+	};
+};
+
+/** @info - Provider meeting times arrive as strings; an unparseable one is ignored. */
+const parseMeetingDate = (value?: string): Date | undefined => {
+	if (!value) return undefined;
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
 export class CourseService {
@@ -50,6 +84,7 @@ export class CourseService {
 
 	/** @info - Services */
 	private paginationService: PaginationService<typeof courses>;
+	private liveSessions = LiveSessionService.getInstance();
 
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Course");
@@ -70,15 +105,22 @@ export class CourseService {
 
 	/** @info - Any course mutation requires the owning instructor or a
 	 * platform admin (mirrors community.service assertOwnerOrAdmin). */
-	private assertCourseOwner = (
+	private isOwnerOrAdmin = (
 		course: { instructorId: number },
 		authData?: IAuthData,
-	) => {
+	): boolean => {
 		const isOwner = Number(course.instructorId) === Number(authData?.id);
 		const isAdmin =
 			Array.isArray(authData?.roles) &&
 			(authData as any).roles.includes("admin");
-		if (!isOwner && !isAdmin) {
+		return isOwner || isAdmin;
+	};
+
+	private assertCourseOwner = (
+		course: { instructorId: number },
+		authData?: IAuthData,
+	) => {
+		if (!this.isOwnerOrAdmin(course, authData)) {
 			throwForbiddenError("You don't have permission to modify this course.");
 		}
 	};
@@ -102,14 +144,61 @@ export class CourseService {
 		return this.assertOwnedCourse(courseId as number, authData);
 	};
 
-	createCourse = async (authData: IAuthData, data: NewCourse) => {
+	/** @info - Is the requester enrolled in this course? */
+	private _isEnrolled = async (courseId: number, userId: number) => {
 		const db = getDb();
-		const slug = await this._uniqueCourseSlug(data.title, authData.id);
+		const [enr] = await db
+			.select({ id: enrollments.id })
+			.from(enrollments)
+			.where(
+				and(eq(enrollments.courseId, courseId), eq(enrollments.userId, userId)),
+			)
+			.limit(1);
+		return !!enr;
+	};
+
+	/** @info - Read-gate predicate: published OR enrolled OR owner/admin. */
+	private _canReadCourse = async (
+		course: { id: number; instructorId: number; status: string },
+		authData?: IAuthData,
+	): Promise<boolean> => {
+		if (course.status === "published") return true;
+		const isOwner = Number(course.instructorId) === Number(authData?.id);
+		const isAdmin =
+			Array.isArray(authData?.roles) &&
+			(authData as any).roles.includes("admin");
+		if (isOwner || isAdmin) return true;
+		if (authData?.id) {
+			return this._isEnrolled(course.id, Number(authData.id));
+		}
+		return false;
+	};
+
+	createCourse = async (authData: IAuthData, data: NewCourse) => {
+		/* @info - Allowlist: createCourseFormSchema is the create contract. The
+		 * controller used to spread the raw form into the insert, so any key
+		 * matching a column name (status, instructorId, enrollmentCount, …) was
+		 * written — the same mass-assignment class the PATCH allowlist closed.
+		 * instructorId and slug are assigned here, never taken from the payload. */
+		const parsed = createCourseFormSchema.safeParse(data);
+		if (!parsed.success) {
+			const issue = parsed.error.issues[0];
+			throwBadRequestError(issue?.message ?? "Invalid course payload.");
+		}
+		const allowed = parsed.data as Record<string, any>;
+
+		/* @info - Publish target: the create contract declares communityId, but the
+		 * form alone cannot prove the author may publish into that community — the
+		 * create UI only ever offers scope=mine. Enforce the same rule here so the
+		 * API cannot be handed a community the author has no standing in. */
+		await assertPublishTarget(authData, Number(allowed.communityId));
+
+		const slug = await this._uniqueCourseSlug(allowed.title, authData.id);
 
 		return withTransaction(async (tx) => {
 			const courseRepo = new RelationalRepository(courses, tx);
 			const course = await courseRepo.create({
-				...data,
+				...allowed,
 				slug,
 				instructorId: authData.id,
 			} as any);
@@ -118,13 +207,13 @@ export class CourseService {
 			await tx
 				.update(communities)
 				.set({ courseCount: sql`${communities.courseCount} + 1` })
-				.where(eq(communities.id, data.communityId!));
+				.where(eq(communities.id, allowed.communityId!));
 
 			return course;
 		});
 	};
 
-	getCourse = async (idOrSlug: number | string) => {
+	getCourse = async (idOrSlug: number | string, authData?: IAuthData) => {
 		const db = getDb();
 		const isNumericId =
 			typeof idOrSlug === "number" || /^\d+$/.test(String(idOrSlug));
@@ -150,9 +239,11 @@ export class CourseService {
 
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
 
-		/* @info - Include the community so the UI can label + gate private
-		 * courses without a second lookup */
-		const enriched = { ...course } as Record<string, unknown>;
+		/* @info - Read gate: content is visible only to published courses,
+		 * enrolled students, the owning instructor, or admins. Everyone else
+		 * (authenticated strangers) gets a landing payload without content. */
+		const canRead = await this._canReadCourse(course, authData);
+
 		/* @info - Instructor profile for the detail page (name + avatar) */
 		const [instructorUser] = await db
 			.select({
@@ -163,7 +254,7 @@ export class CourseService {
 			.from(users)
 			.where(eq(users.id, course!.instructorId))
 			.limit(1);
-		enriched.instructor = instructorUser
+		const instructor = instructorUser
 			? {
 					id: course!.instructorId,
 					name: `${instructorUser.firstName ?? ""} ${instructorUser.lastName ?? ""}`.trim(),
@@ -175,6 +266,30 @@ export class CourseService {
 						: null,
 				}
 			: null;
+
+		if (!canRead) {
+			/* @info - Landing payload: hero fields only. No description, price,
+			 * status, community, or enrollment data leaks to strangers. */
+			return withPresignedUrl(
+				{
+					id: course!.id,
+					title: course!.title,
+					subtitle: course!.subtitle ?? null,
+					coverImageUrl: course!.coverImageUrl ?? null,
+					instructor,
+					access: "landing",
+				},
+				"coverImageUrl",
+			);
+		}
+
+		/* @info - Full payload (published OR enrolled OR owner/admin). Include
+		 * the community so the UI can label + gate private courses. */
+		const enriched = {
+			...course,
+			instructor,
+			access: "full",
+		} as Record<string, unknown>;
 		if (course!.communityId != null) {
 			const [comm] = await db
 				.select({ name: communities.name, slug: communities.slug })
@@ -238,7 +353,7 @@ export class CourseService {
 	/** @info Returns courses the authenticated user is enrolled in */
 	/** @info - Returns courses for the authenticated user:
 	 *          instructor → courses they created; student → courses they enrolled in */
-	listMine = async (authData: IAuthData) => {
+	listMine = async (authData: IAuthData, deleted = false) => {
 		const db = getDb();
 
 		const selectFields = {
@@ -285,16 +400,18 @@ export class CourseService {
 
 		let rows: any[];
 		if (isInstructor) {
-			/* Instructor: courses they created */
+			/* Instructor: courses they created (deleted=true → trash view) */
+			const deletedFilter = deleted
+				? isNotNull(courses.deletedAt)
+				: isNull(courses.deletedAt);
 			rows = await db
 				.select(selectFields)
 				.from(courses)
-				.where(
-					and(eq(courses.instructorId, authData.id), isNull(courses.deletedAt)),
-				)
+				.where(and(eq(courses.instructorId, authData.id), deletedFilter))
 				.orderBy(desc(courses.updatedAt));
 		} else {
-			/* Student: enrolled courses */
+			/* Student: enrolled courses (trash is owner-only — always live rows) */
+			if (deleted) return [];
 			rows = await db
 				.select(selectFields)
 				.from(courses)
@@ -313,8 +430,22 @@ export class CourseService {
 		id: number,
 		data: Partial<NewCourse>,
 	) => {
-		const course = await this.coursesRepo.findById(id);
+		const course = await this.coursesRepo.findById(id, {
+			includeDeleted: true,
+		});
 		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Soft-deleted rows must be restored before any edit. Owners/
+		 * admins get a 400 for ANY payload (not just status changes);
+		 * non-owners get 404 so the existence of deleted courses is never
+		 * disclosed. The normal non-deleted non-owner path keeps its 403. */
+		if ((course as any).deletedAt) {
+			if (!this.isOwnerOrAdmin(course as any, authData)) {
+				throwNotFoundError(CourseMessages.NOT_FOUND);
+			}
+			throwBadRequestError("Restore this course before changing its status.");
+		}
+
 		this.assertCourseOwner(course as any, authData);
 
 		// Coerce FormData string values to proper types
@@ -344,9 +475,104 @@ export class CourseService {
 				coerced.monthlyPrice === "" ? null : Number(coerced.monthlyPrice);
 		if (coerced.price === "") coerced.price = 0;
 
-		const updated = await this.coursesRepo.update(id, coerced as any);
+		/* @info - Allowlist: only whitelisted fields reach the DB. deletedAt /
+		 * instructorId / communityId / id are stripped by the schema, closing
+		 * the previous mass-assignment hole. */
+		const parsed = updateCourseSchema.safeParse(coerced);
+		if (!parsed.success) {
+			const issue = parsed.error.issues[0];
+			throwBadRequestError(issue?.message ?? "Invalid course update payload.");
+		}
+		const allowed = parsed.data as Record<string, any>;
+
+		/* @info - Status transition matrix (owner/admin already asserted; the
+		 * deletedAt case threw above, before any payload was parsed). */
+		if (allowed.status !== undefined) {
+			const from = (course as any).status;
+			const to = allowed.status;
+			if (from === "archived" && to === "published") {
+				throwBadRequestError(
+					"Republish from Drafts: unarchive first, then publish.",
+				);
+			}
+			if (to === "archived" && from === "published") {
+				this.log.info(`Course ${id} archived`);
+			}
+			if (to === "draft" && from === "archived") {
+				this.log.info(`Course ${id} unarchived to draft`);
+			}
+		}
+
+		const updated = await this.coursesRepo.update(id, allowed as any);
 		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
 
+		return withPresignedUrl(updated!, "coverImageUrl");
+	};
+
+	/**
+	 * @info - Moves a course to another community. This is a dedicated endpoint
+	 * because `updateCourseSchema` strips communityId on purpose (the
+	 * mass-assignment hole), and it changes exactly that one column: instructor,
+	 * status, curriculum and enrolments are untouched, so a move re-labels where
+	 * the course is discovered without touching anyone's access to it.
+	 */
+	moveCourseCommunity = async (
+		authData: IAuthData,
+		courseId: number,
+		communityId: number,
+	) => {
+		/* @info - assertOwnedCourse is the takeover guard: 404 for an unknown or
+		 * soft-deleted course, and 403 for anyone who does not own it — which
+		 * includes an admin of the community the course is leaving. */
+		const course = (await this.assertOwnedCourse(
+			Number(courseId),
+			authData,
+		)) as { id: number; communityId: number | null; instructorId: number };
+
+		/* @info - The target must be a community the caller may publish into (the
+		 * same rule the create path and the scope=mine list use). Validation of the id
+		 * itself lives in that assertion. */
+		await assertPublishTarget(authData, Number(communityId));
+
+		const targetCommunityId = Number(communityId);
+		const fromCommunityId =
+			course.communityId == null ? null : Number(course.communityId);
+
+		/* @info - Idempotent: the course already lives there, so the response is
+		 * the unchanged course and nothing is written. */
+		if (fromCommunityId === targetCommunityId) {
+			return withPresignedUrl(course as any, "coverImageUrl");
+		}
+
+		await withTransaction(async (tx) => {
+			await tx
+				.update(courses)
+				.set({ communityId: targetCommunityId } as any)
+				.where(eq(courses.id, Number(courseId)));
+
+			/* @info - communities.course_count is displayed on the community pages,
+			 * so it has to follow the move or both communities report a wrong total.
+			 * The decrement is floored at 0 exactly like deleteCourse's. */
+			if (fromCommunityId != null) {
+				await tx
+					.update(communities)
+					.set({
+						courseCount: sql`GREATEST(${communities.courseCount} - 1, 0)`,
+					})
+					.where(eq(communities.id, fromCommunityId));
+			}
+			await tx
+				.update(communities)
+				.set({ courseCount: sql`${communities.courseCount} + 1` })
+				.where(eq(communities.id, targetCommunityId));
+		});
+
+		const updated = await this.coursesRepo.findById(Number(courseId));
+		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		this.log.info(
+			`Course ${courseId} moved from community ${fromCommunityId} to ${targetCommunityId}`,
+		);
 		return withPresignedUrl(updated!, "coverImageUrl");
 	};
 
@@ -366,6 +592,34 @@ export class CourseService {
 			.where(eq(communities.id, course!.communityId));
 
 		this.log.info(`Course ${id} soft-deleted`);
+	};
+
+	restoreCourse = async (authData: IAuthData, id: number) => {
+		const course = await this.coursesRepo.findById(id, {
+			includeDeleted: true,
+		});
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+		this.assertCourseOwner(course as any, authData);
+
+		/* @info - Restore ALWAYS lands in draft, regardless of the status the
+		 * course was frozen at when deleted. Re-publish is a separate click. */
+		const updated = await this.coursesRepo.update(
+			id,
+			{ deletedAt: null, status: "draft" } as any,
+			{ includeDeleted: true },
+		);
+		if (!updated) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Symmetric with delete's decrement: a restored row re-enters
+		 * the non-deleted set. */
+		const db = getDb();
+		await db
+			.update(communities)
+			.set({ courseCount: sql`${communities.courseCount} + 1` })
+			.where(eq(communities.id, course!.communityId));
+
+		this.log.info(`Course ${id} restored to draft`);
+		return withPresignedUrl(updated!, "coverImageUrl");
 	};
 
 	private _slugify = (title: string, instructorId: number): string => {
@@ -419,8 +673,23 @@ export class CourseService {
 		return this.modulesRepo.create({ ...data, courseId } as any);
 	};
 
-	listModules = async (courseId: number) => {
+	listModules = async (courseId: number, authData?: IAuthData) => {
 		const db = getDb();
+		const [course] = await db
+			.select({
+				id: courses.id,
+				instructorId: courses.instructorId,
+				status: courses.status,
+			})
+			.from(courses)
+			.where(and(eq(courses.id, courseId), isNull(courses.deletedAt)))
+			.limit(1);
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Read gate: strangers on draft/archived get no curriculum. */
+		const canRead = await this._canReadCourse(course as any, authData);
+		if (!canRead) return [];
+
 		return db
 			.select()
 			.from(modules)
@@ -474,16 +743,22 @@ export class CourseService {
 	createLesson = async (
 		authData: IAuthData,
 		moduleId: number,
-		data: NewLesson,
+		data: NewLesson & LessonMeetingInput,
 	) => {
 		const mod = await this.modulesRepo.findById(moduleId);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
 		this.assertDriveLink(data.type, data.driveUrl);
+		const { lessonData, meeting } = splitLessonMeeting(data);
 		const lesson = await this.lessonsRepo.create({
-			...normalizeScheduledAt(data),
+			...lessonData,
 			moduleId,
 		} as any);
+		/* @info - The meeting lives on the lesson's live session, not on the lesson */
+		const session = await this.liveSessions.syncLessonMeeting(
+			lesson.id,
+			meeting,
+		);
 		/* @info - Publish immediately? Index it for the AI tutor */
 		if (lesson.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
@@ -491,22 +766,49 @@ export class CourseService {
 			);
 			await enqueueLessonForIndexing(lesson.id);
 		}
-		return lesson;
+		return { ...lesson, ...toLiveSessionFields(session) };
 	};
 
-	listLessons = async (moduleId: number) => {
+	listLessons = async (moduleId: number, authData?: IAuthData) => {
 		const db = getDb();
-		return db
+		const [mod] = await db
+			.select({ courseId: modules.courseId })
+			.from(modules)
+			.where(eq(modules.id, moduleId))
+			.limit(1);
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+
+		const [course] = await db
+			.select({
+				id: courses.id,
+				instructorId: courses.instructorId,
+				status: courses.status,
+			})
+			.from(courses)
+			.where(
+				and(eq(courses.id, Number(mod!.courseId)), isNull(courses.deletedAt)),
+			)
+			.limit(1);
+		if (!course) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+		/* @info - Read gate: strangers on draft/archived get no curriculum. */
+		const canRead = await this._canReadCourse(course as any, authData);
+		if (!canRead) return [];
+
+		const rows = await db
 			.select()
 			.from(lessons)
 			.where(eq(lessons.moduleId, moduleId))
 			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
+
+		/* @info - Meeting fields on a lesson payload come from its session now */
+		return decorateLessonsWithSessions(rows);
 	};
 
 	updateLesson = async (
 		authData: IAuthData,
 		id: number,
-		data: Partial<NewLesson>,
+		data: Partial<NewLesson> & LessonMeetingInput,
 	) => {
 		const db = getDb();
 		const [existing] = await db
@@ -518,34 +820,35 @@ export class CourseService {
 		const mod = await this.modulesRepo.findById(Number(existing!.moduleId));
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
-		data = normalizeScheduledAt(data);
+		const { lessonData, meeting } = splitLessonMeeting(data);
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
 		this.assertDriveLink(
-			data.type ?? existing!.type,
-			data.driveUrl ?? existing!.driveUrl,
+			lessonData.type ?? existing!.type,
+			lessonData.driveUrl ?? existing!.driveUrl,
 		);
-		/* @info - Re-arming: editing the time of an ended session brings it
-		 * back to the calendar (ended sessions are hidden by design, which
-		 * made reschedules look like they 'didn't commit'). */
-		if (
-			data.scheduledAt &&
-			existing!.liveStatus === "ended" &&
-			existing!.meetingType &&
-			existing!.meetingType !== "none"
-		) {
-			data = { ...data, liveStatus: "scheduled" };
-		}
-		const lesson = await this.lessonsRepo.update(id, data as any);
+		const lessonFields =
+			Object.keys(lessonData).length > 0 ? lessonData : null;
+		/* @info - Meeting fields (schedule, url, kind, clearing) live on the session now, so a
+		 * save that carries only those has no lesson columns to write: skip the row update
+		 * instead of handing Postgres an empty SET ("No values to set" -> 500). */
+		const lesson = lessonFields
+			? await this.lessonsRepo.update(id, lessonFields as any)
+			: existing;
+		/* @info - Meeting edits (schedule, url, kind, clearing) land on the session;
+		 * syncLessonMeeting also re-arms an ended session when it is rescheduled, which
+		 * is what made a reschedule look like it never committed. */
+		const session = await this.liveSessions.syncLessonMeeting(id, meeting);
 		/* @info - A published lesson that was edited gets re-embedded so the
 		 * tutor never serves stale content */
-		const merged = { ...existing, ...data };
-		if (lesson && merged.status === "published") {
+		const merged = { ...existing, ...lessonData };
+		if (lessonFields && merged.status === "published") {
 			const { enqueueLessonForIndexing } = await import(
 				"@/services/queues/lesson-chunk.queue.service"
 			);
 			await enqueueLessonForIndexing(id);
 		}
-		return lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
+		const updated = lesson ?? throwNotFoundError(LessonMessages.NOT_FOUND);
+		return { ...updated, ...toLiveSessionFields(session) };
 	};
 
 	deleteLesson = async (authData: IAuthData, id: number): Promise<void> => {
@@ -556,8 +859,14 @@ export class CourseService {
 		);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
+		/* @info - Read the session link before the row goes: lessons have no
+		 * deleted_at, so softDelete hard-deletes and the link goes with it. Without
+		 * this the session row would keep rendering in the calendar and stay
+		 * reachable at /live/s/<id> with its lesson gone. */
+		const sessionId = ((lesson as any).liveSessionId as number | null) ?? null;
 		const deleted = await this.lessonsRepo.softDelete(id);
 		if (!deleted) throwNotFoundError(LessonMessages.NOT_FOUND);
+		if (sessionId) await this.liveSessions.discardSession(sessionId);
 		this.log.info(`Lesson ${id} soft-deleted`);
 	};
 
@@ -598,11 +907,14 @@ export class CourseService {
 			autoRecord: options.autoRecord,
 		});
 
-		/* Store the meeting link on the lesson */
-		await this.lessonsRepo.update(lessonId, {
-			liveMeetingLink: result.joinLink,
-			liveMeetingDate: options.startTime,
-		} as any);
+		/* @info - The generated link is an external meeting under the session model:
+		 * the legacy lessons columns it used to write were dropped in migration 0028. */
+		await this.liveSessions.syncLessonMeeting(lessonId, {
+			meetingType: LessonMeetingType.EXTERNAL,
+			meetingUrl: result.joinLink,
+			scheduledAt: parseMeetingDate(options.startTime),
+			durationMinutes: options.duration,
+		});
 
 		return result;
 	};

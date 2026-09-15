@@ -19,6 +19,7 @@ export enum TableNames {
 	COURSES = "courses",
 	MODULES = "modules",
 	LESSONS = "lessons",
+	LIVE_SESSIONS = "live_sessions",
 	QUIZ_QUESTIONS = "quiz_questions",
 	QUIZ_ATTEMPTS = "quiz_attempts",
 	ASSIGNMENT_SUBMISSIONS = "assignment_submissions",

@@ -292,9 +292,22 @@ export class CommunityMemberService {
 		if (member!.memberRole === "owner")
 			throwForbiddenError("The owner cannot be removed");
 
-		await db
-			.delete(communityMembers)
-			.where(eq(communityMembers.id, member!.id));
+		/* @info - Membership is the source of truth for the community chat: losing
+		 *         it hides the chat. Both halves land in one transaction — a failure
+		 *         between them would leave the membership gone but the chat visible.
+		 *         The participant row survives (left_at set) so a rejoin reactivates
+		 *         the same row with its history intact. */
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(communityMembers)
+				.where(eq(communityMembers.id, member!.id));
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				targetUserId,
+				true,
+				tx,
+			);
+		});
 	};
 
 	approveMember = async (
@@ -319,11 +332,25 @@ export class CommunityMemberService {
 
 		if (!member) throwNotFoundError("Pending member not found");
 
-		const [updated] = await db
-			.update(communityMembers)
-			.set({ status: "active" })
-			.where(eq(communityMembers.id, member!.id))
-			.returning();
+		/* @info - Approval and chat access are one change, the mirror of removal: a
+		 *         failure between them must not activate a member who still cannot
+		 *         see the chat (nor restore a chat for an approval that never landed).
+		 *         Approving grants the chat to someone who was removed earlier and
+		 *         applied again, reactivating their existing participant row. */
+		const updated = await db.transaction(async (tx) => {
+			const [row] = await tx
+				.update(communityMembers)
+				.set({ status: "active" })
+				.where(eq(communityMembers.id, member!.id))
+				.returning();
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				targetUserId,
+				false,
+				tx,
+			);
+			return row;
+		});
 
 		this.notifyCommunityChat(community.id, community.name, targetUserId).catch(
 			() => {},
@@ -579,16 +606,34 @@ export class CommunityMemberService {
 				? "active"
 				: "pending";
 
-		const [member] = await db
-			.insert(communityMembers)
-			.values({
-				communityId: community.id,
-				userId,
-				role: userRole,
-				memberRole: "member",
-				status,
-			} as any)
-			.returning();
+		/* @info - Joining and chat visibility are one change, the mirror of leaving:
+		 *         a failure between them must not leave a member without their chat
+		 *         (nor a chat restored for a membership that never landed). Rejoining
+		 *         restores the chat they hid earlier — same participant row, same
+		 *         history. If the chat does not exist yet, the ensure below creates it
+		 *         with them visible anyway. */
+		const member = await db.transaction(async (tx) => {
+			const [inserted] = await tx
+				.insert(communityMembers)
+				.values({
+					communityId: community.id,
+					userId,
+					role: userRole,
+					memberRole: "member",
+					status,
+				} as any)
+				.returning();
+
+			if (status === "active") {
+				await MessagingRepository.getInstance().setCommunityChatHidden(
+					community.id,
+					userId,
+					false,
+					tx,
+				);
+			}
+			return inserted;
+		});
 
 		/* Auto-provision the community chat + a "joined" system message (best-effort) */
 		if (status === "active") {
@@ -643,8 +688,19 @@ export class CommunityMemberService {
 			);
 		}
 
-		await db
-			.delete(communityMembers)
-			.where(eq(communityMembers.id, member!.id));
+		/* @info - Same rule as removal: no membership, no chat. Both halves land in
+		 *         one transaction. The participant row stays behind so rejoining
+		 *         brings the same chat back. */
+		await db.transaction(async (tx) => {
+			await tx
+				.delete(communityMembers)
+				.where(eq(communityMembers.id, member!.id));
+			await MessagingRepository.getInstance().setCommunityChatHidden(
+				community.id,
+				userId,
+				true,
+				tx,
+			);
+		});
 	};
 }

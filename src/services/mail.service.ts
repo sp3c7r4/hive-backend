@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -47,19 +47,26 @@ export class EmailService {
 	}
 
 	private async getTemplate(template: string): Promise<string> {
-		/* @info - dist/emails on prod (src isn't shipped), src/emails in dev */
+		/* @info - dist/emails on prod (src isn't shipped), src/emails in dev.
+		 *         Resolve per-file, not per-directory: a stale dist/ in dev
+		 *         otherwise hides templates added since the last build. */
 		const distDir = path.join(process.cwd(), "dist", "emails");
 		const srcDir = path.join(process.cwd(), "src", "emails");
-		const templatesDir = existsSync(distDir) ? distDir : srcDir;
-		const pathName = path.join(templatesDir, template, "html.hbs");
+		const pathName = [
+			path.join(distDir, template, "html.hbs"),
+			path.join(srcDir, template, "html.hbs"),
+		].find((candidate) => existsSync(candidate));
 
-		if (!pathName.startsWith(templatesDir + path.sep)) {
+		if (!pathName) {
+			throw new Error(`Email template ${template} not found.`);
+		}
+		if (
+			!pathName.startsWith(distDir + path.sep) &&
+			!pathName.startsWith(srcDir + path.sep)
+		) {
 			throw new Error(`Invalid template name: ${template}`);
 		}
 
-		await access(pathName).catch(() => {
-			throw new Error(`Email template ${template} not found.`);
-		});
 		return await readFile(pathName, "utf-8");
 	}
 

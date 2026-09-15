@@ -66,17 +66,25 @@ export class PaymentController {
 
 		/* Server-side price truth: exactly one of courseId | communityId,
 		 * and the requested amount must equal the stored price (kobo). */
-		let courseRow: { price: number | null } | undefined;
+		let courseRow: { price: number | null; status: string; deletedAt: Date | null } | undefined;
 		let communityRow: { price: number | null } | undefined;
 		if (type === "enrollment" && courseId) {
 			[courseRow] = await db
-				.select({ price: courses.price })
+				.select({
+					price: courses.price,
+					status: courses.status,
+					deletedAt: courses.deletedAt,
+				})
 				.from(courses)
 				.where(eq(courses.id, Number(courseId)))
 				.limit(1);
 			if (!courseRow) throwNotFoundError("Course not found");
+			/* @info - Checkout gate: no new payments can start for a course
+			 * that is draft/archived or already soft-deleted. */
+			if (courseRow!.deletedAt || courseRow!.status !== "published")
+				throwBadRequestError("This course isn't currently accepting enrollments.");
 			if (!courseRow!.price || courseRow!.price <= 0)
-				throwBadRequestError("This course is free — no payment needed");
+				throwBadRequestError("This course is free, no payment needed");
 			if (amount !== courseRow!.price)
 				throwBadRequestError("Amount does not match the course price");
 		} else if (type === "community" && communityId) {
@@ -87,7 +95,7 @@ export class PaymentController {
 				.limit(1);
 			if (!communityRow) throwNotFoundError("Community not found");
 			if (!communityRow!.price || communityRow!.price <= 0)
-				throwBadRequestError("This community is free — no payment needed");
+				throwBadRequestError("This community is free, no payment needed");
 			if (amount !== communityRow!.price)
 				throwBadRequestError("Amount does not match the community price");
 		} else {

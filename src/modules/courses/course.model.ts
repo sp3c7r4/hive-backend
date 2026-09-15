@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
 	boolean,
 	index,
@@ -7,7 +7,6 @@ import {
 	pgEnum,
 	pgTable,
 	text,
-	timestamp,
 	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
@@ -15,8 +14,6 @@ import {
 	CourseDifficulty,
 	CourseStatus,
 	CourseVisibility,
-	LessonLiveStatus,
-	LessonMeetingType,
 	LessonStatus,
 	LessonType,
 	TableNames,
@@ -35,6 +32,7 @@ import {
 	lessonProgress,
 } from "@/modules/enrollments/enrollment.model";
 import { reviews } from "@/modules/reviews/review.model";
+import { liveSessions } from "@/modules/live/live-session.model";
 import { users } from "@/modules/user/user.model";
 
 export const courseDifficultyEnum = pgEnum(
@@ -56,14 +54,6 @@ export const lessonTypeEnum = pgEnum(
 export const lessonStatusEnum = pgEnum(
 	"lesson_status",
 	Object.values(LessonStatus) as [string, ...string[]],
-);
-export const lessonMeetingTypeEnum = pgEnum(
-	"lesson_meeting_type",
-	Object.values(LessonMeetingType) as [string, ...string[]],
-);
-export const lessonLiveStatusEnum = pgEnum(
-	"lesson_live_status",
-	Object.values(LessonLiveStatus) as [string, ...string[]],
 );
 
 /** @info - A course belongs to one community and is owned by one user (instructor) */
@@ -146,24 +136,18 @@ export const lessons = pgTable(
 		freePreview: boolean("free_preview").default(false),
 		randomizeQuestions: boolean("randomize_questions").default(false).notNull(),
 		status: lessonStatusEnum("status").default("draft").notNull(),
-		/* @info - Live-session scheduling (spec 19). meeting_type discriminates
-		 * LIVE lessons: 'none' = not a meeting, 'native' = LiveKit room,
-		 * 'external' = bring-your-own meeting link. Legacy fields below
-		 * (liveMeetingLink/liveMeetingDate) are kept until the frontend
-		 * migrates to meetingUrl/scheduledAt; dropped in a later migration. */
-		meetingType: lessonMeetingTypeEnum("meeting_type")
-			.default("none")
-			.notNull(),
-		meetingUrl: text("meeting_url"),
-		scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
-		liveStatus: lessonLiveStatusEnum("live_status")
-			.default("scheduled")
-			.notNull(),
-		durationMinutes: integer("duration_minutes").default(60).notNull(),
+		/* @info - A lesson that IS a live thing points at its session. The old
+		 * live columns (meeting_type/meeting_url/scheduled_at/live_status/
+		 * duration_minutes and the dead live_meeting_* pair) were dropped in
+		 * migration 0028: schedule, url and status live on the session now, and the
+		 * API still exposes them under their old names sourced from the join
+		 * (see live-session.mapper). */
+		liveSessionId: integer("live_session_id").references(
+			() => liveSessions.id,
+			{ onDelete: "set null" },
+		),
 		videoUrl: varchar("video_url", { length: 1000 }),
 		pdfUrl: varchar("pdf_url", { length: 1000 }),
-		liveMeetingLink: varchar("live_meeting_link", { length: 1000 }),
-		liveMeetingDate: varchar("live_meeting_date", { length: 255 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
 		driveUrl: varchar("drive_url", { length: 1000 }),
 		settings: jsonb("settings"),
@@ -173,7 +157,11 @@ export const lessons = pgTable(
 		index("idx_lessons_module").on(table.moduleId),
 		index("idx_lessons_type").on(table.type),
 		index("idx_lessons_status").on(table.status),
-		index("idx_lessons_scheduled_at").on(table.scheduledAt),
+		/* @info - One session per lesson; partial so the column stays free for the
+		 * many lessons that are not meetings. */
+		uniqueIndex("uq_lessons_live_session")
+			.on(table.liveSessionId)
+			.where(sql`live_session_id IS NOT NULL`),
 	],
 );
 

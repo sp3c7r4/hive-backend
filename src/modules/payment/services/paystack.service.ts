@@ -24,10 +24,22 @@ import type {
 	VerifyTransactionResult,
 } from "@/interfaces";
 import { ApiService } from "@/services/api.service";
+import { CacheService } from "@/services/cache.service";
+import { TTL } from "@/constants";
 import { PaymentGatewayService } from "./payment-gateway.service";
 import { PaymentSettlementService } from "./payment-settlement.service";
 
 const PaystackBaseUrl = "https://api.paystack.co";
+
+/** @info - NGN payout institutions (see listBanks). The list is identical for
+ * staging and prod, so the KEYS are shared rather than env-scoped. */
+const BANKS_CACHE_KEY = "payments:paystack:banks:ngn";
+const BANKS_LAST_GOOD_KEY = "payments:paystack:banks:ngn:last-good";
+
+export interface PaystackBank {
+	name: string;
+	code: string;
+}
 
 export class PaystackService extends PaymentGatewayService {
 	private static instance: PaystackService;
@@ -120,16 +132,73 @@ export class PaystackService extends PaymentGatewayService {
 
 	/* ── M3 payouts ─────────────────────────────────────────── */
 
+	/** @info - NGN payout institutions for the withdrawal picker. Paystack
+	 *         returns the whole list (≈283) in ONE call — pagination params are
+	 *         ignored there, so no page loop. Cached 24h; the last-good copy is
+	 *         written without a TTL so a cold cache during an upstream outage
+	 *         still serves a usable picker instead of an empty dropdown. */
+	listBanks = async (): Promise<PaystackBank[]> => {
+		const cache = CacheService.getInstance();
+		const cached = await cache.get<PaystackBank[]>(BANKS_CACHE_KEY);
+		if (cached?.length) return cached;
+
+		try {
+			/* @info - Literal path: PaystackPaths is a type-only import, so the
+			 *         interface cannot be read at runtime (same reason every other
+			 *         call in this file uses the literal). */
+			const res = await this.api.get<{ data: PaystackBank[] }>("/bank", {
+				params: { country: "nigeria", currency: "NGN" },
+			});
+			const banks = this.normaliseBanks(res.data?.data ?? []);
+			if (banks.length) {
+				await cache.set(BANKS_CACHE_KEY, banks, TTL.IN_24_HOURS);
+				await cache
+					.getRedisClient()
+					.set(BANKS_LAST_GOOD_KEY, JSON.stringify(banks));
+			}
+			return banks;
+		} catch (e) {
+			this.log.error("Could not fetch Paystack banks", { error: e });
+			return (await cache.get<PaystackBank[]>(BANKS_LAST_GOOD_KEY)) ?? [];
+		}
+	};
+
+	/** @info - Dedupe by code (Paystack lists a few institutions twice) and sort
+	 *         by name so the picker's order is stable between calls. */
+	private normaliseBanks = (banks: PaystackBank[]): PaystackBank[] => {
+		const byCode = new Map<string, PaystackBank>();
+		for (const bank of banks) {
+			const code = String(bank?.code ?? "").trim();
+			const name = String(bank?.name ?? "").trim();
+			if (!code || !name) continue;
+			if (!byCode.has(code)) byCode.set(code, { name, code });
+		}
+		return [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name));
+	};
+
+	/** @info - Bank name → code. Requires an EXACT (case-insensitive) match
+	 *         first: the old first-substring match silently picked the wrong
+	 *         institution when one name contains another (e.g. "Access Bank"
+	 *         inside "Access Bank (Diamond)"), which would send a transfer to a
+	 *         different bank than the instructor chose. A UNIQUE substring is
+	 *         still accepted for legacy hand-typed names; ambiguous ones fail. */
 	override resolveBankCode = async (bankName: string): Promise<string | null> => {
 		try {
-			const res = await this.api.get<{ data: { code: string; name: string }[] }>(
-				"/bank",
-				{ params: { perPage: 100 } },
-			);
-			const bank = (res.data?.data ?? []).find((b: any) =>
-				String(b.name ?? "").toLowerCase().includes(bankName.toLowerCase()),
-			);
-			return bank?.code ?? null;
+			const banks = await this.listBanks();
+			if (!banks.length) return null;
+
+			const needle = bankName.trim().toLowerCase();
+			const exact = banks.find((b) => b.name.toLowerCase() === needle);
+			if (exact) return exact.code;
+
+			const partial = banks.filter((b) => b.name.toLowerCase().includes(needle));
+			if (partial.length === 1) return partial[0]!.code;
+
+			this.log.warn("Bank name did not resolve to exactly one institution", {
+				bankName,
+				matches: partial.length,
+			});
+			return null;
 		} catch (e) {
 			this.log.error("Could not resolve bank code", { error: e, bankName });
 			return null;
