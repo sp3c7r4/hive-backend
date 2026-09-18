@@ -3,10 +3,12 @@
  *
  * Groundable types: TEXT (rich description), QUIZ (questions + instructor
  * explanations), ASSIGNMENT (description + rubric), PDF (parsed via unpdf),
- * GOOGLE_DRIVE (conditional: public Google Docs text export only).
+ * PPTX (slide XML read straight out of the OOXML zip), GOOGLE_DRIVE
+ * (conditional: public Google Docs text export only).
  * Returns null for lessons with nothing extractable.
  */
 import { extractText, getDocumentProxy } from "unpdf";
+import AdmZip from "adm-zip";
 import type { Lesson } from "@/modules/courses/course.model";
 import type { QuizQuestion } from "@/modules/assessments/assessment.model";
 import { LessonType } from "@/enums";
@@ -53,6 +55,76 @@ export async function fetchPdfText(url: string): Promise<string | null> {
 		const { text } = await extractText(pdf, { mergePages: true });
 		return text.trim() || null;
 	} catch {
+		return null;
+	}
+}
+
+/** @info - "slide12.xml" -> 12. Lexical order would put slide10 before slide2. */
+function slideNumber(entryName: string): number {
+	return Number(entryName.match(/slide(\d+)\.xml$/)?.[1] ?? 0);
+}
+
+/** @info - XML character references. `&amp;` is decoded LAST so an escaped
+ * entity like &amp;lt; does not become a second round of markup. */
+function decodeXmlEntities(value: string): string {
+	return value
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) =>
+			String.fromCodePoint(Number.parseInt(hex, 16)),
+		)
+		.replace(/&#(\d+);/g, (_, dec: string) =>
+			String.fromCodePoint(Number(dec)),
+		)
+		.replace(/&amp;/g, "&");
+}
+
+/** @info - One paragraph's worth of runs. Every visible run of slide text sits
+ * in an <a:t> element; splitting on </a:p> first keeps the author's paragraph
+ * breaks instead of flattening the slide into one line. */
+function extractSlideText(slideXml: string): string {
+	return slideXml
+		.split(/<\/a:p>/)
+		.map((paragraph) =>
+			[...paragraph.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
+				.map((match) => decodeXmlEntities(match[1] ?? ""))
+				.join("")
+				.trim(),
+		)
+		.filter(Boolean)
+		.join("\n");
+}
+
+export async function extractPptxText(url: string): Promise<string | null> {
+	const buf = await fetchBuffer(url);
+	if (buf === null) return null;
+	return extractPptxFromBuffer(buf);
+}
+
+/**
+ * @info - Slides have no text layer to read, so the OOXML is parsed directly: a
+ * .pptx is a ZIP whose slide text lives in <a:t> elements of
+ * ppt/slides/slideN.xml. Pure bytes-in/text-out so it is testable without a
+ * network or a database; the fetch wrapper above is the only I/O.
+ * @returns Slide text in numeric slide order, or null if nothing is readable.
+ */
+export function extractPptxFromBuffer(buf: Uint8Array): string | null {
+	try {
+		const zip = new AdmZip(Buffer.from(buf));
+		const text = zip
+			.getEntries()
+			.filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+			.sort((a, b) => slideNumber(a.entryName) - slideNumber(b.entryName))
+			.map((entry) => extractSlideText(entry.getData().toString("utf-8")))
+			.filter(Boolean)
+			.join("\n\n")
+			.trim();
+		return text || null;
+	} catch {
+		/* @info - Encrypted, corrupt, or not actually a zip. The lesson simply is
+		 * not indexed; the student's viewer reports the same file to them. */
 		return null;
 	}
 }
@@ -110,6 +182,10 @@ export async function extractLessonText(
 		case LessonType.PDF: {
 			if (!lesson.pdfUrl) return null;
 			return fetchPdfText(lesson.pdfUrl);
+		}
+		case LessonType.PPTX: {
+			if (!lesson.pptxUrl) return null;
+			return extractPptxText(lesson.pptxUrl);
 		}
 		case LessonType.GOOGLE_DRIVE: {
 			if (!lesson.driveUrl) return null;

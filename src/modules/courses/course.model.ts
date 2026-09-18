@@ -148,6 +148,10 @@ export const lessons = pgTable(
 		),
 		videoUrl: varchar("video_url", { length: 1000 }),
 		pdfUrl: varchar("pdf_url", { length: 1000 }),
+		/* @info - The uploaded .pptx itself. There is no derived artifact: the
+		 * student's browser parses this file, and the AI tutor reads its slide
+		 * XML directly (see extractPptxText). */
+		pptxUrl: varchar("pptx_url", { length: 1000 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
 		driveUrl: varchar("drive_url", { length: 1000 }),
 		settings: jsonb("settings"),

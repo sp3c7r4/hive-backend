@@ -5,6 +5,7 @@ import { sendErrorResponse, sendSuccessResponse } from "@/helpers/response/send-
 import { StorageService } from "@/services/storage.service";
 import { nanoid } from "nanoid";
 import { generateImageKey } from "@/helpers/id-generators";
+import { DocumentMimeType } from "@/enums";
 
 const MIME_BY_EXT: Record<string, string> = {
 	mp4: "video/mp4",
@@ -71,6 +72,22 @@ export class UploadController {
 					c,
 					{
 						message: `Invalid file type '${contentType}'. Allowed: MP4, MOV, WebM, M4V, MPEG`,
+					},
+					StatusCodes.BAD_REQUEST,
+				);
+			}
+		}
+
+		/* @info - Lesson decks. .pptx only: the student's browser parses OOXML, and
+		 * the legacy .ppt binary format is not something a client-side renderer can
+		 * read. Keep the declared content type honest at the gate. */
+		if (folderName === "pptx") {
+			const allowedDeckTypes: readonly string[] = [DocumentMimeType.PPTX];
+			if (!allowedDeckTypes.includes(contentType)) {
+				return sendErrorResponse(
+					c,
+					{
+						message: `Invalid file type '${contentType}'. Allowed: PPTX`,
 					},
 					StatusCodes.BAD_REQUEST,
 				);

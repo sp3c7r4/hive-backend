@@ -106,6 +106,7 @@ export const createLessonSchema = z.object({
 	randomizeQuestions: z.boolean().optional(),
 	videoUrl: z.string().max(1000).optional(),
 	pdfUrl: z.string().max(1000).optional(),
+	pptxUrl: z.string().max(1000).optional(),
 	driveUrl: z.string().max(1000).optional(),
 	/* @info - Live meeting input. These four are stored on the lesson's live
 	 * session (migration 0028 dropped the matching lessons columns), so they are

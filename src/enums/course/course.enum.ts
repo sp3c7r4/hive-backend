@@ -23,6 +23,7 @@ export enum LessonType {
 	ASSIGNMENT = "assignment",
 	TEXT = "text",
 	GOOGLE_DRIVE = "google_drive",
+	PPTX = "pptx",
 }
 
 export enum LessonStatus {
