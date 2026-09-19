@@ -70,6 +70,11 @@ export class AiGradingController {
 		return c.body(stream, 200, {
 			"Content-Type": "text/event-stream",
 			"Cache-Control": "no-cache",
+			/* @info - Same reason the tutor wraps its stream: without this the
+			 * proxy buffers and events arrive in one burst at the end. The nginx
+			 * carve-out for this path is now belt-and-braces rather than the only
+			 * thing keeping SSE live. */
+			"X-Accel-Buffering": "no",
 			Connection: "keep-alive",
 		});
 	};

@@ -13,6 +13,7 @@ import { getDb } from "@/db/postgres.db";
 import { config } from "@/config";
 import { logger } from "@/utils";
 import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
+import { streamResponse } from "@/helpers/response";
 import { runInputGuardrails } from "@/helpers/ai/prompt-guardrails.helper";
 import { EmbeddingService } from "@/services/ai/embedding.service";
 import { enrollments, lessonProgress } from "@/modules/enrollments/enrollment.model";
@@ -187,6 +188,6 @@ export class AiTutorService {
 			},
 		});
 
-		return { kind: "stream", response: result.toTextStreamResponse(), chunkIds };
+		return { kind: "stream", response: streamResponse(result.toTextStreamResponse()), chunkIds };
 	};
 }

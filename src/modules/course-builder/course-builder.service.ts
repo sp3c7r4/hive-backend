@@ -15,6 +15,7 @@ import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
 import { logger } from "@/utils";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
+import { streamResponse } from "@/helpers/response";
 import {
 	runInputGuardrails,
 	screenAssistantOutput,
@@ -97,7 +98,7 @@ export class CourseBuilderService {
 			},
 		});
 
-		return { kind: "stream", response: result.toTextStreamResponse() };
+		return { kind: "stream", response: streamResponse(result.toTextStreamResponse()) };
 	};
 
 	/** @info - (Re)generate ONE module with sibling context for consistency.
@@ -179,7 +180,7 @@ export class CourseBuilderService {
 			},
 		});
 
-		return { kind: "stream", response: result.toTextStreamResponse() };
+		return { kind: "stream", response: streamResponse(result.toTextStreamResponse()) };
 	};
 
 	private async insertLog(
