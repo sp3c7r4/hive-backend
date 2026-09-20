@@ -11,7 +11,7 @@ import {
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { CacheService } from "@/services";
 import { serviceLogger } from "@/utils";
-import type { RecordingDisposition } from "./live-recording.service";
+import type { RecordingUrlPurpose } from "./live-recording.service";
 import { LiveRecordingService } from "./live-recording.service";
 import { getRoomServiceClient } from "./live-room.client";
 import type { LiveSession } from "./live-session.model";
@@ -164,13 +164,13 @@ export class LiveService {
 	stopRecording = async (authData: IAuthData, sessionId: number) =>
 		this.recording.stopRecording(authData, sessionId);
 
-	/** @info - GET /live/sessions/:sessionId/recording/url — one access-checked URL, minted
+	/** @info - GET /live/sessions/:sessionId/recording/url: one access-checked URL, minted
 	 *  per request and never stored (D-P5-2, D-P5-5 as amended). */
 	recordingUrl = async (
 		authData: IAuthData,
 		sessionId: number,
-		disposition: RecordingDisposition,
-	) => this.recording.recordingUrlFor(authData, sessionId, disposition);
+		purpose: RecordingUrlPurpose,
+	) => this.recording.recordingUrlFor(authData, sessionId, purpose);
 
 	/** @info - DELETE /live/sessions/:sessionId/recording — the host destroys a recording
 	 *  (D-P5-11). An API capability with no UI in this phase. */

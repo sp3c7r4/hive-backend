@@ -532,6 +532,37 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 		expect((await row(lessonSessionId)).recording_status).toBeNull();
 	});
 
+	/* ── The share link: the same access rule, a longer-lived URL ───── */
+
+	it("share: the managing side gets the file's own link, seven days long", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY);
+
+		const share = await recordings.recordingUrlFor(
+			auth(hostUserId),
+			lessonSessionId,
+			"share",
+		);
+
+		/* Seven days is the ceiling on a signed URL, so it is the honest life of a link that
+		 * gets pasted somewhere and opened later. */
+		expect(share.expiresIn).toBe(604800);
+		expect(presignSpy()).toHaveBeenLastCalledWith({
+			key: recordingKeyFor(lessonSessionId),
+			bucket: expect.any(String),
+			expiresIn: 604800,
+		});
+	});
+
+	it("share: a student is refused one, and nothing is minted", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY);
+
+		await expect(
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId, "share"),
+		).rejects.toThrow(/Copying a shareable link/);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
 	/* ── The poll (triggers 3 and 4, and the two honest failures) ────── */
 
 	it("poll on EGRESS_COMPLETE: ready with the duration, and a second poll changes nothing", async () => {
@@ -875,7 +906,7 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 			recordings.recordingUrlFor(
 				auth(enrolledUserId),
 				lessonSessionId,
-				"attachment",
+				"download",
 			),
 		);
 
@@ -891,7 +922,7 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 		const instructor = await recordings.recordingUrlFor(
 			auth(hostUserId),
 			lessonSessionId,
-			"attachment",
+			"download",
 		);
 		expect(instructor.url).toBe(PRESIGNED_URL);
 		expect(presignSpy()).toHaveBeenLastCalledWith({
@@ -910,7 +941,7 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 		const admin = await recordings.recordingUrlFor(
 			auth(adminUserId),
 			scheduledSessionId,
-			"attachment",
+			"download",
 		);
 		expect(admin.expiresIn).toBe(3600);
 		expect(presignSpy()).toHaveBeenLastCalledWith(
@@ -1017,7 +1048,7 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 			recordings.recordingUrlFor(
 				auth(hostUserId),
 				lessonSessionId,
-				"attachment",
+				"download",
 			),
 		);
 		expect(host!.status).toBe(410);

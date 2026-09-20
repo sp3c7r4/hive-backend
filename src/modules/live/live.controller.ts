@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { sendSuccessResponse } from "@/helpers";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { LiveService } from "./live.service";
-import type { RecordingDisposition } from "./live-recording.service";
+import type { RecordingUrlPurpose } from "./live-recording.service";
 import type { CommunitySessionScope } from "./live-session.service";
 
 /** @info - Session ids arrive as path params, so guard the Number() coercion. */
@@ -90,17 +90,18 @@ export class LiveController {
 		return sendSuccessResponse(c, result);
 	};
 
-	/** @info - GET /live/sessions/:sessionId/recording/url?disposition=inline|attachment */
+	/** @info - GET /live/sessions/:sessionId/recording/url?purpose=play|download|share */
 	recordingUrl = async (c: Context) => {
 		const authData = c.get("authData");
-		/* @info - Anything that is not `attachment` streams: the flag is a download toggle,
-		 * not a value with a meaning of its own. */
-		const disposition: RecordingDisposition =
-			c.req.query("disposition") === "attachment" ? "attachment" : "inline";
+		/* @info - Anything unrecognised is `play`, the least privileged of the three: a typo
+		 * must not mint a link with a download's disposition or a share link's seven days. */
+		const asked = c.req.query("purpose");
+		const purpose: RecordingUrlPurpose =
+			asked === "download" || asked === "share" ? asked : "play";
 		const result = await this.service.recordingUrl(
 			authData,
 			parseSessionId(c),
-			disposition,
+			purpose,
 		);
 		return sendSuccessResponse(c, result);
 	};

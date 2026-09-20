@@ -47,6 +47,8 @@ const RECORDING_NOT_READY =
 const RECORDING_EXPIRED = "This recording has expired (90-day retention).";
 const DOWNLOAD_IS_MANAGING_SIDE =
 	"Downloading a recording is for the host, the course instructor or a community owner/admin.";
+const COPY_LINK_IS_MANAGING_SIDE =
+	"Copying a shareable link is for the host, the course instructor or a community owner/admin.";
 const STOP_BEFORE_DELETING = "Stop the recording before deleting it.";
 
 /** @info - D-P5-9's floor: `durationMinutes` is only ever as trustworthy as the form that
@@ -89,6 +91,12 @@ export const isRecordingActive = (
 
 /** @info - How a caller wants the bytes delivered: `inline` plays in the page, `attachment`
  *  saves the file. The one flag the download rule turns on (D-P5-5 as amended). */
+/** @info - What a caller wants the URL for. `play` is the player asking to show the file,
+ *  `download` saves it, and `share` is the direct link to the video itself that gets pasted
+ *  somewhere and followed later, so its TTL is as long as S3's signing allows. */
+export type RecordingUrlPurpose = "play" | "download" | "share";
+
+/** @info - What the presign asks S3 to send. Internal to the endpoint. */
 export type RecordingDisposition = "inline" | "attachment";
 
 /**
@@ -262,7 +270,7 @@ export class LiveRecordingService {
 	recordingUrlFor = async (
 		authData: IAuthData,
 		sessionId: number,
-		disposition: RecordingDisposition = "inline",
+		purpose: RecordingUrlPurpose = "play",
 	): Promise<{ url: string; expiresIn: number }> => {
 		const { session, access } = await this.sessions.loadForPlayback(
 			authData,
@@ -294,28 +302,39 @@ export class LiveRecordingService {
 		 * course instructor, a community owner/admin. `isHost` covers the first two for a
 		 * lesson session, `canModerate` adds the community's own admins on an event;
 		 * `courses.allow_downloads` is deliberately not consulted for recordings. */
+		/* @info - A long-lived link to the file is the managing side's, for the same reason the
+		 * download is: whoever receives it can open it, with no session and no membership, so
+		 * handing them out is not a student's move. Asking for one is refused here, before any
+		 * presign call. */
 		if (
-			disposition === "attachment" &&
+			(purpose === "download" || purpose === "share") &&
 			!(access.isHost || access.canModerate)
 		) {
-			throwForbiddenError(DOWNLOAD_IS_MANAGING_SIDE);
+			throwForbiddenError(
+				purpose === "share"
+					? COPY_LINK_IS_MANAGING_SIDE
+					: DOWNLOAD_IS_MANAGING_SIDE,
+			);
 		}
 
 		/* @info - The key is written when the row is claimed; the fallback is that same
 		 * derived key, never a different path. */
 		const key = session.recordingKey ?? recordingKeyFor(session.id);
+		/* @info - Seven days is the ceiling on a signed URL, which is the honest cap on a link
+		 * that is handed out: after it the URL is dead, whatever the object's own 90-day life. */
+		const ttl = purpose === "share" ? TTL.IN_7_DAYS : TTL.IN_AN_HOUR;
 		const storage = StorageService.getInstance();
 		const url = await storage.generatePresignedDownloadUrl(
-			disposition === "attachment"
+			purpose === "download"
 				? {
 						key,
 						bucket: config.recordings.bucket,
-						expiresIn: TTL.IN_AN_HOUR,
+						expiresIn: ttl,
 						responseContentDisposition: `attachment; filename="${downloadFilenameFor(session)}"`,
 					}
-				: { key, bucket: config.recordings.bucket, expiresIn: TTL.IN_AN_HOUR },
+				: { key, bucket: config.recordings.bucket, expiresIn: ttl },
 		);
-		return { url, expiresIn: TTL.IN_AN_HOUR };
+		return { url, expiresIn: ttl };
 	};
 
 	/**
