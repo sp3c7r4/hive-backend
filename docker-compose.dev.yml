@@ -60,6 +60,4 @@ services:
 
 volumes:
   hive_hive-db:
-    external: true
   hive_hive-cache:
-    external: true
