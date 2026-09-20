@@ -1,5 +1,4 @@
 import type { Context } from "hono";
-import { sendSuccessResponse } from "@/helpers";
 import { AiTutorService } from "./ai-tutor.service";
 
 export class AiTutorController {
@@ -12,8 +11,8 @@ export class AiTutorController {
 	}
 
 	/** @info - POST /courses/:courseId/tutor/chat
-	 * Streaming text when grounded; JSON envelope when the honest fallback
-	 * fires. The client distinguishes by content-type. */
+	 * Always streams. A question the course does not cover is answered from
+	 * general knowledge, so there is no non-streaming envelope any more. */
 	chat = async (c: Context) => {
 		const authData = c.get("authData");
 		const courseId = Number(c.req.param("courseId"));
@@ -26,10 +25,6 @@ export class AiTutorController {
 			lessonId,
 		);
 
-		if (result.kind === "stream") return result.response;
-		return sendSuccessResponse(c, {
-			answer: result.answer,
-			fallback: true,
-		});
+		return result.response;
 	};
 }
