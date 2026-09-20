@@ -9,9 +9,11 @@ import {
 	throwRateLimitError,
 } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { getRoomServiceClient } from "./live-room.client";
 import { CacheService } from "@/services";
 import { serviceLogger } from "@/utils";
+import type { RecordingDisposition } from "./live-recording.service";
+import { LiveRecordingService } from "./live-recording.service";
+import { getRoomServiceClient } from "./live-room.client";
 import type { LiveSession } from "./live-session.model";
 import type {
 	CommunitySessionScope,
@@ -19,7 +21,6 @@ import type {
 	UpdateLiveSessionInput,
 } from "./live-session.service";
 import { LiveSessionService, roomNameForSession } from "./live-session.service";
-import { LiveRecordingService } from "./live-recording.service";
 
 /** @info - Live join tokens are short-lived joins, not sessions */
 const TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -162,6 +163,19 @@ export class LiveService {
 	/** @info - POST /live/sessions/:sessionId/recording/stop */
 	stopRecording = async (authData: IAuthData, sessionId: number) =>
 		this.recording.stopRecording(authData, sessionId);
+
+	/** @info - GET /live/sessions/:sessionId/recording/url — one access-checked URL, minted
+	 *  per request and never stored (D-P5-2, D-P5-5 as amended). */
+	recordingUrl = async (
+		authData: IAuthData,
+		sessionId: number,
+		disposition: RecordingDisposition,
+	) => this.recording.recordingUrlFor(authData, sessionId, disposition);
+
+	/** @info - DELETE /live/sessions/:sessionId/recording — the host destroys a recording
+	 *  (D-P5-11). An API capability with no UI in this phase. */
+	deleteRecording = async (authData: IAuthData, sessionId: number) =>
+		this.recording.deleteRecording(authData, sessionId);
 
 	/** @info - POST /live/sessions/:sessionId/end-live — the host ends the session */
 	endLive = async (authData: IAuthData, sessionId: number) => {

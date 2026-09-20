@@ -28,6 +28,12 @@ interface PresignedUploadParams {
 interface PresignedDownloadParams {
 	key: string;
 	expiresIn?: number;
+	/** @info - Recordings live in their own private bucket (spec fact 9), so the caller names
+	 *  it rather than a second S3 service existing for one bucket difference. */
+	bucket?: string;
+	/** @info - Set for a download: `attachment; filename="..."` becomes an overridable
+	 *  response header on the signed GET, so the object saves instead of streaming. */
+	responseContentDisposition?: string;
 }
 
 export class StorageService {
@@ -98,10 +104,15 @@ export class StorageService {
 	generatePresignedDownloadUrl = async ({
 		key,
 		expiresIn = TTL.IN_AN_HOUR,
+		bucket = this.bucket,
+		responseContentDisposition,
 	}: PresignedDownloadParams): Promise<string> => {
 		const command = new GetObjectCommand({
-			Bucket: this.bucket,
+			Bucket: bucket,
 			Key: key,
+			...(responseContentDisposition
+				? { ResponseContentDisposition: responseContentDisposition }
+				: {}),
 		});
 		return getSignedUrl(this.client, command, { expiresIn });
 	};

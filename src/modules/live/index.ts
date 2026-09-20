@@ -8,11 +8,15 @@ export {
 export {
 	isRecordingActive,
 	LiveRecordingService,
-	type LiveSessionRecordingState,
 	recordingCapMinutes,
 	recordingKeyFor,
-	recordingStateFor,
 } from "./live-recording.service";
+export {
+	type LiveSessionRecording,
+	type LiveSessionRecordingState,
+	recordingStateFor,
+	recordingSummaryFor,
+} from "./live-recording.state";
 export {
 	decorateLessonsWithSessions,
 	type LiveSessionFields,

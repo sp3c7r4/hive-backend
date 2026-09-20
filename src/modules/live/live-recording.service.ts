@@ -1,10 +1,14 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { config } from "@/config";
+import { TTL } from "@/constants";
 import { getDb } from "@/db/postgres.db";
 import { RecordingStatus } from "@/enums";
 import {
 	throwBadRequestError,
 	throwConflictError,
+	throwForbiddenError,
+	throwGoneError,
+	throwNotFoundError,
 } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { StorageService } from "@/services/storage.service";
@@ -15,6 +19,10 @@ import {
 	startRoomRecording,
 	stopRoomRecording,
 } from "./live-egress.client";
+import {
+	type LiveSessionRecordingState,
+	recordingStateFor,
+} from "./live-recording.state";
 import {
 	type LiveSession,
 	liveSessions,
@@ -31,6 +39,15 @@ const EGRESS_FAILED = "The recording failed before it could be saved.";
 const ROOM_GONE = "The session's room closed before the recording finished.";
 const RECORDING_LOST =
 	"LiveKit stopped reporting this recording before it finished.";
+
+/** @info - Playback (5b). */
+const NO_RECORDING = "This session has no recording.";
+const RECORDING_NOT_READY =
+	"The recording is still being written. Try again in a moment.";
+const RECORDING_EXPIRED = "This recording has expired (90-day retention).";
+const DOWNLOAD_IS_MANAGING_SIDE =
+	"Downloading a recording is for the host, the course instructor or a community owner/admin.";
+const STOP_BEFORE_DELETING = "Stop the recording before deleting it.";
 
 /** @info - D-P5-9's floor: `durationMinutes` is only ever as trustworthy as the form that
  *  produced it, so a 0 (or a 5) must not cut a real class off at the hour mark. */
@@ -53,12 +70,6 @@ const START_CLAIM_GRACE_MS = 60_000;
 export const recordingCapMinutes = (durationMinutes: number): number =>
 	Math.max(durationMinutes, CAP_FLOOR_MINUTES) + CAP_GRACE_MINUTES;
 
-/** @info - The bucket's own lifecycle rule deletes an object 90 days after it is written
- *  (spec fact 7). Expiry is derived from this, never stored: a flag would drift the moment
- *  the rule changes. */
-const RETENTION_DAYS = 90;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * @info - Where one session's recording lives: `{prefix}/session-{id}/recording.mp4`
  * (D-P5-7). Derived from the immutable session id, like the room name, so a deploy cannot
@@ -76,43 +87,23 @@ export const isRecordingActive = (
 ): boolean =>
 	status === RecordingStatus.RECORDING || status === RecordingStatus.PROCESSING;
 
-/** @info - A session's recording as every surface needs it (spec section 4). Playback and
- *  the download flag are phase 5b and hang off this same object. */
-export interface LiveSessionRecordingState {
-	sessionId: number;
-	/** null means nothing was ever recorded; `deleted` means there was one and the host
-	 *  removed it - deliberately different (spec section 4). */
-	status: RecordingStatus | null;
-	startedAt: Date | null;
-	endedAt: Date | null;
-	durationSeconds: number | null;
-	/** Host-facing reason, only ever set while `failed` (D-P5-10). */
-	error: string | null;
-	/** Derived, never stored: `ready`, and older than the bucket's retention (D-P5-5). */
-	expired: boolean;
-}
+/** @info - How a caller wants the bytes delivered: `inline` plays in the page, `attachment`
+ *  saves the file. The one flag the download rule turns on (D-P5-5 as amended). */
+export type RecordingDisposition = "inline" | "attachment";
 
-/** @info - The column is a database enum (migration 0031), so a stored value is always one
- *  of the five - drizzle types every enum column in this repo as plain `string`. */
-const toRecordingStatus = (value: string | null): RecordingStatus | null =>
-	value === null ? null : (value as RecordingStatus);
-
-export const recordingStateFor = (
-	session: LiveSession,
-	now: Date = new Date(),
-): LiveSessionRecordingState => ({
-	sessionId: session.id,
-	status: toRecordingStatus(session.recordingStatus),
-	startedAt: session.recordingStartedAt ?? null,
-	endedAt: session.recordingEndedAt ?? null,
-	durationSeconds: session.recordingDurationSeconds ?? null,
-	error: session.recordingError ?? null,
-	expired:
-		session.recordingStatus === RecordingStatus.READY &&
-		session.recordingStartedAt !== null &&
-		now.getTime() - session.recordingStartedAt.getTime() >
-			RETENTION_DAYS * DAY_MS,
-});
+/**
+ * @info - The name a downloaded recording saves as, so it is recognisable in a downloads
+ * folder. Everything outside a conservative set is dropped: the value becomes a response
+ * header inside a signed URL, where a quote or a newline would break the signature (or the
+ * header), and the title is author-supplied text.
+ */
+const downloadFilenameFor = (session: LiveSession): string => {
+	const safe = session.title
+		.replace(/[^a-zA-Z0-9 ._-]/g, "")
+		.trim()
+		.replace(/[ .]+/g, "-");
+	return `${safe || `session-${session.id}`}.mp4`;
+};
 
 /**
  * @info - Capture (phase 5a). One recording per session, host-started, host-stopped, and
@@ -256,6 +247,129 @@ export class LiveRecordingService {
 				error,
 			);
 		}
+	};
+
+	/**
+	 * @info - Playback (5b, D-P5-5 as amended): the presigned URL anyone with access watches
+	 * the recording through. The URL is minted here and never stored, on every request, after
+	 * `resolveAccess` has admitted the caller - which is what makes a dropped enrolment (or a
+	 * forwarded link) end access at the next request rather than at the URL's expiry.
+	 *
+	 * Gate order: the session, then the caller's access, then what state the recording is in
+	 * (nothing / failed / not ready / expired), then the download rule, and only then S3. A
+	 * refused caller therefore costs no presign at all.
+	 */
+	recordingUrlFor = async (
+		authData: IAuthData,
+		sessionId: number,
+		disposition: RecordingDisposition = "inline",
+	): Promise<{ url: string; expiresIn: number }> => {
+		const { session, access } = await this.sessions.loadForPlayback(
+			authData,
+			sessionId,
+		);
+		const recording = recordingStateFor(session);
+
+		/* @info - `deleted` answers 404, not "expired": the host destroyed it, and saying
+		 * otherwise would advertise that something existed (D-P5-11). */
+		if (
+			recording.status === null ||
+			recording.status === RecordingStatus.DELETED
+		) {
+			throwNotFoundError(NO_RECORDING);
+		}
+		/* @info - A failure is the host's to see: the row's own reason, told to them, and
+		 * nothing at all to anyone else (D-P5-10). */
+		if (recording.status === RecordingStatus.FAILED) {
+			if (!access.isHost) throwNotFoundError(NO_RECORDING);
+			throwConflictError(recording.error ?? EGRESS_FAILED);
+		}
+		/* @info - `recording` and `processing` alike: the file is not there yet, and "not
+		 * ready" is a state to say rather than an error to bury. */
+		if (recording.status !== RecordingStatus.READY) {
+			throwConflictError(RECORDING_NOT_READY);
+		}
+		if (recording.expired) throwGoneError(RECORDING_EXPIRED);
+		/* @info - Download belongs to the managing side (D-P5-5 as amended): the host, the
+		 * course instructor, a community owner/admin. `isHost` covers the first two for a
+		 * lesson session, `canModerate` adds the community's own admins on an event;
+		 * `courses.allow_downloads` is deliberately not consulted for recordings. */
+		if (
+			disposition === "attachment" &&
+			!(access.isHost || access.canModerate)
+		) {
+			throwForbiddenError(DOWNLOAD_IS_MANAGING_SIDE);
+		}
+
+		/* @info - The key is written when the row is claimed; the fallback is that same
+		 * derived key, never a different path. */
+		const key = session.recordingKey ?? recordingKeyFor(session.id);
+		const storage = StorageService.getInstance();
+		const url = await storage.generatePresignedDownloadUrl(
+			disposition === "attachment"
+				? {
+						key,
+						bucket: config.recordings.bucket,
+						expiresIn: TTL.IN_AN_HOUR,
+						responseContentDisposition: `attachment; filename="${downloadFilenameFor(session)}"`,
+					}
+				: { key, bucket: config.recordings.bucket, expiresIn: TTL.IN_AN_HOUR },
+		);
+		return { url, expiresIn: TTL.IN_AN_HOUR };
+	};
+
+	/**
+	 * @info - DELETE (D-P5-11): the host destroys a recording outright - the case that
+	 * matters is the mistake. Host-only rather than moderator-wide: a recording is the one
+	 * irreversible thing a live session produces, and a community admin destroying a class
+	 * the instructor gave is a policy this feature does not need.
+	 *
+	 * Idempotent, and refused while a recorder is still running: an in-flight egress writes
+	 * its object back after the delete, so "stop it first" is the honest answer - the poll
+	 * converges the row within a tick. No UI calls this yet; it closes the "recorded by
+	 * mistake" gap as an API capability.
+	 */
+	deleteRecording = async (
+		authData: IAuthData,
+		sessionId: number,
+	): Promise<{ sessionId: number; deleted: true }> => {
+		const { session } = await this.sessions.loadForHostAction(
+			authData,
+			sessionId,
+		);
+		const recording = recordingStateFor(session);
+		const stored = recording.status;
+
+		/* @info - Already destroyed (or destroyed again): the same answer, and no second
+		 * object delete. */
+		if (stored === RecordingStatus.DELETED) {
+			return { sessionId: session.id, deleted: true };
+		}
+		if (stored === null) throwNotFoundError(NO_RECORDING);
+		if (isRecordingActive(stored)) {
+			throwConflictError(STOP_BEFORE_DELETING);
+		}
+
+		/* @info - The object goes first: if that fails the row is untouched and the host can
+		 * simply try again - which is the one outcome worth refusing, because a `deleted` row
+		 * whose file is still in the bucket is exactly what this endpoint exists to prevent. */
+		await StorageService.getInstance().delete(
+			session.recordingKey ?? recordingKeyFor(session.id),
+			config.recordings.bucket,
+		);
+		const row = await this.updateRow(session.id, stored!, {
+			recordingStatus: RecordingStatus.DELETED,
+		});
+		if (!row) {
+			/* @info - The conditional write lost, so the row moved on underneath us (a retry
+			 * after a failure is the realistic one). The object is gone; the row reports its
+			 * own state. */
+			this.log.error(
+				`live recording ${session.id}: deleted the object, but the row had already moved`,
+			);
+		}
+		this.log.info(`live recording ${session.id}: deleted`);
+		return { sessionId: session.id, deleted: true };
 	};
 
 	/* ── The poll (triggers 3 and 4, and the two honest endings) ─────── */

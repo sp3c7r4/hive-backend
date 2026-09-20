@@ -17,6 +17,10 @@ import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { NotificationService } from "@/modules/notifications";
 import { serviceLogger } from "@/utils";
 import {
+	type LiveSessionRecording,
+	recordingSummaryFor,
+} from "./live-recording.state";
+import {
 	type LiveSession,
 	liveSessions,
 	type NewLiveSession,
@@ -126,6 +130,9 @@ export interface LiveSessionView {
 	canModerate: boolean;
 	canJoin: boolean;
 	lesson: { id: number; title: string } | null;
+	/** @info - What this session's recording is, as a state (5b): `null` when there is nothing
+	 *  to watch, and never a URL - the playback URL is minted per request. */
+	recording: LiveSessionRecording | null;
 }
 
 const isFinished = (status: LiveSession["status"]): boolean =>
@@ -313,6 +320,20 @@ export class LiveSessionService {
 		if (isFinished(session.status) && !access.isHost) {
 			throwBadRequestError(SESSION_ENDED);
 		}
+		return { session, access };
+	};
+
+	/**
+	 * @info - Playback gate (5b, D-P5-2): the session, then the room's own access rule,
+	 * re-evaluated on every request - so dropping a course or leaving a community ends access
+	 * to a recording at the next request rather than at the minted URL's expiry.
+	 *
+	 * Unlike `loadForJoin` a finished session passes: a recording is watched after the class,
+	 * which is exactly when join would answer "this session has ended".
+	 */
+	loadForPlayback = async (authData: IAuthData, sessionId: number) => {
+		const session = await this.loadById(sessionId);
+		const access = await this.assertCanAccess(session, authData);
 		return { session, access };
 	};
 
@@ -617,6 +638,7 @@ export class LiveSessionService {
 		canModerate: access.canModerate,
 		canJoin: access.canJoin && (!isFinished(session.status) || access.isHost),
 		lesson,
+		recording: recordingSummaryFor(session, access),
 	});
 
 	/**

@@ -28,7 +28,8 @@ import { LiveSessionService } from "@/modules/live/live-session.service";
 import { StorageService } from "@/services";
 
 /**
- * @info - Live sessions phase 5a: capture (spec section 7, legs 1-13).
+ * @info - Live sessions phase 5: capture (5a) and playback/access/delete (5b), spec
+ * section 7 and brief-backend-phase5b.md.
  *
  * LiveKit's egress API is mocked through `@/modules/live/live-egress.client`, exactly as
  * the moderation tests mock the room client: these tests are about our own gate order, the
@@ -46,9 +47,14 @@ import { StorageService } from "@/services";
  *  - the cap has a floor (D-P5-9): a `durationMinutes` of 0 is capped at 120 minutes.
  *  - the poll is the only thing that flips a row, and it is idempotent.
  *
+ * Phase 5b adds the other half: who may be handed a presigned URL for what is already in
+ * the bucket, what the session payload says about it (a state, never a link), and the
+ * host's delete. The 1-hour TTL is the URL's, not the link's (spec section 15): the frontend
+ * builds the stable Hive link itself, so nothing here mints or stores one.
+ *
  * Creates real rows in a throwaway community/course and cleans them up.
  */
-describe("Live sessions phase 5a (recording capture)", () => {
+describe("Live sessions phase 5 (recording capture, playback and deletion)", () => {
 	const live = LiveService.getInstance();
 	const sessions = LiveSessionService.getInstance();
 	const recordings = LiveRecordingService.getInstance();
@@ -77,9 +83,16 @@ describe("Live sessions phase 5a (recording capture)", () => {
 		lastName: "Phase Five",
 	});
 
+	/** @info - A URL that looks signed and reaches nothing: the presign itself is mocked, so
+	 *  no test can mint a real one for the recordings bucket. */
+	const PRESIGNED_URL =
+		"https://hive-recordings.s3.amazonaws.com/session/recording.mp4?signed=test";
+
 	const startSpy = () => vi.mocked(egressClient.startRoomRecording);
 	const stopSpy = () => vi.mocked(egressClient.stopRoomRecording);
 	const listSpy = () => vi.mocked(egressClient.listRoomRecordings);
+	const presignSpy = () =>
+		vi.mocked(StorageService.getInstance().generatePresignedDownloadUrl);
 	const deleteSpy = () => vi.mocked(StorageService.getInstance().delete);
 
 	/** @info - Capture the thrown error as the client would see it (status + message). */
@@ -112,7 +125,12 @@ describe("Live sessions phase 5a (recording capture)", () => {
 	const stampRecording = async (
 		sessionId: number,
 		status: RecordingStatus,
-		options: { egressId?: string; startedAgoMinutes?: number } = {},
+		options: {
+			egressId?: string;
+			startedAgoMinutes?: number;
+			durationSeconds?: number;
+			error?: string;
+		} = {},
 	) => {
 		const egressId = options.egressId ?? `EG_${sessionId}_${stamp}`;
 		const startedAt =
@@ -124,12 +142,19 @@ describe("Live sessions phase 5a (recording capture)", () => {
 				recording_egress_id='${egressId}',
 				recording_key='${recordingKeyFor(sessionId)}',
 				recording_started_at=${startedAt},
-				recording_ended_at=NULL,
-				recording_duration_seconds=NULL,
-				recording_error=NULL
+				recording_ended_at=CASE WHEN '${status}' = '${RecordingStatus.RECORDING}' THEN NULL ELSE now() END,
+				recording_duration_seconds=${options.durationSeconds ?? "NULL"},
+				recording_error=${options.error ? `'${options.error}'` : "NULL"}
 			 WHERE id = ${sessionId}`,
 		);
 		return egressId;
+	};
+
+	/** @info - A finished class: the state a recording is watched in (5b). */
+	const endSession = async (sessionId: number) => {
+		await db.execute(
+			`UPDATE live_sessions SET status='ended' WHERE id = ${sessionId}`,
+		);
 	};
 
 	/** @info - The claim a start writes BEFORE its LiveKit call returns: `recording`, and no
@@ -286,6 +311,12 @@ describe("Live sessions phase 5a (recording capture)", () => {
 		vi.spyOn(StorageService.getInstance(), "delete").mockResolvedValue(
 			{} as never,
 		);
+		/* @info - mocked so no test can mint a real presigned URL against the recordings
+		 *  bucket, and so "never presigned" is an assertion rather than a reading of the code */
+		vi.spyOn(
+			StorageService.getInstance(),
+			"generatePresignedDownloadUrl",
+		).mockResolvedValue(PRESIGNED_URL);
 
 		/* @info - each test starts from live, never-recorded sessions */
 		await db.execute(
@@ -752,6 +783,409 @@ describe("Live sessions phase 5a (recording capture)", () => {
 		);
 	});
 
+	/* ── Phase 5b: playback - one access-checked URL, re-checked every request ── */
+
+	it("refuses a URL to an outsider and to a member who is not enrolled, minting nothing", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+
+		const outsider = await capture(() =>
+			recordings.recordingUrlFor(auth(outsiderUserId), lessonSessionId),
+		);
+		expect(outsider!.status).toBe(403);
+
+		/* a community member is not an enrolled student: a lesson session's recording stays
+		 * behind enrollment (decision A, no widening) */
+		const member = await capture(() =>
+			recordings.recordingUrlFor(auth(memberUserId), lessonSessionId),
+		);
+		expect(member!.status).toBe(403);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("gives an enrolled student a presigned URL from the recordings bucket, good for an hour", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+		await endSession(lessonSessionId);
+
+		const result = await recordings.recordingUrlFor(
+			auth(enrolledUserId),
+			lessonSessionId,
+		);
+
+		expect(result).toEqual({ url: PRESIGNED_URL, expiresIn: 3600 });
+		expect(presignSpy()).toHaveBeenCalledTimes(1);
+		/* @info - inline is the default, so nothing overrides the response headers: a stream,
+		 * not a download */
+		expect(presignSpy()).toHaveBeenCalledWith({
+			key: recordingKeyFor(lessonSessionId),
+			bucket: config.recordings.bucket,
+			expiresIn: 3600,
+		});
+	});
+
+	it("refuses a student's attachment, minting nothing further", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+
+		const result = await capture(() =>
+			recordings.recordingUrlFor(
+				auth(enrolledUserId),
+				lessonSessionId,
+				"attachment",
+			),
+		);
+
+		expect(result!.status).toBe(403);
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("lets the managing side download: the course instructor, and a community owner/admin on an event", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+
+		const instructor = await recordings.recordingUrlFor(
+			auth(hostUserId),
+			lessonSessionId,
+			"attachment",
+		);
+		expect(instructor.url).toBe(PRESIGNED_URL);
+		expect(presignSpy()).toHaveBeenLastCalledWith({
+			key: recordingKeyFor(lessonSessionId),
+			bucket: config.recordings.bucket,
+			expiresIn: 3600,
+			responseContentDisposition: 'attachment; filename="Recording-Lesson.mp4"',
+		});
+
+		/* a standalone event is not a course: its recording's managing side is the host or a
+		 * community owner/admin (D-P5-5 as amended) */
+		await endSession(scheduledSessionId);
+		await stampRecording(scheduledSessionId, RecordingStatus.READY, {
+			durationSeconds: 100,
+		});
+		const admin = await recordings.recordingUrlFor(
+			auth(adminUserId),
+			scheduledSessionId,
+			"attachment",
+		);
+		expect(admin.expiresIn).toBe(3600);
+		expect(presignSpy()).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				key: recordingKeyFor(scheduledSessionId),
+				bucket: config.recordings.bucket,
+				responseContentDisposition:
+					'attachment; filename="Recording-Scheduled.mp4"',
+			}),
+		);
+	});
+
+	it("404s a session that was never recorded, for the host and for a student alike", async () => {
+		const host = await capture(() =>
+			recordings.recordingUrlFor(auth(hostUserId), lessonSessionId),
+		);
+		expect(host!.status).toBe(404);
+
+		const student = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(404);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("409s a recording that is still processing: not ready is a state, not a missing file", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.PROCESSING);
+
+		const host = await capture(() =>
+			recordings.recordingUrlFor(auth(hostUserId), lessonSessionId),
+		);
+		expect(host!.status).toBe(409);
+		expect(host!.message).toMatch(/not ready|still being (written|processed)/i);
+
+		const student = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(409);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("tells the host why a recording failed, and shows a student nothing at all (D-P5-10)", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.FAILED, {
+			error: "The recording failed before it could be saved.",
+		});
+
+		const host = await capture(() =>
+			recordings.recordingUrlFor(auth(hostUserId), lessonSessionId),
+		);
+		expect(host!.status).toBe(409);
+		expect(host!.message).toContain(
+			"The recording failed before it could be saved.",
+		);
+
+		/* a student is told nothing exists: a half-recording is worse than an honest silence */
+		const student = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(404);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("404s a deleted recording for everyone, the host included - deleted is not expired", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.DELETED);
+
+		const host = await capture(() =>
+			recordings.recordingUrlFor(auth(hostUserId), lessonSessionId),
+		);
+		expect(host!.status).toBe(404);
+
+		const student = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(404);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("refuses an expired recording with 410 - after the payload has already said so", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			startedAgoMinutes: 91 * 24 * 60,
+			durationSeconds: 3600,
+		});
+		await endSession(lessonSessionId);
+
+		const view = await live.getSession(auth(enrolledUserId), lessonSessionId);
+		expect(view.recording).toEqual({
+			status: RecordingStatus.READY,
+			durationSeconds: 3600,
+			expired: true,
+		});
+
+		const student = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(410);
+
+		/* the managing side gets the same answer: the object is not there for anyone, and a
+		 * download of nothing is not a download */
+		const host = await capture(() =>
+			recordings.recordingUrlFor(
+				auth(hostUserId),
+				lessonSessionId,
+				"attachment",
+			),
+		);
+		expect(host!.status).toBe(410);
+
+		expect(presignSpy()).not.toHaveBeenCalled();
+	});
+
+	it("carries the state and never a URL: the summary has three keys and nothing URL-shaped", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+
+		const view = await live.getSession(auth(enrolledUserId), lessonSessionId);
+
+		expect(view.recording).toEqual({
+			status: RecordingStatus.READY,
+			durationSeconds: 631,
+			expired: false,
+		});
+		expect(Object.keys(view.recording ?? {}).sort()).toEqual([
+			"durationSeconds",
+			"expired",
+			"status",
+		]);
+		/* @info - the summary is serialised on its own: `meetingUrl` is the payload's one
+		 * pre-existing URL-named key (null on a native session), so asserting over the whole
+		 * payload would be an assertion about a key that has nothing to do with recordings. */
+		const summary = JSON.stringify(view.recording);
+		expect(summary).not.toMatch(/http/i);
+		expect(summary).not.toMatch(/url/i);
+		/* the payload as a whole carries no URL: this is a session, not a link */
+		expect(JSON.stringify(view)).not.toMatch(/http/i);
+	});
+
+	it("shows a student that a recording is ready, and never that one failed", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+		await endSession(lessonSessionId);
+
+		const ready = await live.getSession(auth(enrolledUserId), lessonSessionId);
+		expect(ready.recording?.status).toBe(RecordingStatus.READY);
+
+		await stampRecording(lessonSessionId, RecordingStatus.FAILED, {
+			error: "egress crashed",
+		});
+		const student = await live.getSession(
+			auth(enrolledUserId),
+			lessonSessionId,
+		);
+		/* the key is there and reads null - the shape a consumer can rely on, rather than an
+		 * absent field it would have to guess about */
+		expect(student).toHaveProperty("recording", null);
+
+		const host = await live.getSession(auth(hostUserId), lessonSessionId);
+		expect(host.recording).toEqual({
+			status: RecordingStatus.FAILED,
+			durationSeconds: null,
+			expired: false,
+		});
+	});
+
+	it("carries the same summary in the community's past-sessions list, with the managing side flagged", async () => {
+		await endSession(scheduledSessionId);
+		await stampRecording(scheduledSessionId, RecordingStatus.READY, {
+			durationSeconds: 100,
+		});
+
+		const past = await live.listCommunitySessions(
+			auth(adminUserId),
+			communityId,
+			"past",
+		);
+		const listed = past.find((entry) => entry.id === scheduledSessionId);
+
+		expect(listed?.recording).toEqual({
+			status: RecordingStatus.READY,
+			durationSeconds: 100,
+			expired: false,
+		});
+		/* @info - this list is the managing side's surface (D-P5-6 as amended): the
+		 * owner/admin's `canModerate` is what the frontend's Download hangs on, and an ordinary
+		 * member sees the same state without it */
+		expect(listed?.canModerate).toBe(true);
+
+		const asMember = await live.listCommunitySessions(
+			auth(memberUserId),
+			communityId,
+			"past",
+		);
+		const memberView = asMember.find(
+			(entry) => entry.id === scheduledSessionId,
+		);
+		expect(memberView?.recording?.status).toBe(RecordingStatus.READY);
+		expect(memberView?.canModerate).toBe(false);
+	});
+
+	/* ── Phase 5b: the host's delete (D-P5-11) ──────────────────────── */
+
+	it("deletes only for the host, idempotently, and takes the recording out of every surface", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.READY, {
+			durationSeconds: 631,
+		});
+
+		/* not the host: the enrolled student, and a community owner/admin (a paid course's
+		 * class stays host-only, and destroying a recording is the host's own call) */
+		const student = await capture(() =>
+			recordings.deleteRecording(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(student!.status).toBe(403);
+		const admin = await capture(() =>
+			recordings.deleteRecording(auth(adminUserId), lessonSessionId),
+		);
+		expect(admin!.status).toBe(403);
+		expect(deleteSpy()).not.toHaveBeenCalled();
+
+		const deleted = await recordings.deleteRecording(
+			auth(hostUserId),
+			lessonSessionId,
+		);
+		expect(deleted).toEqual({ sessionId: lessonSessionId, deleted: true });
+		expect(deleteSpy()).toHaveBeenCalledTimes(1);
+		expect(deleteSpy()).toHaveBeenCalledWith(
+			recordingKeyFor(lessonSessionId),
+			config.recordings.bucket,
+		);
+		expect((await row(lessonSessionId)).recording_status).toBe(
+			RecordingStatus.DELETED,
+		);
+
+		/* twice is one delete, and the answer is the same: the host pressing it again after a
+		 * slow response is not an error */
+		const again = await recordings.deleteRecording(
+			auth(hostUserId),
+			lessonSessionId,
+		);
+		expect(again).toEqual({ sessionId: lessonSessionId, deleted: true });
+		expect(deleteSpy()).toHaveBeenCalledTimes(1);
+
+		/* gone from every surface - and 404, not "expired": nothing existed as far as the
+		 * people who paid are concerned (D-P5-11) */
+		expect(
+			(await live.getSession(auth(hostUserId), lessonSessionId)).recording,
+		).toBeNull();
+		expect(
+			(await live.getSession(auth(enrolledUserId), lessonSessionId)).recording,
+		).toBeNull();
+		const url = await capture(() =>
+			recordings.recordingUrlFor(auth(enrolledUserId), lessonSessionId),
+		);
+		expect(url!.status).toBe(404);
+		expect(presignSpy()).not.toHaveBeenCalled();
+
+		/* deleting nothing is a 404, not a delete call: there is no object to remove */
+		const nothing = await capture(() =>
+			recordings.deleteRecording(auth(hostUserId), scheduledSessionId),
+		);
+		expect(nothing!.status).toBe(404);
+		expect(deleteSpy()).toHaveBeenCalledTimes(1);
+	});
+
+	it("refuses a delete while a recorder is still running, rather than orphaning its file", async () => {
+		await stampRecording(lessonSessionId, RecordingStatus.RECORDING);
+
+		const result = await capture(() =>
+			recordings.deleteRecording(auth(hostUserId), lessonSessionId),
+		);
+
+		/* a partial object is written back after the delete, so the honest answer is "stop it
+		 * first": the poll converges it to ready (or failed) within one tick */
+		expect(result!.status).toBe(409);
+		expect(result!.message).toMatch(/stop the recording/i);
+		expect(deleteSpy()).not.toHaveBeenCalled();
+		expect((await row(lessonSessionId)).recording_status).toBe(
+			RecordingStatus.RECORDING,
+		);
+	});
+
+	it("refuses a delete on an external session, which has no recording to destroy", async () => {
+		const external = await capture(() =>
+			recordings.deleteRecording(auth(hostUserId), externalSessionId),
+		);
+		expect(external!.status).toBe(400);
+		expect(deleteSpy()).not.toHaveBeenCalled();
+	});
+
+	it("signs the recordings bucket and the attachment filename into the real URL", async () => {
+		/* @info - the only leg that calls the real presign: signing is local (no request is
+		 * made), and it is what proves the bucket and the disposition reach the signature
+		 * rather than the spy's argument list. */
+		presignSpy().mockRestore();
+
+		const url = await StorageService.getInstance().generatePresignedDownloadUrl(
+			{
+				key: recordingKeyFor(lessonSessionId),
+				bucket: config.recordings.bucket,
+				responseContentDisposition: 'attachment; filename="x.mp4"',
+			},
+		);
+		const decoded = decodeURIComponent(url);
+
+		expect(decoded).toContain(config.recordings.bucket);
+		expect(decoded).toContain(
+			'response-content-disposition=attachment; filename="x.mp4"',
+		);
+	});
+
 	/* ── Derived state (spec section 4) and the untouched surfaces ───── */
 
 	it("derives expiry instead of storing it, and keeps deleted distinct from never recorded", async () => {
@@ -785,9 +1219,11 @@ describe("Live sessions phase 5a (recording capture)", () => {
 		).toBe(RecordingStatus.DELETED);
 	});
 
-	it("leaves a session that was never recorded behaving exactly as before", async () => {
+	it("leaves a session that was never recorded behaving exactly as before, bar one null field", async () => {
 		const view = await live.getSession(auth(hostUserId), lessonSessionId);
 
+		/* @info - exactly today's keys plus `recording`: the payload gained one nullable field
+		 * and every existing consumer keeps working (brief non-negotiable 9, leg 13) */
 		expect(Object.keys(view).sort()).toEqual(
 			[
 				"canJoin",
@@ -803,6 +1239,7 @@ describe("Live sessions phase 5a (recording capture)", () => {
 				"kind",
 				"lesson",
 				"meetingUrl",
+				"recording",
 				"startsAt",
 				"status",
 				"title",
@@ -814,6 +1251,7 @@ describe("Live sessions phase 5a (recording capture)", () => {
 			status: "live",
 			isHost: true,
 			lesson: { title: "Recording Lesson" },
+			recording: null,
 		});
 
 		const token = await live.issueToken(auth(enrolledUserId), lessonSessionId);
@@ -838,6 +1276,16 @@ describe("Live sessions phase 5a (route wiring)", () => {
 
 		expect(table).toContain("POST /sessions/:sessionId/recording/start");
 		expect(table).toContain("POST /sessions/:sessionId/recording/stop");
+	});
+
+	it("mounts the phase 5b playback and delete paths", () => {
+		const table = liveRouter.routes.map(
+			(route) => `${route.method} ${route.path}`,
+		);
+
+		/* @info - GET with a query flag, not POST: minting a URL changes nothing server-side */
+		expect(table).toContain("GET /sessions/:sessionId/recording/url");
+		expect(table).toContain("DELETE /sessions/:sessionId/recording");
 	});
 
 	it("keeps the phase 1/2/3 paths intact", () => {

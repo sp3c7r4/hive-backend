@@ -2,6 +2,7 @@ import {
 	BadRequestError,
 	ConflictError,
 	ForbiddenError,
+	GoneError,
 	InternalServerError,
 	NotFoundError,
 	RateLimitError,
@@ -34,4 +35,8 @@ export const throwConflictError = (message: string): never => {
 
 export const throwRateLimitError = (message: string): never => {
 	throw new RateLimitError(message);
+};
+
+export const throwGoneError = (message: string): never => {
+	throw new GoneError(message);
 };

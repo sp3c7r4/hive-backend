@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { sendSuccessResponse } from "@/helpers";
 import { throwBadRequestError } from "@/helpers/errors/throw-errors";
 import { LiveService } from "./live.service";
+import type { RecordingDisposition } from "./live-recording.service";
 import type { CommunitySessionScope } from "./live-session.service";
 
 /** @info - Session ids arrive as path params, so guard the Number() coercion. */
@@ -83,6 +84,31 @@ export class LiveController {
 	stopRecording = async (c: Context) => {
 		const authData = c.get("authData");
 		const result = await this.service.stopRecording(
+			authData,
+			parseSessionId(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - GET /live/sessions/:sessionId/recording/url?disposition=inline|attachment */
+	recordingUrl = async (c: Context) => {
+		const authData = c.get("authData");
+		/* @info - Anything that is not `attachment` streams: the flag is a download toggle,
+		 * not a value with a meaning of its own. */
+		const disposition: RecordingDisposition =
+			c.req.query("disposition") === "attachment" ? "attachment" : "inline";
+		const result = await this.service.recordingUrl(
+			authData,
+			parseSessionId(c),
+			disposition,
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - DELETE /live/sessions/:sessionId/recording */
+	deleteRecording = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.deleteRecording(
 			authData,
 			parseSessionId(c),
 		);

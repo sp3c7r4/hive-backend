@@ -33,7 +33,8 @@ liveRouter.post("/sessions/:sessionId/end-live", controller.endLive);
  * @info - Recording (phase 5a). No `requireInstructor` and no body schema: a lesson's
  * recording is host-only, a standalone event's is its host's too, and the service holds the
  * authorization exactly as the token and moderation routes do. Ending the session stops the
- * recorder, so `/end-live` above is the other half of these two.
+ * recorder, so `/end-live` above is the other half of these two. See the phase 5b pair
+ * (playback URL and delete) below.
  */
 liveRouter.post(
 	"/sessions/:sessionId/recording/start",
@@ -43,6 +44,15 @@ liveRouter.post(
 	"/sessions/:sessionId/recording/stop",
 	controller.stopRecording,
 );
+
+/**
+ * @info - Playback and delete (phase 5b). GET, because minting a URL changes nothing
+ * server-side, and the same reason as above for the missing `requireInstructor`:
+ * `resolveAccess` is the gate, and the download rule (the managing side only) is applied by
+ * the service after it. Deleting is host-only, in the same service.
+ */
+liveRouter.get("/sessions/:sessionId/recording/url", controller.recordingUrl);
+liveRouter.delete("/sessions/:sessionId/recording", controller.deleteRecording);
 
 /**
  * @info - Standalone community events (phase 2). Authorization lives in the service

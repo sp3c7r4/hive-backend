@@ -35,8 +35,8 @@ import {
 	LiveSessionService,
 	roomNameForSession,
 } from "@/modules/live";
-import * as roomClient from "@/modules/live/live-room.client";
 import { liveRouter } from "@/modules/live/live.routes";
+import * as roomClient from "@/modules/live/live-room.client";
 import { CacheService } from "@/services";
 
 /**
@@ -740,6 +740,10 @@ describe("Live sessions phase 3 (in-room moderation)", () => {
 				"kind",
 				"lesson",
 				"meetingUrl",
+				/* @info - phase 5b's one new key, added here rather than loosening the assertion
+				 * to a subset match: the point of this test is that the payload grew by exactly one
+				 * nullable field and nothing else moved. */
+				"recording",
 				"startsAt",
 				"status",
 				"title",
