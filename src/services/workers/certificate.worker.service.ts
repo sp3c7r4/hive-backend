@@ -13,6 +13,7 @@ import { CertificateService } from "@/modules/certificates/certificate.service";
 import { CertificateSettingsService } from "@/modules/admin/certificate-settings.service";
 import { NotificationService } from "@/modules/notifications";
 import { NotificationType } from "@/enums";
+import { withPresignedUrls } from "@/helpers/storage.helper";
 import { CertificateGenerator, type CertificateTemplateData } from "../certificate.generator.service";
 import { StorageService } from "../storage.service";
 
@@ -120,6 +121,24 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 		/* @info - Director block: platform_settings wins, env is the fallback */
 		const director = await CertificateSettingsService.getInstance().get();
 
+		/* @info - Both signatures are stored as storage KEYS (`images/signature/…`),
+		 * while the template puts them straight into an <img src>. The renderer
+		 * loads the HTML via setContent, so a bare key resolves against
+		 * about:blank and silently renders as a broken image — the certificate
+		 * went out with two broken-signature icons before this. `withPresignedUrls`
+		 * is the repo's key → public CDN URL converter (it passes an absolute URL
+		 * through untouched and leaves an empty value empty, so the template's
+		 * {{#if}} guards still work). */
+		const signatures = withPresignedUrls(
+			{
+				courseInstructorSignature:
+					instructor?.signatureUrl?.trim() || undefined,
+				executiveDirectorSignature:
+					director.directorSignature?.trim() || undefined,
+			},
+			["courseInstructorSignature", "executiveDirectorSignature"],
+		);
+
 		const htmlData: CertificateTemplateData = {
 			studentName: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(),
 			course: course.title ?? "Course",
@@ -128,11 +147,9 @@ export class CertificateWorkerService extends IdempotentWorkerService<Certificat
 			courseInstructorName:
 				`${instructor?.firstName ?? ""} ${instructor?.lastName ?? ""}`.trim() ||
 				"Course Instructor",
-			courseInstructorSignature:
-				instructor?.signatureUrl?.trim() || undefined,
+			courseInstructorSignature: signatures.courseInstructorSignature,
 			executiveDirectorName: director.directorName,
-			executiveDirectorSignature:
-				director.directorSignature?.trim() || undefined,
+			executiveDirectorSignature: signatures.executiveDirectorSignature,
 		};
 
 		/* @info - Certificates are images: render the template to a crisp PNG */
