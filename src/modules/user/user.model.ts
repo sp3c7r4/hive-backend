@@ -24,6 +24,10 @@ export const users = pgTable(
 		passwordHash: varchar("password_hash", { length: 255 }),
 		avatarUrl: varchar("avatar_url", { length: 500 }),
 		bio: text("bio"),
+		/** @info - Professional headline shown under the name on an instructor's
+		 *         profile block (e.g. "Senior AI Research Lead, LagosAI Lab").
+		 *         Distinct from user_roles.role, which is the authorisation role. */
+		title: varchar("title", { length: 120 }),
 		phone: varchar("phone", { length: 50 }),
 		phoneVerified: boolean("phone_verified").default(false),
 		emailVerified: boolean("email_verified").default(false),

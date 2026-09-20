@@ -48,6 +48,8 @@ export const updateUserSchema = z.object({
 	lastName: z.string().max(255).optional(),
 	phone: z.string().optional(),
 	bio: z.string().optional(),
+	/** @info - Instructor headline; capped to the users.title column width. */
+	title: z.string().max(120).optional(),
 	preferences: z
 		.object({
 			notifications: z

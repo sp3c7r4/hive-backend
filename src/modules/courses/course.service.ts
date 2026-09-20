@@ -244,12 +244,14 @@ export class CourseService {
 		 * (authenticated strangers) gets a landing payload without content. */
 		const canRead = await this._canReadCourse(course, authData);
 
-		/* @info - Instructor profile for the detail page (name + avatar) */
+		/* @info - Instructor profile for the detail page (name + avatar + bio + headline) */
 		const [instructorUser] = await db
 			.select({
 				firstName: users.firstName,
 				lastName: users.lastName,
 				avatarUrl: users.avatarUrl,
+				bio: users.bio,
+				title: users.title,
 			})
 			.from(users)
 			.where(eq(users.id, course!.instructorId))
@@ -264,6 +266,8 @@ export class CourseService {
 								"avatar",
 							).avatar
 						: null,
+					bio: instructorUser.bio?.trim() || null,
+					title: instructorUser.title?.trim() || null,
 				}
 			: null;
 

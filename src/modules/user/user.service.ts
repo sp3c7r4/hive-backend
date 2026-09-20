@@ -69,6 +69,7 @@ export class UserService {
 		if (data.lastName !== undefined) updates.lastName = data.lastName;
 		if (data.phone !== undefined) updates.phone = data.phone;
 		if (data.bio !== undefined) updates.bio = data.bio;
+		if (data.title !== undefined) updates.title = data.title;
 		if (data.preferences !== undefined) {
 			const existing = (user as any).preferences ?? {};
 			updates.preferences = { ...existing, ...data.preferences };
@@ -111,6 +112,10 @@ export class UserService {
 		};
 		if (data.avatarUrl) userUpdates.avatarUrl = data.avatarUrl;
 		if (data.bio !== undefined) userUpdates.bio = data.bio;
+		/* @info - Clamped, not validated: /user/onboard reads raw formData with no
+		 *         zod schema, so an over-long title would otherwise reach a
+		 *         VARCHAR(120) column and fail the whole signup. */
+		if (data.title !== undefined) userUpdates.title = String(data.title).slice(0, 120);
 
 		await this.userRepo.update(userId, userUpdates as any);
 
