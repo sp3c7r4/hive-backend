@@ -1,7 +1,8 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import { withPresignedUrl } from "@/helpers/storage.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import { LessonStatus } from "@/enums";
 import { courses, lessons, modules } from "@/modules/courses/course.model";
 import { users } from "@/modules/user/user.model";
 import { enrollments, lessonProgress } from "@/modules/enrollments/enrollment.model";
@@ -59,6 +60,11 @@ export class StudentDashboardService {
 					.select({ courseId: modules.courseId, total: count() })
 					.from(lessons)
 					.innerJoin(modules, eq(modules.id, lessons.moduleId))
+					/* @info - Published lessons only: a draft is not something a student
+					 * can continue, and counting it makes a finished course never reach
+					 * 100% — which is also what decides whether it leaves "Continue
+					 * learning" below. Same rule the certificate uses. */
+					.where(ne(lessons.status, LessonStatus.DRAFT as any))
 					.groupBy(modules.courseId) as any,
 				db
 					.select({
@@ -120,20 +126,24 @@ export class StudentDashboardService {
 		const lessonTotalMap = new Map(
 			(lessonCounts as any[]).map((r) => [Number(r.courseId), Number(r.total)]),
 		);
-		const continueLearning = (enrollRows as any[]).map((e) => {
-			const total = lessonTotalMap.get(e.courseId) ?? 0;
-			const done = completedMap.get(e.enrollmentId) ?? 0;
-			return {
-				courseId: e.courseId,
-				title: e.title,
-				slug: e.slug,
-				coverImageUrl: e.coverImageUrl
-					? withPresignedUrl({ coverImageUrl: e.coverImageUrl } as any, "coverImageUrl").coverImageUrl
-					: null,
-				instructorName: `${e.instructorName ?? ""}`.trim() || "Instructor",
-				progressPercent: total > 0 ? Math.round((done / total) * 100) : 0,
-			};
-		});
+		const continueLearning = (enrollRows as any[])
+			.map((e) => {
+				const total = lessonTotalMap.get(e.courseId) ?? 0;
+				const done = completedMap.get(e.enrollmentId) ?? 0;
+				return {
+					courseId: e.courseId,
+					title: e.title,
+					slug: e.slug,
+					coverImageUrl: e.coverImageUrl
+						? withPresignedUrl({ coverImageUrl: e.coverImageUrl } as any, "coverImageUrl").coverImageUrl
+						: null,
+					instructorName: `${e.instructorName ?? ""}`.trim() || "Instructor",
+					progressPercent: total > 0 ? Math.round((done / total) * 100) : 0,
+				};
+			})
+			/* @info - A finished course is not something to continue: it belongs in
+			 * the student's course list, not here. */
+			.filter((entry) => entry.progressPercent < 100);
 
 		/* Due soon — real assignment lessons with due dates */
 		const subStatusMap = new Map(
