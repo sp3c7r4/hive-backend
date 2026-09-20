@@ -563,6 +563,45 @@ describe("Live sessions phase 5 (recording capture, playback and deletion)", () 
 		expect(stopSpy()).not.toHaveBeenCalled();
 	});
 
+	it("poll on an ended session whose egress already completed: ready, not stuck at processing", async () => {
+		/* The staging bug, as a leg. The host stopped the recording, ended the session, and the
+		 * poll then asked LiveKit to stop an egress that had already completed. LiveKit answers
+		 * 412 ("egress with status EGRESS_COMPLETE cannot be stopped"), so the row sat at
+		 * `processing` forever while its file was already written and playable. */
+		const egressId = await stampRecording(
+			lessonSessionId,
+			RecordingStatus.PROCESSING,
+		);
+		await endSession(lessonSessionId);
+		listSpy().mockResolvedValue([
+			egressInfo(egressId, "complete", { durationSeconds: 92 }),
+		]);
+
+		await recordings.pollRecordings();
+
+		const stored = await row(lessonSessionId);
+		expect(stored.recording_status).toBe(RecordingStatus.READY);
+		expect(stored.recording_duration_seconds).toBe(92);
+		expect(stopSpy()).not.toHaveBeenCalled();
+		expect(deleteSpy()).not.toHaveBeenCalled();
+	});
+
+	it("an ended session whose egress is still running is still stopped (trigger 2 kept)", async () => {
+		const egressId = await stampRecording(
+			lessonSessionId,
+			RecordingStatus.RECORDING,
+		);
+		await endSession(lessonSessionId);
+		listSpy().mockResolvedValue([egressInfo(egressId, "active", {})]);
+
+		await recordings.pollRecordings();
+
+		expect(stopSpy()).toHaveBeenCalledWith(egressId);
+		expect((await row(lessonSessionId)).recording_status).toBe(
+			RecordingStatus.PROCESSING,
+		);
+	});
+
 	it("does not fail a claim whose LiveKit start is still in flight (B1)", async () => {
 		await stampClaim(lessonSessionId);
 

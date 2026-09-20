@@ -424,16 +424,22 @@ export class LiveRecordingService {
 			return;
 		}
 
+		/* @info - Ask LiveKit before deciding anything: its answer says whether there is still
+		 * something to stop. This call used to sit BELOW the ended-session branch, so a finished
+		 * egress on a finished session was blind-stopped, LiveKit answered 412 ("egress with
+		 * status EGRESS_COMPLETE cannot be stopped"), and the row sat at `processing` forever
+		 * with its file already written: the first real recording on staging did exactly that,
+		 * every 15 seconds, until this was moved. */
+		const [info] = await listRoomRecordings(egressId);
+
 		/* @info - Trigger 2 generalised (D-P5-15): a session that is no longer live must not
 		 * keep recording. end-live asks for the stop on its own path, but delete and cancel end
 		 * a class too, and end-live's stop is best effort - this backstop reaches every route
 		 * within one poll tick, instead of the cap's four hours. */
 		if (session.deletedAt !== null || session.status !== "live") {
-			await this.stopForEndedSession(session, status, egressId);
+			await this.stopForEndedSession(session, status, egressId, info);
 			return;
 		}
-
-		const [info] = await listRoomRecordings(egressId);
 		if (!info) {
 			/* @info - Trigger 4 (D-P5-15): LiveKit no longer knows this egress while we still
 			 * believe it is running - the recorder died with its room. A row that was already
@@ -483,12 +489,31 @@ export class LiveRecordingService {
 
 	/** @info - The session is over, so the recorder goes: claim the row first so two cycles
 	 *  cannot both ask, then ask. A row already `processing` is re-asked, which is what
-	 *  converges a stop LiveKit refused. */
+	 *  converges a stop LiveKit refused.
+	 *
+	 *  The egress's own state is consulted first, because "the session ended" does not mean
+	 *  "there is something to stop": a recording that finished on its own, or that the host
+	 *  stopped before End session, is already a file. Stopping it again is the 412 above and a
+	 *  row stuck at `processing` forever. */
 	private stopForEndedSession = async (
 		session: LiveSession,
 		status: RecordingStatus,
 		egressId: string,
+		info: EgressInfoSummary | undefined,
 	): Promise<void> => {
+		if (info?.state === "complete") {
+			await this.markReady(session, status, info);
+			return;
+		}
+		if (
+			info &&
+			(info.state === "failed" ||
+				info.state === "aborted" ||
+				info.state === "limit_reached")
+		) {
+			await this.fail(session, status, info.error ?? EGRESS_FAILED, info.endedAt);
+			return;
+		}
 		if (status === RecordingStatus.RECORDING) {
 			const claimed = await this.updateRow(session.id, status, {
 				recordingStatus: RecordingStatus.PROCESSING,
@@ -642,7 +667,15 @@ export class LiveRecordingService {
 			await stopRoomRecording(egressId);
 		} catch (error) {
 			/* @info - Best effort: a refusal usually means the egress already finished or the
-			 * room took it with it, and the next poll reads the terminal state. */
+			 * room took it with it, and the next poll reads the terminal state. The finished case is
+			 * LiveKit's 412, which is the expected answer for a recording that ended before its
+			 * session did, so it does not earn a stack trace every 15 seconds. */
+			if ((error as { status?: number })?.status === 412) {
+				this.log.info(
+					`live recording ${sessionId}: ${egressId} had already finished when the stop was asked`,
+				);
+				return;
+			}
 			this.log.error(
 				`live recording ${sessionId}: stopping ${egressId} failed`,
 				error,
