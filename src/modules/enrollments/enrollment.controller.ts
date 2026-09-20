@@ -46,27 +46,38 @@ export class EnrollmentController {
 
 	markLessonComplete = async (c: Context) => {
 		const authData = c.get("authData");
-		const enrollmentId = c.req.param("enrollmentId");
-		const lessonId = c.req.param("lessonId");
-		const data = await this.service.markLessonComplete(
+		/* @info - Route params are strings; coerce here so the service, the
+		 * progress row and the certificate job all carry real ids. These used to
+		 * be casts (`as unknown as number`) around a string, which put a string
+		 * enrollmentId into the certificate job payload. */
+		const enrollmentId = Number(c.req.param("enrollmentId"));
+		const lessonId = Number(c.req.param("lessonId"));
+		const { row, eligibility } = await this.service.markLessonComplete(
 			authData,
-			enrollmentId as unknown as number,
-			lessonId as unknown as number,
+			enrollmentId,
+			lessonId,
 		);
+		/* @info - `eligibility` rides along on the completion response so the
+		 * learner's checklist updates without a second round trip. `data` keeps
+		 * its existing shape for callers that only want the progress row. */
 		return sendSuccessResponse(c, {
 			message: "Lesson marked complete",
-			data,
+			data: row,
+			eligibility,
 		});
 	};
 
 	getLessonProgress = async (c: Context) => {
-		const enrollmentId = c.req.param("enrollmentId");
-		const data = await this.service.getLessonProgress(
-			enrollmentId as unknown as number,
+		const authData = c.get("authData");
+		const enrollmentId = Number(c.req.param("enrollmentId"));
+		const { data, eligibility } = await this.service.getLessonProgress(
+			authData,
+			enrollmentId,
 		);
 		return sendSuccessResponse(c, {
 			message: "Lesson progress fetched successfully",
 			data,
+			eligibility,
 		});
 	};
 }

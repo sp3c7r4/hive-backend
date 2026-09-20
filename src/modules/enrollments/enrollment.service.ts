@@ -1,10 +1,10 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { EmailJobNames } from "@/enums";
+import { EmailJobNames, LessonStatus } from "@/enums";
 import { EmailQueueService } from "@/services/queues/email.queue.service";
 import { EnrollmentMessages } from "./enrollment.message";
 import {
@@ -16,8 +16,13 @@ import { courses, lessons, modules } from "@/modules/courses/course.model";
 import { enrollments as enrollmentsModel } from "./enrollment.model";
 import { communities } from "@/modules/communities/community.model";
 import { payments } from "@/modules/payment/payment.model";
-import { quizAttempts } from "@/modules/assessments/assessment.model";
+import { quizAttempts, quizQuestions } from "@/modules/assessments/assessment.model";
 import { CertificateQueueService } from "@/services/queues/certificate.queue.service";
+import {
+	type CertificateEligibilityResult,
+	type CertificateQuizInput,
+	evaluateCertificateEligibility,
+} from "@/helpers/certificate-eligibility";
 
 export class EnrollmentService {
 	private static instance: EnrollmentService;
@@ -170,11 +175,14 @@ export class EnrollmentService {
   ) => {
     const row = await this.progress.upsertProgress(enrollmentId, lessonId, authData.id);
 
-    /* @info - After marking, check whether the course is now complete enough
-     * to earn a certificate; if so, enqueue generation (idempotent per
-     * user+course, so repeated completes never double-generate). */
+    /* @info - After marking, re-evaluate eligibility: enqueue generation when
+     * the student now qualifies (idempotent per user+course, so repeated
+     * completes never double-generate), and hand the verdict back either way
+     * so the learner is told what is still missing instead of being left to
+     * guess. */
+    let eligibility: CertificateEligibilityResult | null = null;
     try {
-      await this._maybeQueueCertificate(authData.id, enrollmentId);
+      eligibility = await this._maybeQueueCertificate(authData.id, enrollmentId);
     } catch (e) {
       this.log.error("Could not evaluate certificate eligibility", {
         error: e,
@@ -182,10 +190,19 @@ export class EnrollmentService {
       });
     }
 
-    return row;
+    return { row, eligibility };
   };
 
-  private _maybeQueueCertificate = async (userId: number, enrollmentId: number) => {
+  /**
+   * @info - Evaluates certificate eligibility for an enrollment and queues
+   *         generation when it passes. Returns the full verdict, which is the
+   *         same object the learner UI renders as a requirements checklist —
+   *         the rules live in `evaluateCertificateEligibility`, not here.
+   */
+  private _maybeQueueCertificate = async (
+    userId: number,
+    enrollmentId: number,
+  ): Promise<CertificateEligibilityResult | null> => {
     const db = getDb();
 
     const [enrollment] = await db
@@ -193,7 +210,7 @@ export class EnrollmentService {
       .from(enrollmentsModel)
       .where(eq(enrollmentsModel.id, enrollmentId))
       .limit(1);
-    if (!enrollment) return;
+    if (!enrollment) return null;
 
     const [course] = await db
       .select({
@@ -204,80 +221,183 @@ export class EnrollmentService {
       .from(courses)
       .where(eq(courses.id, enrollment.courseId))
       .limit(1);
-    if (!course?.offerCertificate) return;
+    if (!course) return null;
 
-    /* Total + completed lessons for this enrollment */
-    const progressRows = await this.progress.findByEnrollment(enrollmentId);
-    const totalLessons = await this._countCourseLessons(enrollment.courseId);
-    if (totalLessons === 0) return;
-    const completedCount = progressRows.filter((p: any) => p.completed).length;
-    const completionPercent = Math.round((completedCount / totalLessons) * 100);
-
-    if (completionPercent < (course.minCompletionPercent ?? 80)) return;
-
-    /* Quiz score: average per-quiz-lesson score (correct/total). No quiz
-     * lessons → 100 (passes any threshold). */
-    const quizScorePercent = await this._courseQuizScore(userId, enrollment.courseId);
-    if (quizScorePercent < (course.minQuizScorePercent ?? 0)) return;
+    const eligibility = await this.evaluateEligibility(userId, enrollmentId, {
+      courseId: enrollment.courseId,
+      offerCertificate: course.offerCertificate ?? false,
+      minCompletionPercent: course.minCompletionPercent ?? 80,
+      minQuizScorePercent: course.minQuizScorePercent ?? 0,
+    });
+    if (!eligibility?.eligible) return eligibility;
 
     await CertificateQueueService.getInstance().queueCertificate({
       userId,
       courseId: enrollment.courseId,
       enrollmentId,
-      completionPercent,
-      quizScorePercent,
+      completionPercent: eligibility.completionPercent,
+      /* @info - The certificate row is NOT NULL on this column and nothing
+       * gates on it, so a null (no quizzes attempted) is stored as 100. */
+      quizScorePercent: eligibility.quizScorePercent ?? 100,
+    });
+
+    return eligibility;
+  };
+
+  /**
+   * @info - Gathers the plain data the pure eligibility rules need and runs
+   *         them. Public so the progress endpoint can explain a decision
+   *         without duplicating any of the queries.
+   */
+  evaluateEligibility = async (
+    userId: number,
+    enrollmentId: number,
+    criteria?: {
+      courseId: number;
+      offerCertificate: boolean;
+      minCompletionPercent: number;
+      minQuizScorePercent: number;
+    },
+  ): Promise<CertificateEligibilityResult | null> => {
+    const db = getDb();
+
+    const resolved =
+      criteria ?? (await this._certificateCriteria(enrollmentId));
+    if (!resolved) return null;
+
+    /* @info - Published lessons only: drafts cannot be required of a student,
+     * and a completion recorded against one cannot count towards the
+     * threshold. */
+    const lessonRows = await db
+      .select({ id: lessons.id, type: lessons.type, title: lessons.title })
+      .from(lessons)
+      .innerJoin(modules, eq(modules.id, lessons.moduleId))
+      .where(
+        and(
+          eq(modules.courseId, resolved.courseId),
+          ne(lessons.status, LessonStatus.DRAFT as any),
+        ),
+      );
+
+    const progressRows = await this.progress.findByEnrollment(enrollmentId);
+
+    return evaluateCertificateEligibility({
+      offerCertificate: resolved.offerCertificate,
+      minCompletionPercent: resolved.minCompletionPercent,
+      minQuizScorePercent: resolved.minQuizScorePercent,
+      publishedLessonIds: lessonRows.map((lesson) => lesson.id),
+      completedLessonIds: progressRows
+        .filter((row: any) => row.completed)
+        .map((row: any) => row.lessonId),
+      quizLessons: await this._quizInputs(
+        userId,
+        lessonRows.filter((lesson) => lesson.type === "quiz"),
+      ),
     });
   };
 
-  private _countCourseLessons = async (courseId: number): Promise<number> => {
+  /** @info - The course's certificate settings, resolved from an enrollment. */
+  private _certificateCriteria = async (enrollmentId: number) => {
     const db = getDb();
-    const [row] = await db
-      .select({ total: count() })
-      .from(lessons)
-      .innerJoin(modules, eq(modules.id, lessons.moduleId))
-      .where(eq(modules.courseId, courseId));
-    return Number(row?.total ?? 0);
+    const [enrollment] = await db
+      .select({ courseId: enrollmentsModel.courseId })
+      .from(enrollmentsModel)
+      .where(eq(enrollmentsModel.id, enrollmentId))
+      .limit(1);
+    if (!enrollment) return null;
+
+    const [course] = await db
+      .select({
+        offerCertificate: courses.offerCertificate,
+        minCompletionPercent: courses.minCompletionPercent,
+        minQuizScorePercent: courses.minQuizScorePercent,
+      })
+      .from(courses)
+      .where(eq(courses.id, enrollment.courseId))
+      .limit(1);
+    if (!course) return null;
+
+    return {
+      courseId: enrollment.courseId,
+      offerCertificate: course.offerCertificate ?? false,
+      minCompletionPercent: course.minCompletionPercent ?? 80,
+      minQuizScorePercent: course.minQuizScorePercent ?? 0,
+    };
   };
 
-  private _courseQuizScore = async (userId: number, courseId: number): Promise<number> => {
+  /**
+   * @info - Per-quiz attempt data. Two counts per quiz lesson: the questions
+   *         that exist (the score denominator, so unanswered questions count
+   *         against the student) and the ones currently answered correctly.
+   *         Note `quiz_attempts` holds ONE row per question, upserted on
+   *         re-submission, so these are current standings rather than a
+   *         history of every attempt.
+   */
+  private _quizInputs = async (
+    userId: number,
+    quizLessons: Array<{ id: number; title: string | null }>,
+  ): Promise<CertificateQuizInput[]> => {
     const db = getDb();
-    const quizLessonRows = await db
-      .select({ lessonId: lessons.id })
-      .from(lessons)
-      .innerJoin(modules, eq(modules.id, lessons.moduleId))
-      .where(and(eq(modules.courseId, courseId), eq(lessons.type, "quiz" as any)));
-    if (quizLessonRows.length === 0) return 100;
+    const inputs: CertificateQuizInput[] = [];
 
-    let totalPercent = 0;
-    for (const { lessonId } of quizLessonRows) {
-      const [stats] = await db
-        .select({ correct: count() })
-        .from(quizAttempts)
-        .where(
-          and(
-            eq(quizAttempts.userId, userId),
-            eq(quizAttempts.lessonId, lessonId),
-            eq(quizAttempts.isCorrect, true),
-          ),
-        );
-      const [attempts] = await db
+    for (const lesson of quizLessons) {
+      const [authored] = await db
+        .select({ total: count() })
+        .from(quizQuestions)
+        .where(eq(quizQuestions.lessonId, lesson.id));
+      const [correct] = await db
         .select({ total: count() })
         .from(quizAttempts)
         .where(
           and(
             eq(quizAttempts.userId, userId),
-            eq(quizAttempts.lessonId, lessonId),
+            eq(quizAttempts.lessonId, lesson.id),
+            eq(quizAttempts.isCorrect, true),
           ),
         );
-      const attemptTotal = Number(attempts?.total ?? 0);
-      if (attemptTotal > 0) {
-        totalPercent += (Number(stats?.correct ?? 0) / attemptTotal) * 100;
-      }
+      const [attempted] = await db
+        .select({ total: count() })
+        .from(quizAttempts)
+        .where(
+          and(
+            eq(quizAttempts.userId, userId),
+            eq(quizAttempts.lessonId, lesson.id),
+          ),
+        );
+
+      inputs.push({
+        lessonId: lesson.id,
+        title: lesson.title?.trim() || "Quiz",
+        totalQuestions: Number(authored?.total ?? 0),
+        correctAnswers: Number(correct?.total ?? 0),
+        attempted: Number(attempted?.total ?? 0) > 0,
+      });
     }
-    return Math.round(totalPercent / quizLessonRows.length);
+
+    return inputs;
   };
 
-	getLessonProgress = async (enrollmentId: number) => {
-		return this.progress.findByEnrollment(enrollmentId);
-	};
+  /**
+   * @info - Lesson progress plus the certificate verdict, for the learn page.
+   *         Attached here rather than behind a new endpoint so the learner's
+   *         checklist costs no extra round trip.
+   */
+  getLessonProgress = async (authData: IAuthData, enrollmentId: number) => {
+    const data = await this.progress.findByEnrollment(enrollmentId);
+
+    let eligibility: CertificateEligibilityResult | null = null;
+    try {
+      eligibility = await this.evaluateEligibility(
+        Number(authData.id),
+        enrollmentId,
+      );
+    } catch (e) {
+      this.log.error("Could not evaluate certificate eligibility", {
+        error: e,
+        enrollmentId,
+      });
+    }
+
+    return { data, eligibility };
+  };
 }
