@@ -1,5 +1,4 @@
 import type { Context } from "hono";
-import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { throwNotFoundError } from "@/helpers/errors/throw-errors";
 import { CertificateMessages } from "./certificate.message";
@@ -18,14 +17,8 @@ export class CertificateController {
 		this.service = CertificateService.getInstance();
 	}
 
-	issue = async (c: Context) => {
-		const authData = c.get("authData");
-		const data = await this.service.issue(authData, await c.req.json());
-		return sendSuccessResponse(c, {
-			message: "Certificate issued successfully",
-			data,
-		}, StatusCodes.CREATED);
-	};
+	/* @info - No `issue` handler: issuance happens in the certificate worker,
+	 * never on request. See the note in certificate.routes.ts. */
 
 	/* Public verification — no auth */
 	verify = async (c: Context) => {
