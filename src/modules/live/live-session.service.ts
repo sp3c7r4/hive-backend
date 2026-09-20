@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
 import { LessonMeetingType, NotificationType } from "@/enums";
 import {
@@ -54,6 +55,17 @@ const formatStartsAt = (date: Date): string =>
 		timeStyle: "short",
 		timeZone: "Africa/Lagos",
 	}).format(date);
+
+/**
+ * @info - LiveKit room name for a session. Derived from the immutable session id and
+ * never stored: staging and production share one LiveKit project and are separated
+ * only by LIVEKIT_ROOM_PREFIX, so every participant and every deploy composes the
+ * same name for the same session. It lives here, next to the session it names, so the
+ * live service and the recorder both derive it from one place rather than one
+ * importing the other (which would be an import cycle).
+ */
+export const roomNameForSession = (sessionId: number): string =>
+	`${config.livekit.roomPrefix}session-${sessionId}`;
 
 /** @info - What the caller may do with a session (spec phase 1 section 5). */
 export interface LiveSessionAccess {

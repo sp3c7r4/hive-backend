@@ -56,6 +56,21 @@ export const config = {
 			domain: env.RESEND_DOMAIN,
 		},
 	},
+
+	recordings: {
+		/** @info - The private bucket session recordings land in (phase 5). */
+		bucket: env.RECORDINGS_BUCKET,
+		/** @info - D-P5-7: the prefix names the environment, so a dev bug cannot write a
+		 * prod key into the one shared bucket. Defaulted rather than required: an absent
+		 * variable must never mean an unprefixed (prod-looking) key. */
+		keyPrefix:
+			env.RECORDING_KEY_PREFIX ??
+			(env.NODE_ENV === "production"
+				? "prod"
+				: env.NODE_ENV === "staging"
+					? "staging"
+					: "dev"),
+	},
 	cdn: {
 		url: env.CDN_URL,
 	},

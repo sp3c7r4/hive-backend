@@ -69,6 +69,26 @@ export class LiveController {
 		return sendSuccessResponse(c, result);
 	};
 
+	/** @info - POST /live/sessions/:sessionId/recording/start */
+	startRecording = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.startRecording(
+			authData,
+			parseSessionId(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
+	/** @info - POST /live/sessions/:sessionId/recording/stop */
+	stopRecording = async (c: Context) => {
+		const authData = c.get("authData");
+		const result = await this.service.stopRecording(
+			authData,
+			parseSessionId(c),
+		);
+		return sendSuccessResponse(c, result);
+	};
+
 	/** @info - GET /live/communities/:communityId/sessions?scope=upcoming|past */
 	listCommunitySessions = async (c: Context) => {
 		const authData = c.get("authData");

@@ -7,7 +7,12 @@ import {
 	timestamp,
 	varchar,
 } from "drizzle-orm/pg-core";
-import { LiveSessionKind, LiveSessionStatus, TableNames } from "@/enums";
+import {
+	LiveSessionKind,
+	LiveSessionStatus,
+	RecordingStatus,
+	TableNames,
+} from "@/enums";
 import { softDelete } from "@/models/soft-delete.model";
 import { timestamps } from "@/models/timestamps.b.model";
 
@@ -18,6 +23,10 @@ export const liveSessionKindEnum = pgEnum(
 export const liveSessionStatusEnum = pgEnum(
 	"live_session_status",
 	Object.values(LiveSessionStatus) as [string, ...string[]],
+);
+export const liveRecordingStatusEnum = pgEnum(
+	"live_recording_status",
+	Object.values(RecordingStatus) as [string, ...string[]],
 );
 
 /**
@@ -49,6 +58,21 @@ export const liveSessions = pgTable(
 		startsAt: timestamp("starts_at", { withTimezone: true }),
 		durationMinutes: integer("duration_minutes").default(60).notNull(),
 		status: liveSessionStatusEnum("status").default("scheduled").notNull(),
+		/* @info - Recording (phase 5a). All nullable: a session that was never recorded
+		 * carries null everywhere, and the migration can land before the code. The key is
+		 * derived from the immutable id like the room name, so no deploy can strand a file
+		 * by recomputing a different one. */
+		recordingStatus: liveRecordingStatusEnum("recording_status"),
+		recordingEgressId: varchar("recording_egress_id", { length: 255 }),
+		recordingKey: varchar("recording_key", { length: 1000 }),
+		recordingDurationSeconds: integer("recording_duration_seconds"),
+		recordingStartedAt: timestamp("recording_started_at", {
+			withTimezone: true,
+		}),
+		recordingEndedAt: timestamp("recording_ended_at", {
+			withTimezone: true,
+		}),
+		recordingError: text("recording_error"),
 		...timestamps,
 		...softDelete,
 	},

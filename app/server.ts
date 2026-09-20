@@ -17,6 +17,7 @@ import { CertificateQueueService } from "@/services/queues/certificate.queue.ser
 import { ReceiptQueueService } from "@/services/queues/receipt.queue.service";
 import { SubscriptionExpiryQueueService } from "@/services/queues/subscription-expiry.queue.service";
 import { GradingQueueService } from "@/services/queues/grading.queue.service";
+import { LiveRecordingQueueService } from "@/services/queues/live-recording.queue.service";
 import { messagingWsHandler } from "@/modules/messaging/messaging.ws";
 import { logger } from "@/utils";
 
@@ -68,6 +69,7 @@ createBullBoard({
 		new BullMQAdapter(ReceiptQueueService.getInstance().getQueue()),
 		new BullMQAdapter(SubscriptionExpiryQueueService.getInstance().getQueue()),
 		new BullMQAdapter(GradingQueueService.getInstance().getQueue()),
+		new BullMQAdapter(LiveRecordingQueueService.getInstance().getQueue()),
 	],
 	serverAdapter: bullMQAdapter,
 	options: {

@@ -18,7 +18,8 @@ import type {
 	CreateLiveSessionInput,
 	UpdateLiveSessionInput,
 } from "./live-session.service";
-import { LiveSessionService } from "./live-session.service";
+import { LiveSessionService, roomNameForSession } from "./live-session.service";
+import { LiveRecordingService } from "./live-recording.service";
 
 /** @info - Live join tokens are short-lived joins, not sessions */
 const TOKEN_TTL_SECONDS = 2 * 60 * 60;
@@ -37,15 +38,6 @@ const NOT_IN_ROOM = "That participant is not in this session.";
 const MODERATE_SELF = "You cannot mute or remove yourself.";
 const MODERATE_HOST = "The host cannot be muted or removed.";
 
-/**
- * @info - LiveKit room name for a session. Derived from the immutable session id and
- * never stored: staging and production share one LiveKit project and are separated
- * only by LIVEKIT_ROOM_PREFIX, so every participant and every deploy composes the
- * same name for the same session.
- */
-export const roomNameForSession = (sessionId: number): string =>
-	`${config.livekit.roomPrefix}session-${sessionId}`;
-
 /** @info - A currently-denied participant, as the moderator's roster panel needs them. */
 export interface RemovedParticipant {
 	identity: string;
@@ -62,6 +54,7 @@ export interface RemovedParticipant {
 export class LiveService {
 	private static instance: LiveService;
 	private readonly sessions = LiveSessionService.getInstance();
+	private readonly recording = LiveRecordingService.getInstance();
 	private readonly log = serviceLogger("Live");
 
 	static getInstance(): LiveService {
@@ -162,12 +155,25 @@ export class LiveService {
 		return { sessionId: updated.id, status: updated.status };
 	};
 
+	/** @info - POST /live/sessions/:sessionId/recording/start — the host records the room. */
+	startRecording = async (authData: IAuthData, sessionId: number) =>
+		this.recording.startRecording(authData, sessionId);
+
+	/** @info - POST /live/sessions/:sessionId/recording/stop */
+	stopRecording = async (authData: IAuthData, sessionId: number) =>
+		this.recording.stopRecording(authData, sessionId);
+
 	/** @info - POST /live/sessions/:sessionId/end-live — the host ends the session */
 	endLive = async (authData: IAuthData, sessionId: number) => {
 		const { session } = await this.sessions.loadForHostAction(
 			authData,
 			sessionId,
 		);
+		/* @info - Trigger 2 (D-P5-15): ending the class ends its recorder, or the overnight
+		 * recording D-P5-9 exists to prevent arrives through the front door. Before the early
+		 * return below, so a repeat end-live still stops a recorder whose first stop was
+		 * refused - stopping an egress that is already stopped is a no-op. */
+		await this.recording.stopForSessionEnd(session);
 		if (session.status === "ended") {
 			return { sessionId: session.id, status: session.status };
 		}

@@ -30,6 +30,21 @@ liveRouter.post("/sessions/:sessionId/go-live", controller.goLive);
 liveRouter.post("/sessions/:sessionId/end-live", controller.endLive);
 
 /**
+ * @info - Recording (phase 5a). No `requireInstructor` and no body schema: a lesson's
+ * recording is host-only, a standalone event's is its host's too, and the service holds the
+ * authorization exactly as the token and moderation routes do. Ending the session stops the
+ * recorder, so `/end-live` above is the other half of these two.
+ */
+liveRouter.post(
+	"/sessions/:sessionId/recording/start",
+	controller.startRecording,
+);
+liveRouter.post(
+	"/sessions/:sessionId/recording/stop",
+	controller.stopRecording,
+);
+
+/**
  * @info - Standalone community events (phase 2). Authorization lives in the service
  * because a community owner/admin schedules these and need not be an instructor, so
  * `requireInstructor` deliberately does not apply here.

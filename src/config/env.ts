@@ -49,6 +49,16 @@ const EnvSchema = z.object({
 	AWS_SECRET_ACCESS_KEY: z.string(),
 	AWS_BEDROCK_API_KEY: z.string(),
 	AWS_S3_BUCKET: z.string(),
+	/* @info - Live recording (phase 5). A separate, hand-managed bucket from the media
+	 * one, with its own 90-day lifecycle: the default is the real bucket so a deploy that
+	 * has not learned the variable yet still records. */
+	RECORDINGS_BUCKET: z.string().default("hive-recordings-prod"),
+	/* @info - Names the environment inside that one bucket (`prod` / `staging` /
+	 * `dev`), so no dev run can write a prod key (D-P5-7). Defaulted per environment
+	 * in config rather than required, so a missing variable can never produce an
+	 * unprefixed key. */
+	RECORDING_KEY_PREFIX: z.string().optional(),
+
 	/* @info - Public media base (CloudFront in prod, public S3 in dev) */
 	CDN_URL: z.string(),
 	AWS_S3_ENDPOINT: z.string().optional(),

@@ -1,5 +1,18 @@
 export { liveRouter } from "./live.routes";
-export { LiveService, roomNameForSession } from "./live.service";
+export { LiveService } from "./live.service";
+export {
+	type EgressInfoSummary,
+	type EgressState,
+	recordingFileOutput,
+} from "./live-egress.client";
+export {
+	isRecordingActive,
+	LiveRecordingService,
+	type LiveSessionRecordingState,
+	recordingCapMinutes,
+	recordingKeyFor,
+	recordingStateFor,
+} from "./live-recording.service";
 export {
 	decorateLessonsWithSessions,
 	type LiveSessionFields,
@@ -21,5 +34,6 @@ export {
 	type LiveSessionAccess,
 	LiveSessionService,
 	type LiveSessionView,
+	roomNameForSession,
 	type UpdateLiveSessionInput,
 } from "./live-session.service";

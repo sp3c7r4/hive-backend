@@ -114,9 +114,17 @@ export class StorageService {
 		return this.client.send(command);
 	};
 
-	delete = async (key: string): Promise<DeleteObjectCommandOutput> => {
+	/**
+	 * @info - Deletes one object. The bucket defaults to the media bucket every other path
+	 * uses; recordings live in their own bucket (and have their own 90-day lifecycle), so the
+	 * caller passes it rather than a second service class existing for one bucket difference.
+	 */
+	delete = async (
+		key: string,
+		bucket: string = this.bucket,
+	): Promise<DeleteObjectCommandOutput> => {
 		const command = new DeleteObjectCommand({
-			Bucket: this.bucket,
+			Bucket: bucket,
 			Key: key,
 		});
 		return this.client.send(command);

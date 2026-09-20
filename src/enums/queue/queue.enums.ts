@@ -5,6 +5,7 @@ export enum QueueNames {
 	CERTIFICATE = "hive-certificate",
 	LESSON_CHUNK = "hive-lesson-chunk",
 	GRADING = "hive-grading",
+	LIVE_RECORDING = "hive-live-recording",
 }
 
 export enum JobNames {
@@ -12,6 +13,7 @@ export enum JobNames {
 	GENERATE_CERTIFICATE = "generate-certificate-job",
 	EMBED_LESSON = "embed-lesson-job",
 	GRADE_SUBMISSION = "grade-submission-job",
+	POLL_LIVE_RECORDINGS = "poll-live-recordings-job",
 }
 
 export enum EmailJobNames {
