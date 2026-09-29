@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /* Mocks — the service captures repository/queue instances at construction,
  * so we mock the modules and return shared fakes from getInstance().
@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => {
 		create: vi.fn(),
 		findById: vi.fn(),
 	};
-	const lessonRepo = { findById: vi.fn() };
+	const lessonRepo = { findById: vi.fn(), update: vi.fn() };
+	const courseRepo = { findById: vi.fn() };
+	const moduleRepo = { findById: vi.fn() };
 	const emailAdd = vi.fn();
 	const dbRow = { email: "vekogep220@murkstar.com", firstName: "Testing" };
 	const queryChain = { limit: vi.fn(async () => [dbRow]) };
@@ -22,7 +24,7 @@ const mocks = vi.hoisted(() => {
 			from: vi.fn(() => ({ where: vi.fn(() => queryChain) })),
 		})),
 	};
-	return { submissionRepo, lessonRepo, emailAdd, db };
+	return { submissionRepo, lessonRepo, courseRepo, moduleRepo, emailAdd, db };
 });
 
 vi.mock("@/modules/assessments/submission.repository", () => ({
@@ -30,6 +32,8 @@ vi.mock("@/modules/assessments/submission.repository", () => ({
 }));
 vi.mock("@/modules/courses/course.repository", () => ({
 	LessonRepository: { getInstance: () => mocks.lessonRepo },
+	CourseRepository: { getInstance: () => mocks.courseRepo },
+	ModuleRepository: { getInstance: () => mocks.moduleRepo },
 }));
 vi.mock("@/services/queues/email.queue.service", () => ({
 	EmailQueueService: { getInstance: () => ({ add: mocks.emailAdd }) },
@@ -46,6 +50,19 @@ async function loadService() {
 
 const auth = { id: 6 } as any;
 
+/**
+ * @info - `grade` now resolves the submission's owning course before it writes
+ * anything, so the ownership chain has to resolve. The mapping assertions below
+ * are unchanged; the guard itself is covered by `submission-ownership.test.ts`
+ * and `submission-ownership-api.test.ts`. `auth.id` is the course's instructor
+ * as well as the submission's author, so either check passes.
+ */
+const stubOwnershipChain = () => {
+	mocks.courseRepo.findById.mockResolvedValue({ id: 100, instructorId: 6 });
+	mocks.moduleRepo.findById.mockResolvedValue({ id: 50, courseId: 100 });
+	mocks.lessonRepo.findById.mockResolvedValue({ id: 9, moduleId: 50 });
+};
+
 describe("AssignmentService.submit", () => {
 	beforeEach(() => {
 		mocks.submissionRepo.findByUserAndLesson.mockReset();
@@ -56,10 +73,19 @@ describe("AssignmentService.submit", () => {
 
 	it("clears score/feedback/gradedAt when a resubmission overwrites an existing graded submission", async () => {
 		const service = await loadService();
-		mocks.submissionRepo.findByUserAndLesson.mockResolvedValue({ id: 1, userId: 6, lessonId: 9 });
-		mocks.submissionRepo.update.mockResolvedValue({ id: 1, status: "submitted" });
+		mocks.submissionRepo.findByUserAndLesson.mockResolvedValue({
+			id: 1,
+			userId: 6,
+			lessonId: 9,
+		});
+		mocks.submissionRepo.update.mockResolvedValue({
+			id: 1,
+			status: "submitted",
+		});
 
-		await service.submit(auth, 9, "revised answer", ["images/files/general/a.pdf"]);
+		await service.submit(auth, 9, "revised answer", [
+			"images/files/general/a.pdf",
+		]);
 
 		expect(mocks.submissionRepo.update).toHaveBeenCalledWith(
 			1,
@@ -77,7 +103,10 @@ describe("AssignmentService.submit", () => {
 
 	it("creates a fresh submission without any grade fields on first submit", async () => {
 		const service = await loadService();
-		mocks.submissionRepo.create.mockResolvedValue({ id: 2, status: "submitted" });
+		mocks.submissionRepo.create.mockResolvedValue({
+			id: 2,
+			status: "submitted",
+		});
 
 		await service.submit(auth, 9, "hello", ["images/files/general/b.pdf"]);
 
@@ -100,14 +129,24 @@ describe("AssignmentService.grade", () => {
 		mocks.submissionRepo.findById.mockReset();
 		mocks.submissionRepo.update.mockReset();
 		mocks.emailAdd.mockReset();
-		mocks.submissionRepo.findById.mockResolvedValue({ id: 1, userId: 6, lessonId: 9, maxScore: 100 });
+		mocks.submissionRepo.findById.mockResolvedValue({
+			id: 1,
+			userId: 6,
+			lessonId: 9,
+			maxScore: 100,
+		});
 		mocks.submissionRepo.update.mockResolvedValue({ id: 1 });
+		stubOwnershipChain();
 	});
 
 	it("maps return_for_revision to status 'returned' with gradedAt null", async () => {
 		const service = await loadService();
 
-		await service.grade(1, { score: 40, feedback: "revise", action: "return_for_revision" });
+		await service.grade(auth, 1, {
+			score: 40,
+			feedback: "revise",
+			action: "return_for_revision",
+		});
 
 		expect(mocks.submissionRepo.update).toHaveBeenCalledWith(
 			1,
@@ -124,7 +163,11 @@ describe("AssignmentService.grade", () => {
 	it("maps grade to status 'graded' with gradedAt set and queues the email", async () => {
 		const service = await loadService();
 
-		await service.grade(1, { score: 90, feedback: "nice work", action: "grade" });
+		await service.grade(auth, 1, {
+			score: 90,
+			feedback: "nice work",
+			action: "grade",
+		});
 
 		expect(mocks.submissionRepo.update).toHaveBeenCalledWith(
 			1,
