@@ -20,8 +20,14 @@ import { users } from "@/modules/user/user.model";
 import { serviceLogger } from "@/utils";
 import type { NewQuizQuestion } from "./assessment.model";
 import { quizAttempts } from "./assessment.model";
+import {
+	type AssessmentStatus,
+	assessmentDeadline,
+	assessmentState,
+} from "./assessment-state";
 import { QuizMessages } from "./quiz.message";
 import {
+	AssessmentSessionRepository,
 	QuizAttemptRepository,
 	QuizQuestionRepository,
 } from "./quiz.repository";
@@ -35,6 +41,7 @@ export class QuizService {
 	private static instance: QuizService;
 	private questions: QuizQuestionRepository;
 	private attempts: QuizAttemptRepository;
+	private sessions: AssessmentSessionRepository;
 	private courses: CourseRepository;
 	private modules: ModuleRepository;
 	private lessons: LessonRepository;
@@ -50,10 +57,124 @@ export class QuizService {
 	private constructor() {
 		this.questions = QuizQuestionRepository.getInstance();
 		this.attempts = QuizAttemptRepository.getInstance();
+		this.sessions = AssessmentSessionRepository.getInstance();
 		this.courses = CourseRepository.getInstance();
 		this.modules = ModuleRepository.getInstance();
 		this.lessons = LessonRepository.getInstance();
 	}
+
+	/**
+	 * @info - Starting an assessment, which is idempotent by design.
+	 *
+	 * The once-only rule is the unique index on `(user_id, lesson_id)`, not a
+	 * read-then-write here: two Start presses racing each other must not open two
+	 * sessions, so losing the race (23505) is treated as the other press having won
+	 * and the caller just re-reads. `started_at` is never touched on a session that
+	 * already exists — resuming must not restart the clock, because the clock ran
+	 * while the student was away.
+	 */
+	startAssessment = async (authData: IAuthData, lessonId: number) => {
+		const lesson = await this.assertAssessmentLesson(lessonId);
+		const userId = Number(authData.id);
+
+		let session = await this.sessions.findByUserAndLesson(userId, lessonId);
+		if (!session) {
+			try {
+				session = await this.sessions.create({
+					userId,
+					lessonId,
+				} as any);
+			} catch (e: any) {
+				if (e?.code !== "23505") throw e;
+				session = await this.sessions.findByUserAndLesson(userId, lessonId);
+			}
+		}
+
+		return this.assessmentSessionResponse(userId, lesson, session ?? null);
+	};
+
+	/** @info - The read side: same body, never writes. The learn page calls this on
+	 *  mount to choose between Start, Resume and a terminal state. */
+	getAssessmentSession = async (authData: IAuthData, lessonId: number) => {
+		const lesson = await this.assertAssessmentLesson(lessonId);
+		const userId = Number(authData.id);
+		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
+
+		return this.assessmentSessionResponse(userId, lesson, session ?? null);
+	};
+
+	/**
+	 * @info - The answer payload a resume needs. Deliberately no `isCorrect`: the
+	 * autosave path writes these rows while the attempt is open, so echoing
+	 * correctness here would turn the resume call into an answer oracle.
+	 */
+	listAttemptsForStudent = async (
+		userId: number,
+		lessonId: number,
+	): Promise<Array<{ questionId: number; selectedAnswer: string | null }>> => {
+		const rows = await this.attempts.findByUserAndLesson(userId, lessonId);
+
+		return rows.map((row) => ({
+			questionId: row.questionId,
+			selectedAnswer: row.selectedAnswer,
+		}));
+	};
+
+	/**
+	 * @info - The shared assessment body. `serverNow` travels with it because the
+	 * countdown is rendered from the server's clock offset by the client's — a
+	 * client clock that is minutes out must not decide when the attempt ends.
+	 */
+	private assessmentSessionResponse = async (
+		userId: number,
+		lesson: { id: number; timeLimitMinutes: number | null },
+		session: {
+			startedAt: Date | null;
+			submittedAt: Date | null;
+		} | null,
+	): Promise<{
+		status: AssessmentStatus;
+		startedAt: Date | null;
+		deadline: Date | null;
+		submittedAt: Date | null;
+		serverNow: Date;
+		timeLimitMinutes: number | null;
+		answers: Array<{ questionId: number; selectedAnswer: string | null }>;
+	}> => {
+		const now = new Date();
+		const timeLimitMinutes = lesson.timeLimitMinutes ?? null;
+		const status = assessmentState({ session, timeLimitMinutes, now });
+
+		return {
+			status,
+			startedAt: session?.startedAt ?? null,
+			deadline: assessmentDeadline({
+				startedAt: session?.startedAt ?? null,
+				timeLimitMinutes,
+			}),
+			submittedAt: session?.submittedAt ?? null,
+			serverNow: now,
+			timeLimitMinutes,
+			/* @info - Before Start there is nothing to resume, and returning the
+			 * paper here would defeat D23's whole point. */
+			answers:
+				status === "not_started"
+					? []
+					: await this.listAttemptsForStudent(userId, lesson.id),
+		};
+	};
+
+	/** @info - Every assessment endpoint resolves the lesson first: the type is what
+	 *  decides whether these rules apply at all, and quizzes keep today's behaviour
+	 *  untouched. */
+	private assertAssessmentLesson = async (lessonId: number) => {
+		const lesson = await this.lessons.findById(lessonId);
+		if (!lesson) return throwNotFoundError(LessonMessages.NOT_FOUND);
+		if (lesson.type !== "assessment") {
+			return throwBadRequestError(QuizMessages.NOT_ASSESSMENT);
+		}
+		return lesson;
+	};
 
 	/**
 	 * @info - Authorization. `requireInstructor` answers "is this person an
