@@ -67,8 +67,15 @@ const cleanup = async () => {
 	await sql(`DELETE FROM lessons WHERE module_id IN ${moduleIds}`);
 	await sql(`DELETE FROM modules WHERE course_id IN ${courseIds}`);
 	await sql(`DELETE FROM courses WHERE slug = '${SLUG}'`);
-	await sql(`DELETE FROM users WHERE lower(email) IN ('${EMAIL}', '${INSTRUCTOR_EMAIL}')`);
+	/* @info - The community goes before the users who own it. `communities.owner_id`
+	 * is ON DELETE RESTRICT, so whichever suite finds `communities` empty creates its
+	 * own and then cannot delete its users until that community is gone — and a
+	 * failure here is invisible in the test counts, because it happens in `afterAll`
+	 * after every test has already reported passing. It also used to make the suite
+	 * permanently unrunnable: the surviving community outlived the run that made it
+	 * and blocked the next run's own `beforeAll` clean-up. */
 	await sql(`DELETE FROM communities WHERE slug = 'cert-test-community'`);
+	await sql(`DELETE FROM users WHERE lower(email) IN ('${EMAIL}', '${INSTRUCTOR_EMAIL}')`);
 };
 
 beforeAll(async () => {
