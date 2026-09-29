@@ -24,3 +24,15 @@ export const createQuizQuestionSchema = z.object({
 });
 
 export const updateQuizQuestionSchema = createQuizQuestionSchema.omit({ lessonId: true }).partial();
+
+/**
+ * @info - Autosave writes one answer at a time, so it carries only the question
+ *         being answered. `lessonId` rather than a path param because the client
+ *         already has it from the session call, and the pair is what the
+ *         once-only rule is enforced against.
+ */
+export const assessmentAutosaveSchema = z.object({
+	lessonId: z.number().int(),
+	questionId: z.number().int(),
+	selectedAnswer: z.string().max(500),
+});

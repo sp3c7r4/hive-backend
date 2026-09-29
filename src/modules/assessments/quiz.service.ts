@@ -17,6 +17,7 @@ import {
 	ModuleRepository,
 } from "@/modules/courses/course.repository";
 import { users } from "@/modules/user/user.model";
+import { EnrollmentRepository } from "@/modules/enrollments/enrollment.repository";
 import { serviceLogger } from "@/utils";
 import type { NewQuizQuestion } from "./assessment.model";
 import { quizAttempts } from "./assessment.model";
@@ -24,6 +25,7 @@ import {
 	type AssessmentStatus,
 	assessmentDeadline,
 	assessmentState,
+	withinGrace,
 } from "./assessment-state";
 import { QuizMessages } from "./quiz.message";
 import {
@@ -45,6 +47,7 @@ export class QuizService {
 	private courses: CourseRepository;
 	private modules: ModuleRepository;
 	private lessons: LessonRepository;
+	private enrollments: EnrollmentRepository;
 
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Quiz");
@@ -61,7 +64,181 @@ export class QuizService {
 		this.courses = CourseRepository.getInstance();
 		this.modules = ModuleRepository.getInstance();
 		this.lessons = LessonRepository.getInstance();
+		this.enrollments = EnrollmentRepository.getInstance();
 	}
+
+	/**
+	 * @info - Autosave. The assessment-only variant of writing an answer: it exists
+	 *         so an attempt survives a refresh, and it returns no score and no
+	 *         correctness, so it cannot be used to test guesses against the paper.
+	 *
+	 *         Requires an OPEN session. Grace is deliberately not honoured here —
+	 *         it exists so a submit that started before the bell is not lost, not to
+	 *         keep accepting fresh answers after it.
+	 */
+	autosaveAttempt = async (
+		authData: IAuthData,
+		input: { lessonId: number; questionId: number; selectedAnswer: string },
+	) => {
+		const lesson = await this.assertAssessmentLesson(input.lessonId);
+		const userId = Number(authData.id);
+		await this.assertEnrolledInLesson(userId, input.lessonId);
+
+		const session = await this.sessions.findByUserAndLesson(
+			userId,
+			lesson.id,
+		);
+		const status = assessmentState({
+			session: session ?? null,
+			timeLimitMinutes: lesson.timeLimitMinutes ?? null,
+			now: new Date(),
+		});
+
+		if (status === "submitted") {
+			return throwBadRequestError(QuizMessages.ATTEMPT_SUBMITTED);
+		}
+		if (status === "expired") {
+			return throwBadRequestError(QuizMessages.ATTEMPT_EXPIRED);
+		}
+		if (status === "not_started") {
+			return throwBadRequestError(QuizMessages.ATTEMPT_NOT_STARTED);
+		}
+
+		/* @info - One row per (user, lesson, question): the same upsert `submit`
+		 * does, minus the scoring. */
+		const existing = await this.attempts.findByUserAndQuestion(
+			userId,
+			input.questionId,
+		);
+		if (existing) {
+			await this.attempts.update(existing.id, {
+				selectedAnswer: input.selectedAnswer,
+				attemptedAt: new Date(),
+			} as any);
+		} else {
+			await this.attempts.create({
+				userId,
+				lessonId: lesson.id,
+				questionId: input.questionId,
+				selectedAnswer: input.selectedAnswer,
+			} as any);
+		}
+
+		return { serverNow: new Date() };
+	};
+
+	/**
+	 * @info - D9: an expired attempt is graded on whatever was autosaved, and there
+	 *         is no background job — the score is computable from the rows plus the
+	 *         questions, so it is computed the first time somebody asks for it.
+	 *         Idempotent, and it never touches `attempted_at` (that is when the
+	 *         student answered, not when they were graded).
+	 */
+	private gradeExpiredAssessment = async (userId: number, lessonId: number) => {
+		const rows = await this.attempts.findByUserAndLesson(userId, lessonId);
+		if (rows.length === 0) return;
+
+		const questions = await this.questions.findByLesson(lessonId);
+		const correctById = new Map(
+			questions.map((question) => [question.id, question.correctAnswer]),
+		);
+
+		for (const row of rows) {
+			if (row.isCorrect) continue;
+			const correct = correctById.get(row.questionId);
+			if (correct === undefined) continue;
+			if (row.selectedAnswer === correct) {
+				await this.attempts.update(row.id, { isCorrect: true } as any);
+			}
+		}
+	};
+
+	/** @info - Spec §4.2: a successful submit closes the attempt. Without this the
+	 *  session stays open forever and "may be taken exactly once" is not enforced,
+	 *  because `submit` accepts any open session. No-op for quizzes, which have no
+	 *  session row at all. */
+	private markAssessmentSubmitted = async (
+		userId: number,
+		lessonId: number,
+	): Promise<void> => {
+		const lesson = await this.assertLessonIfAssessment(lessonId);
+		if (!lesson) return;
+
+		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
+		if (!session || session.submittedAt) return;
+		await this.sessions.update(session.id, { submittedAt: new Date() } as any);
+	};
+
+	/**
+	 * @info - The attempt policy, in the one place that writes `quiz_attempts`:
+	 *         `submit` is the sole writer, so this single guard covers both the quiz
+	 *         and the assessment path from every caller.
+	 *
+	 *         Quizzes are untouched (no session row exists for them, and none is
+	 *         required). An assessment accepts a submit while it is open, and for
+	 *         GRACE_SECONDS after the deadline — the case the grace window exists
+	 *         for is a round trip that started before the bell and landed after it.
+	 */
+	private assertAttemptOpen = async (
+		authData: IAuthData,
+		lessonId: number,
+	): Promise<void> => {
+		const lesson = await this.assertLessonIfAssessment(lessonId);
+		if (!lesson) return;
+
+		const userId = Number(authData.id);
+		await this.assertEnrolledInLesson(userId, lessonId);
+
+		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
+		const timing = {
+			session: session ?? null,
+			timeLimitMinutes: lesson.timeLimitMinutes ?? null,
+			now: new Date(),
+		};
+
+		if (assessmentState(timing) === "submitted") {
+			return throwBadRequestError(QuizMessages.ATTEMPT_SUBMITTED);
+		}
+		/* @info - Checked before grace: `withinGrace` is false with no session at all
+		 * (there is nothing to send an answer against), so relying on it here would
+		 * report "time is up" for an attempt that was never started. */
+		if (assessmentState(timing) === "not_started") {
+			return throwBadRequestError(QuizMessages.ATTEMPT_NOT_STARTED);
+		}
+		if (!withinGrace(timing)) {
+			return throwBadRequestError(QuizMessages.ATTEMPT_EXPIRED);
+		}
+	};
+
+	/** @info - The lesson, or `null` when it is not an assessment: callers that
+	 *  must not refuse a quiz need to tell "not an assessment" from "missing". */
+	private assertLessonIfAssessment = async (lessonId: number) => {
+		const lesson = await this.lessons.findById(Number(lessonId));
+		if (!lesson) return throwNotFoundError(LessonMessages.NOT_FOUND);
+		return lesson.type === "assessment" ? lesson : null;
+	};
+
+	/**
+	 * @info - A student may only attempt a course they are enrolled in. The quiz
+	 *         module has never checked this; assessments do, because a one-shot exam
+	 *         is the thing worth bypassing. Resolved lesson → module → course.
+	 */
+	private assertEnrolledInLesson = async (
+		userId: number,
+		lessonId: number,
+	): Promise<void> => {
+		const lesson = await this.lessons.findById(Number(lessonId));
+		if (!lesson) return throwNotFoundError(LessonMessages.NOT_FOUND);
+		const mod = await this.modules.findById(Number(lesson.moduleId));
+		if (!mod || mod.courseId == null) {
+			return throwNotFoundError(LessonMessages.NOT_FOUND);
+		}
+		const enrollment = await this.enrollments.findByUserAndCourse(
+			userId,
+			Number(mod.courseId),
+		);
+		if (!enrollment) return throwForbiddenError(QuizMessages.NOT_ENROLLED);
+	};
 
 	/**
 	 * @info - Starting an assessment, which is idempotent by design.
@@ -76,6 +253,7 @@ export class QuizService {
 	startAssessment = async (authData: IAuthData, lessonId: number) => {
 		const lesson = await this.assertAssessmentLesson(lessonId);
 		const userId = Number(authData.id);
+		await this.assertEnrolledInLesson(userId, lessonId);
 
 		let session = await this.sessions.findByUserAndLesson(userId, lessonId);
 		if (!session) {
@@ -98,6 +276,7 @@ export class QuizService {
 	getAssessmentSession = async (authData: IAuthData, lessonId: number) => {
 		const lesson = await this.assertAssessmentLesson(lessonId);
 		const userId = Number(authData.id);
+		await this.assertEnrolledInLesson(userId, lessonId);
 		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
 
 		return this.assessmentSessionResponse(userId, lesson, session ?? null);
@@ -245,6 +424,9 @@ export class QuizService {
 		lessonId: number,
 		submissions: QuizSubmission[],
 	) => {
+		/* @info - The attempt policy, checked before anything is written. */
+		await this.assertAttemptOpen(authData, lessonId);
+
 		const allQuestions = await this.questions.findByLesson(lessonId);
 
 		if (allQuestions.length === 0) {
@@ -309,6 +491,10 @@ export class QuizService {
 		const score =
 			totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
 
+		/* @info - Closing the attempt is part of a successful submit: the answers are
+		 * graded above, so the session must stop accepting more of them. */
+		await this.markAssessmentSubmitted(Number(authData.id), lessonId);
+
 		return {
 			total: allQuestions.length,
 			submitted: submissions.length,
@@ -321,11 +507,57 @@ export class QuizService {
 	/* Student: view attempts */
 
 	getAttempts = async (authData: IAuthData, lessonId: number) => {
-		return this.attempts.findByUserAndLesson(authData.id, lessonId);
+		const rows = await this.attempts.findByUserAndLesson(
+			authData.id,
+			lessonId,
+		);
+		const lesson = await this.assertLessonIfAssessment(lessonId);
+		if (!lesson) return rows;
+
+		/* @info - AC18. Autosave writes these rows DURING an open attempt, so
+		 * returning `isCorrect` here makes the endpoint an answer oracle: autosave a
+		 * guess, read back whether it was right, repeat. Withheld until the attempt
+		 * is finished — `selectedAnswer` stays, because Resume rehydrates from it. */
+		const userId = Number(authData.id);
+		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
+		const status = assessmentState({
+			session: session ?? null,
+			timeLimitMinutes: lesson.timeLimitMinutes ?? null,
+			now: new Date(),
+		});
+		if (status !== "in_progress") {
+			/* @info - An expired attempt is graded here, on read (D9), because there is
+			 * no background job to do it: this is the first moment anyone asks. */
+			if (status === "expired") {
+				await this.gradeExpiredAssessment(userId, lessonId);
+				return this.attempts.findByUserAndLesson(userId, lessonId);
+			}
+			return rows;
+		}
+
+		return rows.map(({ isCorrect: _isCorrect, ...row }) => row);
 	};
 
-	/** @info - Student-facing quiz questions: answers & explanations stripped */
-	getLessonQuestions = async (lessonId: number) => {
+	/** @info - Student-facing quiz questions: answers & explanations stripped.
+	 *
+	 *  For an ASSESSMENT the paper is also unreadable before Start: `not_started`
+	 *  is refused, so the questions cannot be read in advance of the attempt they
+	 *  exist to measure (spec D23). Quizzes are untouched — no enrollment check is
+	 *  retrofitted onto them (spec §10), so they stay readable exactly as today. */
+	getLessonQuestions = async (authData: IAuthData, lessonId: number) => {
+		const lesson = await this.assertLessonIfAssessment(lessonId);
+		if (lesson) {
+			const userId = Number(authData.id);
+			await this.assertEnrolledInLesson(userId, lessonId);
+			const session = await this.sessions.findByUserAndLesson(
+				userId,
+				lessonId,
+			);
+			if (!session) {
+				return throwForbiddenError(QuizMessages.ATTEMPT_NOT_STARTED);
+			}
+		}
+
 		const questions = await this.questions.findByLesson(lessonId);
 		return questions.map(({ correctAnswer: _, explanation: __, ...q }) => q);
 	};

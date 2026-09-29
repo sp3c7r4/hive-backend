@@ -3,6 +3,7 @@ import { JwtService, ZodEngine } from "@/services";
 import { requireInstructor } from "@/middlewares/auth";
 import { QuizController } from "./quiz.controller";
 import {
+	assessmentAutosaveSchema,
 	quizSubmissionSchema,
 	createQuizQuestionSchema,
 	updateQuizQuestionSchema,
@@ -35,6 +36,29 @@ quizRouter.get(
 	"/attempts/:lessonId",
 	jwt.validateToken,
 	controller.getAttempts,
+);
+
+/* Student: autosave one answer. Assessment lessons only, and only while the
+ * attempt is open — no score and no correctness comes back, so it cannot be used
+ * as an answer oracle. */
+quizRouter.post(
+	"/attempts/autosave",
+	jwt.validateToken,
+	zod.validate.body(assessmentAutosaveSchema),
+	controller.autosaveAttempt,
+);
+
+/* Student: assessment attempt — start (idempotent) and read state */
+quizRouter.post(
+	"/lessons/:lessonId/assessment/start",
+	jwt.validateToken,
+	controller.startAssessment,
+);
+
+quizRouter.get(
+	"/lessons/:lessonId/assessment/session",
+	jwt.validateToken,
+	controller.getAssessmentSession,
 );
 
 /* Student: fetch quiz questions (answers stripped) */

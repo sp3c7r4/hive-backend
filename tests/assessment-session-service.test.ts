@@ -43,15 +43,21 @@ function buildService() {
 	};
 	const courses = { findById: vi.fn() };
 	const modules = { findById: vi.fn() };
+	const enrollments = { findByUserAndCourse: vi.fn() };
 	(service as any).courses = courses;
 	(service as any).modules = modules;
 	(service as any).lessons = lessons;
 	(service as any).sessions = sessions;
+	/* @info - The lesson → module → course walk the enrollment gate needs; an
+	 * enrolled student by default, so the tests here stay about the session. */
+	modules.findById.mockResolvedValue({ id: 200, courseId: 10 });
+	enrollments.findByUserAndCourse.mockResolvedValue({ id: 1 });
+	(service as any).enrollments = enrollments;
 	vi.spyOn(service as any, "reindexLesson").mockResolvedValue(undefined);
 	/* @info - The resume payload reads attempt rows; stubbed empty so these tests
 	 * stay about the session, not about answers (Task 3's suite owns those). */
 	vi.spyOn(service as any, "listAttemptsForStudent").mockResolvedValue([]);
-	return { service, lessons, sessions, courses, modules };
+	return { service, lessons, sessions, courses, modules, enrollments };
 }
 
 const rejectsBadRequest = async (call: Promise<unknown>, message?: string) => {

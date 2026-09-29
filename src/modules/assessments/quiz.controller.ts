@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
+import { QuizMessages } from "./quiz.message";
 import { QuizService } from "./quiz.service";
 
 export class QuizController {
@@ -30,13 +31,42 @@ export class QuizController {
 
 	getAttempts = async (c: Context) => {
 		const authData = c.get("authData");
-		const lessonId = c.req.param("lessonId");
-		const data = await this.service.getAttempts(
-			authData,
-			lessonId as unknown as number,
-		);
+		const lessonId = Number(c.req.param("lessonId"));
+		const data = await this.service.getAttempts(authData, lessonId);
 		return sendSuccessResponse(c, {
 			message: "Quiz attempts fetched successfully",
+			data,
+		});
+	};
+
+	/* Student: assessment attempt */
+
+	startAssessment = async (c: Context) => {
+		const authData = c.get("authData");
+		const lessonId = Number(c.req.param("lessonId"));
+		const data = await this.service.startAssessment(authData, lessonId);
+		return sendSuccessResponse(c, {
+			message: QuizMessages.ASSESSMENT_STARTED,
+			data,
+		});
+	};
+
+	getAssessmentSession = async (c: Context) => {
+		const authData = c.get("authData");
+		const lessonId = Number(c.req.param("lessonId"));
+		const data = await this.service.getAssessmentSession(authData, lessonId);
+		return sendSuccessResponse(c, {
+			message: QuizMessages.ASSESSMENT_FETCHED,
+			data,
+		});
+	};
+
+	autosaveAttempt = async (c: Context) => {
+		const authData = c.get("authData");
+		const body = await c.req.json();
+		const data = await this.service.autosaveAttempt(authData, body);
+		return sendSuccessResponse(c, {
+			message: QuizMessages.ATTEMPT_SAVED,
 			data,
 		});
 	};
@@ -44,10 +74,9 @@ export class QuizController {
 	/* Student: fetch quiz questions (answers stripped) */
 
 	getLessonQuestions = async (c: Context) => {
-		const lessonId = c.req.param("lessonId");
-		const data = await this.service.getLessonQuestions(
-			lessonId as unknown as number,
-		);
+		const authData = c.get("authData");
+		const lessonId = Number(c.req.param("lessonId"));
+		const data = await this.service.getLessonQuestions(authData, lessonId);
 		return sendSuccessResponse(c, {
 			message: "Quiz questions fetched successfully",
 			data,

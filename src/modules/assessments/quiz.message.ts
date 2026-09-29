@@ -13,6 +13,13 @@ export const QuizMessages = {
 	 * than a 404: the lesson exists and the caller may read it, it is simply not
 	 * the kind of lesson this endpoint acts on. */
 	NOT_ASSESSMENT: "This lesson is not an assessment",
+	/* @info - A student attempting a course they are not enrolled in. */
+	NOT_ENROLLED: "You must be enrolled in this course to take this assessment",
+	/* @info - Success messages for the assessment endpoints. The attempt-policy keys
+	 * below are the refusals. */
+	ASSESSMENT_STARTED: "Assessment started successfully",
+	ASSESSMENT_FETCHED: "Assessment session fetched successfully",
+	ATTEMPT_SAVED: "Answer saved successfully",
 	ATTEMPT_SUBMITTED: "This assessment has already been submitted",
 	ATTEMPT_EXPIRED: "Time is up for this assessment",
 	ATTEMPT_NOT_STARTED: "This assessment has not been started",
