@@ -24,10 +24,15 @@ export class AssignmentController {
 			lessonId?: number;
 			text?: string;
 		};
-		const uploadedFiles = c.get("uploadedFiles") as Array<{ key: string }> | undefined;
+		const uploadedFiles = c.get("uploadedFiles") as
+			| Array<{ key: string }>
+			| undefined;
 		const fileUrls = uploadedFiles?.map((f) => f.key) ?? [];
 		const data = await this.service.submit(authData, lessonId!, text, fileUrls);
-		return sendSuccessResponse(c, { message: "Assignment submitted successfully", data });
+		return sendSuccessResponse(c, {
+			message: "Assignment submitted successfully",
+			data,
+		});
 	};
 
 	/* Student: Get my submission for a lesson */
@@ -35,19 +40,24 @@ export class AssignmentController {
 	getMySubmission = async (c: Context) => {
 		const authData = c.get("authData");
 		const lessonId = c.req.param("lessonId");
-		const data = await this.service.getByUserAndLesson(authData.id, lessonId as unknown as number);
+		const data = await this.service.getByUserAndLesson(
+			authData.id,
+			lessonId as unknown as number,
+		);
 		return sendSuccessResponse(c, { message: "Submission fetched", data });
 	};
 
 	/* Instructor: List submissions for a course */
 
 	listByCourse = async (c: Context) => {
+		const authData = c.get("authData");
 		const courseId = c.req.param("courseId");
 		const page = Number(c.req.query("page") ?? "1");
 		const limit = Number(c.req.query("limit") ?? "20");
 		const status = c.req.query("status");
 
 		const data = await this.service.listByCourse(
+			authData,
 			courseId as unknown as number,
 			{ page, limit, status },
 		);
@@ -60,8 +70,9 @@ export class AssignmentController {
 	/* Instructor/Student: Get single submission */
 
 	get = async (c: Context) => {
+		const authData = c.get("authData");
 		const id = c.req.param("submissionId");
-		const data = await this.service.get(id as unknown as number);
+		const data = await this.service.get(authData, id as unknown as number);
 		return sendSuccessResponse(c, {
 			message: "Submission fetched successfully",
 			data,
@@ -71,8 +82,10 @@ export class AssignmentController {
 	/* Instructor: Grade a submission */
 
 	grade = async (c: Context) => {
+		const authData = c.get("authData");
 		const id = c.req.param("submissionId");
 		const data = await this.service.grade(
+			authData,
 			id as unknown as number,
 			await c.req.json(),
 		);
@@ -85,8 +98,10 @@ export class AssignmentController {
 	/* Instructor: Update assignment settings on a lesson */
 
 	updateAssignmentSettings = async (c: Context) => {
+		const authData = c.get("authData");
 		const lessonId = c.req.param("lessonId");
 		const data = await this.service.updateAssignmentSettings(
+			authData,
 			lessonId as unknown as number,
 			await c.req.json(),
 		);
