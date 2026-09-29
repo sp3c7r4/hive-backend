@@ -2,6 +2,7 @@ export const CourseMessages = {
 	NOT_FOUND: "Course not found",
 	DELETED: "Course deleted",
 	CREATED: "Course created",
+	LEADERBOARD_FETCHED: "Leaderboard fetched successfully",
 };
 
 export const ModuleMessages = {

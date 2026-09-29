@@ -10,6 +10,11 @@ import {
 } from "@/helpers/errors/throw-errors";
 import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import {
+	type LeaderboardSession,
+	type LeaderboardStudent,
+	rankLeaderboard,
+} from "@/modules/assessments/leaderboard";
 import { communities } from "@/modules/communities/community.model";
 import { assertPublishTarget } from "@/modules/communities/community-publish-target";
 import { enrollments } from "@/modules/enrollments/enrollment.model";
@@ -123,6 +128,130 @@ export class CourseService {
 		if (!this.isOwnerOrAdmin(course, authData)) {
 			throwForbiddenError("You don't have permission to modify this course.");
 		}
+	};
+
+	/**
+	 * @info - The course leaderboard: enrolled students ordered by their average
+	 *         score across the course's assessments.
+	 *
+	 * Assessments only. A quiz can be retaken — `quiz_attempts` holds one upserted
+	 * row per question — so a board built on quizzes would move a student's rank
+	 * backwards for a retake they chose to take. An assessment happens once, which
+	 * is what makes its score a rankable fact.
+	 *
+	 * In scope: published assessments (not drafts) that have at least one authored
+	 * question. A question-less assessment can never be taken, so requiring one
+	 * would make the board unreachable for everyone.
+	 *
+	 * The query gathers plain data and `rankLeaderboard` decides the order, so
+	 * none of the ranking rules live in SQL. It also only returns CLOSED sessions
+	 * (submitted, or past the deadline): autosave writes real `quiz_attempts` rows
+	 * while a student is still answering, so an open attempt must not be graded
+	 * into a rank.
+	 */
+	leaderboard = async (authData: IAuthData, courseId: number) => {
+		await this.assertOwnedCourse(courseId, authData);
+		const db = getDb();
+		const id = Number(courseId);
+
+		const assessmentRows = await db.execute(sql`
+			SELECT l.id AS lesson_id, l.title
+			FROM lessons l
+			JOIN modules m ON m.id = l.module_id
+			WHERE m.course_id = ${id}
+				AND l.type = 'assessment'
+				AND l.status <> 'draft'
+				AND EXISTS (SELECT 1 FROM quiz_questions q WHERE q.lesson_id = l.id)
+			ORDER BY l.sort_order, l.id
+		`);
+		const assessments = (assessmentRows.rows as any[]).map((row) => ({
+			lessonId: Number(row.lesson_id),
+			title: row.title as string | null,
+		}));
+		if (assessments.length === 0) {
+			/* @info - No assessments in scope is not an error: the tab has an empty
+			 * state and the response says so in the same shape. */
+			return { assessments: [], rows: [], unranked: [] };
+		}
+
+		const questionRows = await db.execute(sql`
+			SELECT lesson_id, count(*)::int AS total
+			FROM quiz_questions
+			WHERE lesson_id IN (${sql.join(
+				assessments.map((a) => sql`${a.lessonId}`),
+				sql`, `,
+			)})
+			GROUP BY lesson_id
+		`);
+		const totals = new Map(
+			(questionRows.rows as any[]).map((row) => [
+				Number(row.lesson_id),
+				Number(row.total),
+			]),
+		);
+
+		const enrollmentRows = await db.execute(sql`
+			SELECT u.id AS user_id, u.first_name, u.last_name
+			FROM enrollments e
+			JOIN users u ON u.id = e.user_id
+			WHERE e.course_id = ${id}
+			ORDER BY u.id
+		`);
+
+		const sessionRows = await db.execute(sql`
+			SELECT s.user_id, s.lesson_id, s.started_at, s.submitted_at,
+				CASE
+					WHEN l.time_limit_minutes IS NULL THEN NULL
+					ELSE s.started_at + (l.time_limit_minutes * interval '1 minute')
+				END AS deadline,
+				COALESCE(SUM(CASE WHEN qa.is_correct THEN 1 ELSE 0 END), 0)::int AS correct
+			FROM assessment_sessions s
+			JOIN lessons l ON l.id = s.lesson_id
+			JOIN modules m ON m.id = l.module_id
+			LEFT JOIN quiz_attempts qa
+				ON qa.user_id = s.user_id AND qa.lesson_id = s.lesson_id
+			WHERE m.course_id = ${id}
+				AND (
+					s.submitted_at IS NOT NULL
+					OR (
+						l.time_limit_minutes IS NOT NULL
+						AND now() > s.started_at + (l.time_limit_minutes * interval '1 minute')
+					)
+				)
+			GROUP BY s.user_id, s.lesson_id, s.started_at, s.submitted_at,
+				l.time_limit_minutes
+		`);
+
+		const sessionsByStudent = new Map<number, LeaderboardSession[]>();
+		for (const row of sessionRows.rows as any[]) {
+			const userId = Number(row.user_id);
+			const list = sessionsByStudent.get(userId) ?? [];
+			list.push({
+				lessonId: Number(row.lesson_id),
+				correct: Number(row.correct),
+				total: totals.get(Number(row.lesson_id)) ?? 0,
+				startedAt: row.started_at ? new Date(row.started_at) : null,
+				submittedAt: row.submitted_at ? new Date(row.submitted_at) : null,
+				deadline: row.deadline ? new Date(row.deadline) : null,
+			});
+			sessionsByStudent.set(userId, list);
+		}
+
+		/* @info - `firstName` plus the last initial, the same as the grading tab. */
+		const students: LeaderboardStudent[] = (enrollmentRows.rows as any[]).map(
+			(row) => ({
+				userId: Number(row.user_id),
+				name: `${row.first_name} ${String(row.last_name ?? "")
+					.charAt(0)
+					.toUpperCase()}.`.trim(),
+				sessions: sessionsByStudent.get(Number(row.user_id)) ?? [],
+			}),
+		);
+
+		return {
+			assessments,
+			...rankLeaderboard({ assessments, students }),
+		};
 	};
 
 	/** @info - Resolves a course and asserts the caller may mutate it. */
@@ -882,8 +1011,7 @@ export class CourseService {
 			lessonData.type ?? existing!.type,
 			lessonData.driveUrl ?? existing!.driveUrl,
 		);
-		const lessonFields =
-			Object.keys(lessonData).length > 0 ? lessonData : null;
+		const lessonFields = Object.keys(lessonData).length > 0 ? lessonData : null;
 		/* @info - Meeting fields (schedule, url, kind, clearing) live on the session now, so a
 		 * save that carries only those has no lesson columns to write: skip the row update
 		 * instead of handing Postgres an empty SET ("No values to set" -> 500). */

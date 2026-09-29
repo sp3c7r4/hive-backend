@@ -1,18 +1,18 @@
 import { Hono } from "hono";
-import { JwtService, ZodEngine } from "@/services";
-import { requireInstructor } from "@/middlewares/auth";
-import { FileUploadMiddleware } from "@/middlewares/upload";
 import { FILE_SIZES } from "@/constants/file-size";
 import { ImageMimeType } from "@/enums";
+import { requireInstructor } from "@/middlewares/auth";
+import { FileUploadMiddleware } from "@/middlewares/upload";
+import { JwtService, ZodEngine } from "@/services";
 import { CourseController } from "./course.controller";
 import {
 	createCourseFormSchema,
-	createModuleSchema,
 	createLessonSchema,
-	updateModuleSchema,
-	updateLessonSchema,
+	createModuleSchema,
 	generateMeetingSchema,
 	moveCourseCommunitySchema,
+	updateLessonSchema,
+	updateModuleSchema,
 } from "./course.schema";
 
 export const courseRouter = new Hono({ strict: true });
@@ -66,8 +66,22 @@ courseRouter.patch(
 );
 
 /** @info - Module routes nested under courses */
+/* Instructor: the course leaderboard. Owned courses only — `requireInstructor`
+ * answers "is this an instructor", never "is this their course", so the service
+ * asserts ownership as well. */
+courseRouter.get(
+	"/:courseId/leaderboard",
+	requireInstructor,
+	controller.leaderboard,
+);
+
 courseRouter.get("/:courseId/modules", controller.listModules);
-courseRouter.post("/:courseId/modules", requireInstructor, zod.validate.body(createModuleSchema), controller.createModule);
+courseRouter.post(
+	"/:courseId/modules",
+	requireInstructor,
+	zod.validate.body(createModuleSchema),
+	controller.createModule,
+);
 
 /** @info - Live class meeting generation — instructor only */
 courseRouter.post(
@@ -80,11 +94,30 @@ courseRouter.post(
 export const moduleRouter = new Hono({ strict: true });
 moduleRouter.use("*", jwt.validateToken);
 
-moduleRouter.patch("/:id", requireInstructor, zod.validate.body(updateModuleSchema), controller.updateModule);
+moduleRouter.patch(
+	"/:id",
+	requireInstructor,
+	zod.validate.body(updateModuleSchema),
+	controller.updateModule,
+);
 moduleRouter.delete("/:id", requireInstructor, controller.deleteModule);
 
 /** @info - Lesson routes nested under modules */
 moduleRouter.get("/:moduleId/lessons", controller.listLessons);
-moduleRouter.post("/:moduleId/lessons", requireInstructor, zod.validate.body(createLessonSchema), controller.createLesson);
-moduleRouter.patch("/:moduleId/lessons/:lessonId", requireInstructor, zod.validate.body(updateLessonSchema), controller.updateLesson);
-moduleRouter.delete("/:moduleId/lessons/:lessonId", requireInstructor, controller.deleteLesson);
+moduleRouter.post(
+	"/:moduleId/lessons",
+	requireInstructor,
+	zod.validate.body(createLessonSchema),
+	controller.createLesson,
+);
+moduleRouter.patch(
+	"/:moduleId/lessons/:lessonId",
+	requireInstructor,
+	zod.validate.body(updateLessonSchema),
+	controller.updateLesson,
+);
+moduleRouter.delete(
+	"/:moduleId/lessons/:lessonId",
+	requireInstructor,
+	controller.deleteLesson,
+);

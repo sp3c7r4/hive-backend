@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { formDataToObject } from "@/helpers/middleware";
+import { CourseMessages } from "./course.message";
 import { CourseService } from "./course.service";
 
 /** @info - zValidator stores the parsed form under the request's validation
@@ -234,6 +235,17 @@ export class CourseController {
 			},
 			StatusCodes.CREATED,
 		);
+	};
+
+	/** @info - Instructor-only: the course leaderboard (spec §4.3). */
+	leaderboard = async (c: Context) => {
+		const authData = c.get("authData");
+		const courseId = Number(c.req.param("courseId"));
+		const data = await this.service.leaderboard(authData, courseId);
+		return sendSuccessResponse(c, {
+			message: CourseMessages.LEADERBOARD_FETCHED,
+			data,
+		});
 	};
 
 	listLessons = async (c: Context) => {
