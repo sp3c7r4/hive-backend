@@ -38,6 +38,7 @@ const OWNER_EMAIL = "reparent.owner@hive.test";
 const STRANGER_EMAIL = "reparent.stranger@hive.test";
 const SLUG = "reparent-test-course";
 const VICTIM_SLUG = "reparent-test-victim";
+const COMMUNITY_SLUG = "reparent-community";
 
 let db: ReturnType<typeof getDb>;
 let app: Hono;
@@ -57,6 +58,17 @@ const sql = async (statement: string) => {
 };
 const one = async (statement: string) => (await sql(statement))[0];
 
+/**
+ * @info - Identified by unique markers (slugs, emails) rather than captured ids, so
+ * this is safe to call at the START of a run as well as the end: a run that died
+ * midway leaves rows behind, and the next run's first act is to clear them.
+ *
+ * ORDER IS LOAD-BEARING. `communities.owner_id` and `courses.instructor_id` are
+ * both `ON DELETE RESTRICT`, so a test user who owns a community cannot be deleted
+ * until that community is gone — and on a database with no communities the first
+ * run CREATES one, which is exactly when the user delete would fail. Children
+ * before parents, communities before users.
+ */
 const cleanup = async () => {
 	const allCourses = `(SELECT id FROM courses WHERE slug IN ('${SLUG}', '${VICTIM_SLUG}'))`;
 	const allModules = `(SELECT id FROM modules WHERE course_id IN ${allCourses})`;
@@ -67,6 +79,9 @@ const cleanup = async () => {
 	await sql(`DELETE FROM lessons WHERE module_id IN ${allModules}`);
 	await sql(`DELETE FROM modules WHERE course_id IN ${allCourses}`);
 	await sql(`DELETE FROM courses WHERE slug IN ('${SLUG}', '${VICTIM_SLUG}')`);
+	/* @info - Before the users: RESTRICT, and only our own slug, never a community
+	 * the fixture reused from elsewhere. */
+	await sql(`DELETE FROM communities WHERE slug = '${COMMUNITY_SLUG}'`);
 	await sql(
 		`DELETE FROM users WHERE lower(email) IN ('${OWNER_EMAIL}', '${STRANGER_EMAIL}')`,
 	);
@@ -119,7 +134,7 @@ beforeAll(async () => {
 		? existingCommunity.id
 		: (
 				await one(
-					`INSERT INTO communities (name, slug, owner_id) VALUES ('Reparent Community', 'reparent-community', ${ownerId}) RETURNING id`,
+					`INSERT INTO communities (name, slug, owner_id) VALUES ('Reparent Community', '${COMMUNITY_SLUG}', ${ownerId}) RETURNING id`,
 				)
 			).id;
 

@@ -29,6 +29,7 @@ const STRANGER_EMAIL = "submission.ownership.stranger@hive.test";
 const AUTHOR_EMAIL = "submission.ownership.author@hive.test";
 const OTHER_STUDENT_EMAIL = "submission.ownership.other@hive.test";
 const SLUG = "submission-ownership-test-course";
+const COMMUNITY_SLUG = "submission-ownership-community";
 
 let db: ReturnType<typeof getDb>;
 let app: Hono;
@@ -48,6 +49,18 @@ const sql = async (statement: string) => {
 
 const one = async (statement: string) => (await sql(statement))[0];
 
+/**
+ * @info - Identified by unique markers (slugs, emails) rather than captured ids, so
+ * this is safe to call at the START of a run as well as the end: a run that died
+ * midway leaves rows behind, and the next run's first act is to clear them.
+ *
+ * ORDER IS LOAD-BEARING. `communities.owner_id` and `courses.instructor_id` are
+ * both `ON DELETE RESTRICT`, so a test user who owns a community cannot be deleted
+ * until that community is gone — and on a database with no communities the first
+ * run CREATES one, which is exactly when the user delete would fail. Children
+ * before parents, communities before users. Submissions reference the lessons, so
+ * they go first of all.
+ */
 const cleanup = async () => {
 	const courseIds = `(SELECT id FROM courses WHERE slug = '${SLUG}')`;
 	const moduleIds = `(SELECT id FROM modules WHERE course_id IN ${courseIds})`;
@@ -59,6 +72,9 @@ const cleanup = async () => {
 	await sql(`DELETE FROM lessons WHERE module_id IN ${moduleIds}`);
 	await sql(`DELETE FROM modules WHERE course_id IN ${courseIds}`);
 	await sql(`DELETE FROM courses WHERE slug = '${SLUG}'`);
+	/* @info - Before the users: RESTRICT, and only our own slug, never a community
+	 * the fixture reused from elsewhere. */
+	await sql(`DELETE FROM communities WHERE slug = '${COMMUNITY_SLUG}'`);
 	await sql(
 		`DELETE FROM users WHERE lower(email) IN ('${OWNER_EMAIL}', '${STRANGER_EMAIL}', '${AUTHOR_EMAIL}', '${OTHER_STUDENT_EMAIL}')`,
 	);
@@ -125,7 +141,7 @@ beforeAll(async () => {
 	} else {
 		communityId = (
 			await one(
-				`INSERT INTO communities (name, slug, owner_id) VALUES ('Submission Ownership Community', 'submission-ownership-community', ${ownerId}) RETURNING id`,
+				`INSERT INTO communities (name, slug, owner_id) VALUES ('Submission Ownership Community', '${COMMUNITY_SLUG}', ${ownerId}) RETURNING id`,
 			)
 		).id;
 	}

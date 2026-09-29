@@ -27,6 +27,7 @@ const OWNER_EMAIL = "quiz.ownership.owner@hive.test";
 const STRANGER_EMAIL = "quiz.ownership.stranger@hive.test";
 const STUDENT_EMAIL = "quiz.ownership.student@hive.test";
 const SLUG = "quiz-ownership-test-course";
+const COMMUNITY_SLUG = "quiz-ownership-community";
 
 let db: ReturnType<typeof getDb>;
 let app: Hono;
@@ -53,6 +54,17 @@ const one = async (statement: string) => (await sql(statement))[0];
 
 /** @info - Identified by unique markers rather than captured ids, so a run that
  *  died midway cannot poison the next one. */
+/**
+ * @info - Identified by unique markers (slugs, emails) rather than captured ids, so
+ * this is safe to call at the START of a run as well as the end: a run that died
+ * midway leaves rows behind, and the next run's first act is to clear them.
+ *
+ * ORDER IS LOAD-BEARING. `communities.owner_id` and `courses.instructor_id` are
+ * both `ON DELETE RESTRICT`, so a test user who owns a community cannot be deleted
+ * until that community is gone — and on a database with no communities the first
+ * run CREATES one, which is exactly when the user delete would fail. Children
+ * before parents, communities before users.
+ */
 const cleanup = async () => {
 	const courseIds = `(SELECT id FROM courses WHERE slug = '${SLUG}')`;
 	const moduleIds = `(SELECT id FROM modules WHERE course_id IN ${courseIds})`;
@@ -64,6 +76,9 @@ const cleanup = async () => {
 	await sql(`DELETE FROM modules WHERE course_id IN ${courseIds}`);
 	await sql(`DELETE FROM courses WHERE slug = '${SLUG}'`);
 	await sql(`DELETE FROM courses WHERE slug = '${SLUG}-foreign'`);
+	/* @info - Before the users: RESTRICT, and only our own slug, never a community
+	 * the fixture reused from elsewhere. */
+	await sql(`DELETE FROM communities WHERE slug = '${COMMUNITY_SLUG}'`);
 	await sql(
 		`DELETE FROM users WHERE lower(email) IN ('${OWNER_EMAIL}', '${STRANGER_EMAIL}', '${STUDENT_EMAIL}')`,
 	);
@@ -126,7 +141,7 @@ beforeAll(async () => {
 		communityId = existingCommunity.id;
 	} else {
 		const created = await one(
-			`INSERT INTO communities (name, slug, owner_id) VALUES ('Quiz Ownership Community', 'quiz-ownership-community', ${ownerId}) RETURNING id`,
+			`INSERT INTO communities (name, slug, owner_id) VALUES ('Quiz Ownership Community', '${COMMUNITY_SLUG}', ${ownerId}) RETURNING id`,
 		);
 		communityId = created.id;
 	}
