@@ -45,6 +45,8 @@ let assessmentB: number;
 let draftAssessment: number;
 let questionlessAssessment: number;
 let quizLesson: number;
+/** @info - The second assessment's question ids: the expired-attempt test scores them. */
+let secondAssessmentQuestions: number[] = [];
 
 const sql = async (statement: string) => {
 	const result = await db.execute(statement);
@@ -95,9 +97,14 @@ const seedSession = async (input: {
 			${input.open ? "NULL" : `now() - interval '5 minutes'`})`,
 	);
 	for (const answer of input.answers) {
+		/* @info - A wrong row has to LOOK wrong as well as be flagged wrong: the
+		 * leaderboard scores an ungraded row by comparing the answer to the question
+		 * (D9's grading on read), so a fixture that wrote the correct answer with
+		 * is_correct = false would be scored right. */
 		await sql(
 			`INSERT INTO quiz_attempts (user_id, lesson_id, question_id, selected_answer, is_correct)
-			 VALUES (${input.userId}, ${input.lessonId}, ${answer.questionId}, 'x', ${answer.correct})`,
+			 VALUES (${input.userId}, ${input.lessonId}, ${answer.questionId},
+				${answer.correct ? "'x'" : "'wrong'"}, ${answer.correct})`,
 		);
 	}
 };
@@ -189,6 +196,7 @@ beforeAll(async () => {
 	assessmentA = a.lesson;
 	const b = await mkLesson("Final", "assessment", "published", 2);
 	assessmentB = b.lesson;
+	secondAssessmentQuestions = b.ids;
 	/* @info - In scope only if the query filters: a draft, and one with no questions. */
 	draftAssessment = (
 		await mkLesson("Draft assessment", "assessment", "draft", 2)
@@ -325,6 +333,40 @@ describe("GET /courses/:courseId/leaderboard — the board", () => {
 		expect(data.rows).toHaveLength(1);
 		expect(data.unranked).toHaveLength(1);
 		expect(data.unranked[0].reason).toBe("partial");
+
+		await sql(
+			`DELETE FROM assessment_sessions WHERE user_id = ${student2Id} AND lesson_id = ${assessmentB}`,
+		);
+		await sql(
+			`DELETE FROM quiz_attempts WHERE user_id = ${student2Id} AND lesson_id = ${assessmentB}`,
+		);
+	});
+
+	it("scores an expired attempt on its autosaved answers, without anyone opening it", async () => {
+		/* @info - D9: an attempt that ran out of time is graded on what was
+		 * autosaved, and nothing schedules that — the student's own attempts view is
+		 * where it normally happens. So a board read BEFORE that view still finds
+		 * rows with `is_correct = false` on answers that are right, and must not
+		 * report them as 0%. This is the case the browser pass caught: a seeded
+		 * student showed 0% on the board with one correct answer saved. */
+		await sql(
+			`INSERT INTO assessment_sessions (user_id, lesson_id, started_at, submitted_at)
+			 VALUES (${student2Id}, ${assessmentB}, now() - interval '90 minutes', NULL)
+			 ON CONFLICT (user_id, lesson_id) DO UPDATE SET started_at = EXCLUDED.started_at, submitted_at = NULL`,
+		);
+		for (const [index, questionId] of secondAssessmentQuestions.entries()) {
+			await sql(
+				`INSERT INTO quiz_attempts (user_id, lesson_id, question_id, selected_answer, is_correct)
+				 VALUES (${student2Id}, ${assessmentB}, ${questionId}, ${index === 0 ? "'x'" : "'wrong'"}, false)`,
+			);
+		}
+
+		const res = await board(OWNER_AUTH);
+		const data = (await bodyOf(res)).data.data;
+		/* Ada: 2/4 on the first (50%) and 1/2 on the expired second (50%) -> 50. */
+		const ada = (data.rows as any[]).find((row) => row.userId === student2Id);
+		expect(ada).toBeTruthy();
+		expect(ada.averagePercent).toBe(50);
 
 		await sql(
 			`DELETE FROM assessment_sessions WHERE user_id = ${student2Id} AND lesson_id = ${assessmentB}`,

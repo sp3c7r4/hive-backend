@@ -204,12 +204,29 @@ export class CourseService {
 					WHEN l.time_limit_minutes IS NULL THEN NULL
 					ELSE s.started_at + (l.time_limit_minutes * interval '1 minute')
 				END AS deadline,
-				COALESCE(SUM(CASE WHEN qa.is_correct THEN 1 ELSE 0 END), 0)::int AS correct
+				/* @info - An expired attempt is graded on what was autosaved (D9), and
+				 * nothing guarantees somebody has asked before the board does: the
+				 * student's own attempts view is where that grading normally happens, so
+				 * a session nobody has opened still carries is_correct = false on rows
+				 * that are right. The comparison is that same rule, applied here, and it
+				 * cannot drift from the stored verdict because the question lock (D24)
+				 * refuses to change a question once any session exists. */
+				COALESCE(
+					SUM(
+						CASE
+							WHEN qa.is_correct
+								OR qa.selected_answer = q.correct_answer
+							THEN 1 ELSE 0
+						END
+					),
+					0
+				)::int AS correct
 			FROM assessment_sessions s
 			JOIN lessons l ON l.id = s.lesson_id
 			JOIN modules m ON m.id = l.module_id
 			LEFT JOIN quiz_attempts qa
 				ON qa.user_id = s.user_id AND qa.lesson_id = s.lesson_id
+			LEFT JOIN quiz_questions q ON q.id = qa.question_id
 			WHERE m.course_id = ${id}
 				AND (
 					s.submitted_at IS NOT NULL
