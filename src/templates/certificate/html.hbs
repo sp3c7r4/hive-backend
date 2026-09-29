@@ -191,18 +191,18 @@
         /* ---------- Seal ---------- */
         .seal {
             position: absolute;
-            top: 648px;
+            top: 690px;   /* was 760px — pulled up 70px to align with sig-lines */
             left: 50%;
             transform: translateX(-50%);
-            width: 303px;
-            height: 259px;
+            width: 260px;
+            /* no height — let it scale */
             object-fit: contain;
         }
 
         /* ---------- Signature blocks ---------- */
         .sig-block {
             position: absolute;
-            top: 668px;
+            top: 790px; /* Moved down from 668px to align with the new seal position */
             width: 380px;
             text-align: center;
             overflow: visible;
@@ -303,7 +303,8 @@
         <div class="course-name">{{course}}</div>
 
         <!-- Seal (fixed: object-fit: contain ensures no clipping) -->
-        <img class="seal" src="https://cdn.tryhive.app/assets/images/cert-assets/seal.png" alt="Official seal">
+        <img class="seal" src="https://cdn.tryhive.app/assets/images/cert-assets/seal.png" alt="Official seal"
+            style="{{#if (gt course.length 40)}}top: 720px;{{/if}}">
 
         <!-- Signatures -->
         <div class="sig-block left">

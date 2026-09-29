@@ -9,6 +9,8 @@ import type { EmailOptions } from "@/interfaces";
 import { logger } from "@/utils";
 import nodemailer from "nodemailer";
 
+Handlebars.registerHelper("gt", (a, b) => a > b);
+
 export class EmailService {
 	private static instance: EmailService;
 

@@ -156,7 +156,8 @@ export abstract class FileGenerator<T> {
 
 		const page = await browser.newPage();
 		try {
-			await page.setContent(html, { waitUntil: "load" });
+			await page.setContent(html, { waitUntil: "domcontentloaded" });
+			await new Promise((r) => setTimeout(r, 1500));
 
 			const pdf = await page.pdf({
 				format: "A4",
@@ -194,7 +195,8 @@ export abstract class FileGenerator<T> {
 				height: imageOptions?.height ?? 794,
 				deviceScaleFactor: imageOptions?.deviceScaleFactor ?? 2,
 			});
-			await page.setContent(html, { waitUntil: "load" });
+			await page.setContent(html, { waitUntil: "domcontentloaded" });
+			await new Promise((r) => setTimeout(r, 1500));
 
 			const image = await page.screenshot({
 				fullPage: true,
