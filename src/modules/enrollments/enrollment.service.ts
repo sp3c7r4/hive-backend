@@ -174,10 +174,12 @@ export class EnrollmentService {
 
 	/**
 	 * @info - An enrollment belongs to the student it enrolls, to whoever paid for
-	 *         it (`enrolledById` is the parent on a parent-bought enrollment) and to
-	 *         an admin. Deliberately not to the course's instructor: every instructor
-	 *         view of a cohort is course-scoped (`/courses/:courseId/...`), so no
-	 *         screen needs to name an enrollment it does not belong to.
+	 *         it (`enrolledById` is the parent on a parent-bought enrollment; no
+	 *         write path sets that column yet, so the payer branch is ready for a
+	 *         flow that does) and to an admin. Deliberately not to the course's
+	 *         instructor: every instructor view of a cohort is course-scoped
+	 *         (`/courses/:courseId/...`), so no screen needs to name an enrollment
+	 *         it does not belong to.
 	 */
 	private isOwnerOrAdmin = (
 		enrollment: { userId?: number | null; enrolledById?: number | null },
@@ -190,7 +192,9 @@ export class EnrollmentService {
 		return (
 			isCaller(enrollment.userId) ||
 			isCaller(enrollment.enrolledById) ||
-			(authData?.roles ?? []).includes("admin")
+			/* @info - `Array.isArray` as in the sibling services: a malformed session
+			 * carrying a roles *string* would otherwise substring-match "admin". */
+			(Array.isArray(authData?.roles) && authData.roles.includes("admin"))
 		);
 	};
 
@@ -200,11 +204,18 @@ export class EnrollmentService {
 	 *         re-reading it. A missing enrollment throws NOT_FOUND rather than
 	 *         resolving to undefined, which used to answer these routes with a 200
 	 *         and an empty body.
+	 *
+	 *         A non-numeric id is NOT_FOUND too: it used to reach the repository as
+	 *         NaN and answer 500 "an unexpected database error", which tells the
+	 *         caller nothing and logs noise for a request that is simply wrong.
 	 */
 	private assertOwnedEnrollment = async (
 		authData: IAuthData,
 		enrollmentId: number,
 	) => {
+		if (!Number.isInteger(enrollmentId)) {
+			return throwNotFoundError(EnrollmentMessages.NOT_FOUND);
+		}
 		const enrollment = await this.enrollments.findById(enrollmentId);
 		if (!enrollment) return throwNotFoundError(EnrollmentMessages.NOT_FOUND);
 		if (!this.isOwnerOrAdmin(enrollment, authData)) {

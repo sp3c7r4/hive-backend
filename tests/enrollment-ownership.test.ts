@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ForbiddenError } from "@/errors";
+import { ForbiddenError, NotFoundError } from "@/errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import { EnrollmentMessages } from "@/modules/enrollments/enrollment.message";
 import { EnrollmentService } from "@/modules/enrollments/enrollment.service";
 
 /**
@@ -17,16 +18,20 @@ import { EnrollmentService } from "@/modules/enrollments/enrollment.service";
  * before doing anything with the caller it was handed. The PATCH is the sharpest
  * of the three: `upsertProgress(enrollmentId, lessonId, _userId)` ignores the user
  * entirely, so any logged-in student could mark lessons complete inside another
- * student's enrollment — which feeds that student's `progressPercent` and, through
- * `_maybeQueueCertificate`, their certificate.
+ * student's enrollment — which forges progress inside that student's enrollment
+ * and, through `_maybeQueueCertificate`, moves their certificate eligibility.
  *
  * Who may read one: the student it enrolls, the person who paid for it
- * (`enrolledById` is the parent on a parent-bought enrollment), and an admin. No
+ * (`enrolledById` is the parent on a parent-bought enrollment; nothing writes that
+ * column yet, so the branch is ready for a flow that does), and an admin. No
  * screen reads an enrollment by id for anyone else — the learn page resolves its
  * own id from `GET /enrollments`, and instructor views are course-scoped.
  *
- * Repositories are stubbed and the database is never touched, so this suite runs
- * without Postgres or Redis.
+ * Repositories are stubbed. This suite opens no database connection of its own and
+ * reads no rows — but it is not connection-free: `EnrollmentService.getInstance()`
+ * runs the `emailQueue` field initializer, which builds a bullmq Queue and so opens
+ * Redis connections, and the certificate path calls `getDb()` (that error is
+ * swallowed by the service, which is itself the behavior a test here pins).
  */
 
 const STUDENT = { id: 1, roles: ["student"] } as unknown as IAuthData;
@@ -62,6 +67,10 @@ const rejectsForbidden = async (call: Promise<unknown>) => {
 		(e: unknown) => e,
 	);
 	expect(error).toBeInstanceOf(ForbiddenError);
+	/* @info - The message is pinned too: an error of the right class carrying the
+	 * wrong text is still a broken response, and nothing else in either suite
+	 * asserts the user-facing string. */
+	expect((error as Error).message).toBe(EnrollmentMessages.FORBIDDEN);
 };
 
 describe("GET /enrollments/:id", () => {
@@ -113,8 +122,19 @@ describe("GET /enrollments/:id", () => {
 			() => null,
 			(e: unknown) => e,
 		);
-		expect(error).not.toBeInstanceOf(ForbiddenError);
-		expect(error).toBeInstanceOf(Error);
+		expect(error).toBeInstanceOf(NotFoundError);
+		expect((error as Error).message).toBe(EnrollmentMessages.NOT_FOUND);
+	});
+
+	it("404 for an id that is not a number, instead of a database error", async () => {
+		/* @info - `/enrollments/abc` used to reach the repository as NaN and answer
+		 * 500 "an unexpected database error". */
+		const error = await (f.service.get as any)(STUDENT, Number("abc")).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(NotFoundError);
+		expect(f.enrollments.findById).not.toHaveBeenCalled();
 	});
 });
 
@@ -135,10 +155,33 @@ describe("GET /enrollments/:enrollmentId/progress", () => {
 	});
 
 	it("the enrolled student reads their own progress", async () => {
-		await expect(
-			f.service.getLessonProgress(STUDENT, enrollment.id),
-		).resolves.toBeDefined();
+		f.progress.findByEnrollment.mockResolvedValue([
+			{ lessonId: 42, completed: true },
+		]);
+		/* @info - Assert the returned shape, not merely `toBeDefined()`: `{}` satisfies
+		 * that, and so does a run where the eligibility lookup threw, because the
+		 * service swallows that error. */
+		const result = await f.service.getLessonProgress(STUDENT, enrollment.id);
+		expect(result.data).toEqual([{ lessonId: 42, completed: true }]);
+		expect(result).toHaveProperty("eligibility");
 		expect(f.progress.findByEnrollment).toHaveBeenCalledWith(enrollment.id);
+	});
+
+	it("the parent who paid reads the child's progress", async () => {
+		f.enrollments.findById.mockResolvedValue({
+			...enrollment,
+			enrolledById: PARENT.id,
+		});
+		await expect(
+			f.service.getLessonProgress(PARENT, enrollment.id),
+		).resolves.toBeDefined();
+	});
+
+	it("an admin reads any enrollment's progress", async () => {
+		f.enrollments.findById.mockResolvedValue({ ...enrollment, userId: 777 });
+		await expect(
+			f.service.getLessonProgress(ADMIN, enrollment.id),
+		).resolves.toBeDefined();
 	});
 
 	it("403 for a student whose id is not the enrollment's", async () => {
@@ -170,9 +213,12 @@ describe("PATCH /enrollments/:enrollmentId/progress/:lessonId", () => {
 	});
 
 	it("the enrolled student can mark their own lesson complete", async () => {
-		await expect(
-			f.service.markLessonComplete(STUDENT, enrollment.id, 42),
-		).resolves.toBeDefined();
+		const result = await f.service.markLessonComplete(
+			STUDENT,
+			enrollment.id,
+			42,
+		);
+		expect(result).toHaveProperty("row");
 		expect(f.progress.upsertProgress).toHaveBeenCalledWith(
 			enrollment.id,
 			42,
@@ -186,5 +232,35 @@ describe("PATCH /enrollments/:enrollmentId/progress/:lessonId", () => {
 			f.service.markLessonComplete(STRANGER, enrollment.id, 42),
 		);
 		expect(f.progress.upsertProgress).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * @info - This is the test that pins "the student comes from the enrollment, not
+	 * from the caller". Everywhere else in this file the caller IS the enrolled
+	 * student, so passing `authData.id` would look identical — and `upsertProgress`
+	 * ignores the id it is handed, so only the PARENT case, where caller and student
+	 * differ, can tell the two implementations apart. Same for the certificate path:
+	 * a parent's write must not file the certificate under the parent.
+	 */
+	it("a parent writing to the child's enrollment writes it under the child", async () => {
+		f.enrollments.findById.mockResolvedValue({
+			...enrollment,
+			enrolledById: PARENT.id,
+		});
+		await expect(
+			f.service.markLessonComplete(PARENT, enrollment.id, 42),
+		).resolves.toBeDefined();
+		expect(f.progress.upsertProgress).toHaveBeenCalledWith(
+			enrollment.id,
+			42,
+			STUDENT.id,
+		);
+	});
+
+	it("an admin can write into any enrollment", async () => {
+		f.enrollments.findById.mockResolvedValue({ ...enrollment, userId: 777 });
+		await expect(
+			f.service.markLessonComplete(ADMIN, enrollment.id, 42),
+		).resolves.toBeDefined();
 	});
 });
