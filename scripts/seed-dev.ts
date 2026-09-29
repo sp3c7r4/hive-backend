@@ -27,7 +27,7 @@ for (const [first, last, email] of users) {
   const ins = await pool.query(
     `INSERT INTO users (first_name, last_name, email, onboarded)
      VALUES ($1,$2,$3, true)
-     ON CONFLICT (email) DO UPDATE SET onboarded = true
+     ON CONFLICT (lower(email)) DO UPDATE SET onboarded = true
      RETURNING id`,
     [first, last, email],
   );
@@ -38,10 +38,11 @@ const instructorId = userIds["sarafasatar@gmail.com"];
 const studentEmail = users.find((u) => u[1] === "Student")![2];
 const studentId = userIds[studentEmail];
 
-// Roles (user_roles unique on (user_id, role))
+// Roles. Migration 0027 allows ONE non-admin working role per user
+// (`uq_user_role_single_working`), so this account gets the instructor role it
+// needs to own the seeded courses, and not a second one.
 for (const [email, role] of [
   ["sarafasatar@gmail.com", "instructor"],
-  ["sarafasatar@gmail.com", "student"],
   [studentEmail, "student"],
 ] as const) {
   await pool.query(
@@ -60,7 +61,7 @@ const adminHash = await hash(ADMIN_PASSWORD, {
 const admin = await pool.query(
   `INSERT INTO users (first_name, last_name, email, password_hash, onboarded)
    VALUES ('Admin', 'Admin', $1, $2, true)
-   ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
+   ON CONFLICT (lower(email)) DO UPDATE SET password_hash = EXCLUDED.password_hash
    RETURNING id`,
   [ADMIN_EMAIL, adminHash],
 );
