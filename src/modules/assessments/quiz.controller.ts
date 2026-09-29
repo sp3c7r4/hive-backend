@@ -61,6 +61,21 @@ export class QuizController {
 		});
 	};
 
+	resetAssessmentAttempt = async (c: Context) => {
+		const authData = c.get("authData");
+		const lessonId = Number(c.req.param("lessonId"));
+		const { userId } = await c.req.json();
+		const data = await this.service.resetAssessmentAttempt(
+			authData,
+			lessonId,
+			Number(userId),
+		);
+		return sendSuccessResponse(c, {
+			message: QuizMessages.ATTEMPT_RESET,
+			data,
+		});
+	};
+
 	autosaveAttempt = async (c: Context) => {
 		const authData = c.get("authData");
 		const body = await c.req.json();

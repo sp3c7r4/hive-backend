@@ -4,6 +4,7 @@ import { requireInstructor } from "@/middlewares/auth";
 import { QuizController } from "./quiz.controller";
 import {
 	assessmentAutosaveSchema,
+	assessmentResetSchema,
 	quizSubmissionSchema,
 	createQuizQuestionSchema,
 	updateQuizQuestionSchema,
@@ -59,6 +60,16 @@ quizRouter.get(
 	"/lessons/:lessonId/assessment/session",
 	jwt.validateToken,
 	controller.getAssessmentSession,
+);
+
+/* Instructor: reset one student's attempt. Ownership-checked; this is also what
+ * lifts the question lock. */
+quizRouter.post(
+	"/lessons/:lessonId/assessment/reset",
+	jwt.validateToken,
+	requireInstructor,
+	zod.validate.body(assessmentResetSchema),
+	controller.resetAssessmentAttempt,
 );
 
 /* Student: fetch quiz questions (answers stripped) */

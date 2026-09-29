@@ -32,9 +32,13 @@ const STRANGER_AUTH = "auth:assess-stranger";
 const STUDENT_EMAIL = "assess.student@hive.test";
 const STRANGER_EMAIL = "assess.stranger@hive.test";
 const INSTRUCTOR_EMAIL = "assess.instructor@hive.test";
+/* @info - An instructor who owns nothing here. `requireInstructor` reads the DB
+ * and only one non-admin role is allowed per user, so an instructor cannot double
+ * as the un-enrolled student; the ownership refusal needs a real instructor. */
+const OTHER_INSTRUCTOR_EMAIL = "assess.other-instructor@hive.test";
 const SLUG = "assessment-session-course";
 
-const ALL_EMAILS = `'${STUDENT_EMAIL}', '${STRANGER_EMAIL}', '${INSTRUCTOR_EMAIL}'`;
+const ALL_EMAILS = `'${STUDENT_EMAIL}', '${STRANGER_EMAIL}', '${INSTRUCTOR_EMAIL}', '${OTHER_INSTRUCTOR_EMAIL}'`;
 
 let db: ReturnType<typeof getDb>;
 let app: Hono;
@@ -122,10 +126,12 @@ beforeAll(async () => {
 	studentId = await mkUser("Stu", STUDENT_EMAIL);
 	const strangerId = await mkUser("Stranger", STRANGER_EMAIL);
 	const instructorId = await mkUser("Inst", INSTRUCTOR_EMAIL);
+	const otherInstructorId = await mkUser("Other", OTHER_INSTRUCTOR_EMAIL);
 	for (const [userId, role] of [
 		[studentId, "student"],
 		[strangerId, "student"],
 		[instructorId, "instructor"],
+		[otherInstructorId, "instructor"],
 	] as const) {
 		await sql(
 			`INSERT INTO user_roles (user_id, role) VALUES (${userId}, '${role}')`,
@@ -559,5 +565,223 @@ describe("the submit guard", () => {
 			STUDENT_AUTH,
 		);
 		expect(res.status).toBe(200);
+	});
+});
+
+/**
+ * @info - AC21: the paper is frozen once anybody has started.
+ *
+ * A session means somebody's score was computed against the question set as it
+ * stood, so adding, editing or deleting a question afterwards moves a submitted
+ * student's grade — and, in Plan 2, their leaderboard rank. All three mutations
+ * are refused with 409 while ANY session exists on that lesson, and the lock lifts
+ * when every session is reset. Reading the questions is never blocked: that is how
+ * an instructor looks before deciding to reset.
+ */
+describe("AC21 - the question lock", () => {
+	let ownerToken: string;
+	const ownerAuthId = "auth:assess-owner-instructor";
+	let nonOwnerAuthId = "auth:assess-nonowner-instructor";
+	let nonOwnerToken: string;
+
+	/** @info - The fixture's instructor: the course belongs to them. */
+	const instructorToken = async () => {
+		if (ownerToken) return ownerToken;
+		const instructor = await one(
+			`SELECT id, email FROM users WHERE lower(email) = '${INSTRUCTOR_EMAIL}'`,
+		);
+		ownerToken = JwtService.getInstance().generateToken(ownerAuthId);
+		await CacheService.getInstance().set(ownerAuthId, {
+			id: instructor.id,
+			email: instructor.email,
+			firstName: "Inst",
+			roles: ["instructor"],
+			isAuthenticated: true,
+		});
+		return ownerToken;
+	};
+
+	/** @info - A real instructor (so `requireInstructor` passes) who owns nothing
+	 *  here, so the ONLY thing that can refuse them is the ownership assert. */
+	const strangerToken = async () => {
+		if (nonOwnerToken) return nonOwnerToken;
+		const other = await one(
+			`SELECT id, email FROM users WHERE lower(email) = '${OTHER_INSTRUCTOR_EMAIL}'`,
+		);
+		nonOwnerToken = JwtService.getInstance().generateToken(nonOwnerAuthId);
+		await CacheService.getInstance().set(nonOwnerAuthId, {
+			id: other.id,
+			email: other.email,
+			firstName: "Other",
+			roles: ["instructor"],
+			isAuthenticated: true,
+		});
+		return nonOwnerToken;
+	};
+
+	afterAll(async () => {
+		const cache = CacheService.getInstance();
+		await cache.delete(ownerAuthId);
+		await cache.delete(nonOwnerAuthId);
+	});
+
+	const asInstructor = async (
+		path: string,
+		init: { method?: string; body?: unknown } = {},
+	) =>
+		app.request(`/api/v1${path}`, {
+			method: init.method ?? "GET",
+			headers: {
+				Authorization: `Bearer ${await instructorToken()}`,
+				...(init.body ? { "Content-Type": "application/json" } : {}),
+			},
+			...(init.body ? { body: JSON.stringify(init.body) } : {}),
+		});
+
+	const withSession = () =>
+		sql(
+			`INSERT INTO assessment_sessions (user_id, lesson_id, started_at) VALUES (${studentId}, ${assessmentLessonId}, now())`,
+		);
+	const withoutSessions = () =>
+		sql(
+			`DELETE FROM assessment_sessions WHERE lesson_id IN (${assessmentLessonId}, ${quizLessonId})`,
+		);
+
+	it("409s on create, update and delete while a session exists, leaving rows unchanged", async () => {
+		await withoutSessions();
+		await withSession();
+
+		const before = await one(
+			`SELECT count(*)::int n FROM quiz_questions WHERE lesson_id = ${assessmentLessonId}`,
+		);
+
+		const create = await asInstructor(
+			`/quiz/lessons/${assessmentLessonId}/questions`,
+			{ method: "POST", body: { type: "multiple", text: "Sneaked in", correctAnswer: "A" } },
+		);
+		expect(create.status).toBe(409);
+		expect((await bodyOf(create)).error.message).toBe(
+			QuizMessages.ASSESSMENT_LOCKED,
+		);
+
+		const update = await asInstructor(`/quiz/questions/${questionId}`, {
+			method: "PATCH",
+			body: { text: "Rewritten" },
+		});
+		expect(update.status).toBe(409);
+
+		const remove = await asInstructor(`/quiz/questions/${otherQuestionId}`, {
+			method: "DELETE",
+		});
+		expect(remove.status).toBe(409);
+
+		const after = await one(
+			`SELECT count(*)::int n FROM quiz_questions WHERE lesson_id = ${assessmentLessonId}`,
+		);
+		expect(after.n).toBe(before.n);
+		const text = await one(
+			`SELECT text FROM quiz_questions WHERE id = ${questionId}`,
+		);
+		expect(text.text).toBe("Q1");
+
+		/* @info - Reading is never locked: it is how an instructor decides. */
+		const read = await asInstructor(
+			`/quiz/lessons/${assessmentLessonId}/questions`,
+		);
+		expect(read.status).toBe(200);
+	});
+
+	it("allows all three once no session exists", async () => {
+		await withoutSessions();
+
+		const create = await asInstructor(
+			`/quiz/lessons/${assessmentLessonId}/questions`,
+			{ method: "POST", body: { type: "multiple", text: "Allowed", correctAnswer: "A" } },
+		);
+		expect(create.status).toBe(201);
+
+		const created = await one(
+			`SELECT id FROM quiz_questions WHERE lesson_id = ${assessmentLessonId} AND text = 'Allowed'`,
+		);
+		const update = await asInstructor(`/quiz/questions/${created.id}`, {
+			method: "PATCH",
+			body: { text: "Still allowed" },
+		});
+		expect(update.status).toBe(200);
+
+		const remove = await asInstructor(`/quiz/questions/${created.id}`, {
+			method: "DELETE",
+		});
+		expect(remove.status).toBe(200);
+	});
+
+	it("never locks a quiz lesson, even with a session on the assessment", async () => {
+		await withSession();
+		const create = await asInstructor(
+			`/quiz/lessons/${quizLessonId}/questions`,
+			{ method: "POST", body: { type: "multiple", text: "Quiz question", correctAnswer: "A" } },
+		);
+		expect(create.status).toBe(201);
+		await withoutSessions();
+	});
+
+	it("reset: 403 for a non-owner instructor, and the attempt survives", async () => {
+		await withoutSessions();
+		await sql(
+			`INSERT INTO assessment_sessions (user_id, lesson_id, started_at) VALUES (${studentId}, ${assessmentLessonId}, now())`,
+		);
+
+		const res = await app.request(
+			`/api/v1/quiz/lessons/${assessmentLessonId}/assessment/reset`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${await strangerToken()}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ userId: studentId }),
+			},
+		);
+		expect(res.status).toBe(403);
+
+		const still = await one(
+			`SELECT count(*)::int n FROM assessment_sessions WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		expect(still.n).toBe(1);
+	});
+
+	it("reset: deletes the session AND the answers, so a restart is not pre-filled", async () => {
+		await sql(
+			`INSERT INTO assessment_sessions (user_id, lesson_id, started_at) VALUES (${studentId}, ${assessmentLessonId}, now()) ON CONFLICT DO NOTHING`,
+		);
+		await sql(
+			`INSERT INTO quiz_attempts (user_id, lesson_id, question_id, selected_answer) VALUES (${studentId}, ${assessmentLessonId}, ${questionId}, 'B') ON CONFLICT DO NOTHING`,
+		);
+
+		const res = await asInstructor(
+			`/quiz/lessons/${assessmentLessonId}/assessment/reset`,
+			{ method: "POST", body: { userId: studentId } },
+		);
+		expect(res.status).toBe(200);
+		expect((await bodyOf(res)).data.data.reset).toBe(true);
+
+		const session = await one(
+			`SELECT count(*)::int n FROM assessment_sessions WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		expect(session.n).toBe(0);
+		const answers = await one(
+			`SELECT count(*)::int n FROM quiz_attempts WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		expect(answers.n).toBe(0);
+
+		/* @info - And the student sees a clean start, not a pre-filled attempt. */
+		const view = await sessionOf(
+			await call(
+				`/quiz/lessons/${assessmentLessonId}/assessment/session`,
+				STUDENT_AUTH,
+			),
+		);
+		expect(view.status).toBe("not_started");
+		expect(view.answers).toEqual([]);
 	});
 });

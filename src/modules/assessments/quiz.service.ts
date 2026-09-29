@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import {
 	throwBadRequestError,
+	throwConflictError,
 	throwForbiddenError,
 	throwNotFoundError,
 } from "@/helpers/errors/throw-errors";
@@ -608,6 +609,7 @@ export class QuizService {
 
 	createQuestion = async (authData: IAuthData, data: NewQuizQuestion) => {
 		await this.assertOwnedLessonCourse(data.lessonId, authData);
+		await this.assertQuestionsEditable(data.lessonId);
 		const question = await this.questions.create(data as any);
 		/* @info - Quiz content feeds the tutor; re-index the lesson */
 		await this.reindexLesson(question!.lessonId);
@@ -623,7 +625,8 @@ export class QuizService {
 		id: number,
 		data: Partial<NewQuizQuestion>,
 	) => {
-		await this.assertOwnedQuestionCourse(id, authData);
+		const owned = await this.assertOwnedQuestionCourse(id, authData);
+		await this.assertQuestionsEditable(Number(owned?.lessonId));
 		/* @info - Whitelist, the way `updateCourse` and `updateLesson` do it.
 		 * `updateQuizQuestionSchema` omits `lessonId`, but that only constrains what
 		 * Zod returns - the controller reads the raw body, so a smuggled `lessonId`
@@ -651,11 +654,60 @@ export class QuizService {
 	};
 
 	deleteQuestion = async (authData: IAuthData, id: number): Promise<void> => {
-		await this.assertOwnedQuestionCourse(id, authData);
+		const owned = await this.assertOwnedQuestionCourse(id, authData);
+		await this.assertQuestionsEditable(Number(owned?.lessonId));
 		const question = await this.questions.delete(id);
 		if (!question) throwNotFoundError(QuizMessages.NOT_FOUND);
 		await this.reindexLesson(question!.lessonId);
 		this.log.info(`Quiz question ${id} deleted`);
+	};
+
+	/**
+	 * @info - The question lock (D24/AC21). Adding, editing or deleting a question on
+	 *         an assessment that has ANY session is refused, because every session's
+	 *         score was computed against the question set as it stood: letting the
+	 *         paper change afterwards moves a submitted student's grade, and with it
+	 *         their leaderboard rank.
+	 *
+	 *         Called only by the three question mutations. `listQuestions`,
+	 *         `getQuestion` and the reset endpoint stay open — reading the paper and
+	 *         clearing the sessions are how an instructor gets out of the lock.
+	 *
+	 *         A quiz lesson is never locked: quizzes have no sessions and no
+	 *         once-only rule, which is why this checks the lesson type first.
+	 */
+	private assertQuestionsEditable = async (lessonId: number) => {
+		const lesson = await this.assertLessonIfAssessment(lessonId);
+		if (!lesson) return;
+
+		const sessions = await this.sessions.findByLesson(lessonId);
+		if (sessions.length > 0) {
+			return throwConflictError(QuizMessages.ASSESSMENT_LOCKED);
+		}
+	};
+
+	/**
+	 * @info - Resetting one student's attempt: it is what makes the lock liftable.
+	 *         Deleting the session alone would leave their autosaved answers behind,
+	 *         and the next Start would hand them back a pre-filled paper — the bug
+	 *         this exists to prevent, so both go.
+	 */
+	resetAssessmentAttempt = async (
+		authData: IAuthData,
+		lessonId: number,
+		userId: number,
+	) => {
+		const lesson = await this.assertAssessmentLesson(lessonId);
+		await this.assertOwnedLessonCourse(lesson.id, authData);
+
+		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
+		if (session) await this.sessions.delete(session.id);
+		for (const row of await this.attempts.findByUserAndLesson(userId, lessonId)) {
+			await this.attempts.delete(row.id);
+		}
+
+		this.log.info(`Assessment attempt reset`, { lessonId, userId });
+		return { reset: true };
 	};
 
 	/** @info - Re-embed the lesson after quiz edits (best-effort, published only) */

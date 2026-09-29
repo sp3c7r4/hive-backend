@@ -36,3 +36,8 @@ export const assessmentAutosaveSchema = z.object({
 	questionId: z.number().int(),
 	selectedAnswer: z.string().max(500),
 });
+
+/** @info - Which student's attempt to reset. */
+export const assessmentResetSchema = z.object({
+	userId: z.number().int(),
+});

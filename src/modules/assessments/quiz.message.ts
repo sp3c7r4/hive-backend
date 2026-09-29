@@ -23,4 +23,10 @@ export const QuizMessages = {
 	ATTEMPT_SUBMITTED: "This assessment has already been submitted",
 	ATTEMPT_EXPIRED: "Time is up for this assessment",
 	ATTEMPT_NOT_STARTED: "This assessment has not been started",
+	/* @info - The question lock. The message names the way out on purpose: the
+	 * instructor is stuck until they do it, and resetting the attempts is the only
+	 * thing that lifts the lock. */
+	ASSESSMENT_LOCKED:
+		"Questions cannot be changed once an assessment has been started. Reset the students' attempts first",
+	ATTEMPT_RESET: "Attempt reset successfully",
 };
