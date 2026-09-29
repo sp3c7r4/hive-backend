@@ -119,6 +119,8 @@ export const createLessonSchema = z.object({
 	 * it every schedule save died on value.toISOString(). */
 	scheduledAt: z.coerce.date().optional(),
 	durationMinutes: z.number().int().min(5).max(600).optional(),
+	/** @info - Assessment only: minutes allowed; absent or null means untimed. */
+	timeLimitMinutes: z.number().int().positive().nullable().optional(),
 	attachmentUrl: z.string().max(1000).optional(),
 	/** @info - Lesson-type-specific settings (e.g. assignment rubric/due date) */
 	settings: z.record(z.string(), z.any()).optional(),

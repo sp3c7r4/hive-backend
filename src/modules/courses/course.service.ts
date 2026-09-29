@@ -187,6 +187,11 @@ export class CourseService {
 		"attachmentUrl",
 		"driveUrl",
 		"settings",
+		/* @info - The assessment attempt window. Only meaningful for an assessment
+		 * lesson, and read only there; harmless on the others because nothing reads
+		 * it. It has to be listed here or the whitelist silently drops it, which is
+		 * exactly what the raw-body fix exists to prevent. */
+		"timeLimitMinutes",
 	] as const;
 
 	/** @info - Copies only the named keys that were actually sent, so a PATCH stays
