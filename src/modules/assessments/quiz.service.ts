@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import {
 	throwBadRequestError,
@@ -21,7 +21,7 @@ import { users } from "@/modules/user/user.model";
 import { EnrollmentRepository } from "@/modules/enrollments/enrollment.repository";
 import { serviceLogger } from "@/utils";
 import type { NewQuizQuestion } from "./assessment.model";
-import { quizAttempts } from "./assessment.model";
+import { assessmentSessions, quizAttempts } from "./assessment.model";
 import {
 	type AssessmentStatus,
 	assessmentDeadline,
@@ -586,7 +586,33 @@ export class QuizService {
 			.innerJoin(users, eq(quizAttempts.userId, users.id))
 			.innerJoin(lessons, eq(quizAttempts.lessonId, lessons.id))
 			.innerJoin(modules, eq(lessons.moduleId, modules.id))
-			.where(eq(modules.courseId, courseId))
+			/* @info - D25: an assessment appears here only once its session is closed
+			 * (submitted, or past its deadline). Autosave writes these rows while the
+			 * student is still answering, so without this the grading tab shows a run as
+			 * finished — with a score — before it is. A LEFT join, so quizzes (which have
+			 * no session rows at all) keep counting their attempts exactly as before. */
+			.leftJoin(
+				assessmentSessions,
+				and(
+					eq(assessmentSessions.lessonId, quizAttempts.lessonId),
+					eq(assessmentSessions.userId, quizAttempts.userId),
+				),
+			)
+			.where(
+				and(
+					eq(modules.courseId, courseId),
+					sql`(
+						${lessons.type} <> 'assessment'
+						OR ${assessmentSessions.id} IS NULL
+						OR ${assessmentSessions.submittedAt} IS NOT NULL
+						OR (
+							${lessons.timeLimitMinutes} IS NOT NULL
+							AND now() > ${assessmentSessions.startedAt}
+								+ (${lessons.timeLimitMinutes} * interval '1 minute')
+						)
+					)`,
+				),
+			)
 			.groupBy(
 				quizAttempts.userId,
 				users.firstName,

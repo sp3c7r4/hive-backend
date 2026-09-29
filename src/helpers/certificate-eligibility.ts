@@ -33,7 +33,13 @@ export interface CertificateEligibilityInput {
 	publishedLessonIds: number[];
 	/** Lesson ids with a completed progress row. */
 	completedLessonIds: number[];
-	/** Quiz lessons of the course, already filtered to published ones. */
+	/**
+	 * @info - Graded question-bearing lessons of the course, already filtered to
+	 *         published ones. This is a quiz OR an assessment — the caller decides
+	 *         which lessons count (an assessment counts only once its session is
+	 *         submitted or expired), because these rules do not care where the
+	 *         answers came from. The name is historical.
+	 */
 	quizLessons: CertificateQuizInput[];
 }
 

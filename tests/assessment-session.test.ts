@@ -785,3 +785,87 @@ describe("AC21 - the question lock", () => {
 		expect(view.answers).toEqual([]);
 	});
 });
+
+/**
+ * @info - AC20, the other half: the instructor's grading tab must not show a run
+ * that is still going.
+ *
+ * `listByCourse` aggregates `quiz_attempts`, and autosave writes those rows while
+ * the student is still answering — so an open attempt appeared as a finished one,
+ * with a score, and the instructor had no way to tell. An assessment is counted
+ * only once its session is submitted or past its deadline; quizzes, which have no
+ * session rows, keep counting exactly as they always have.
+ */
+describe("AC20 - an open assessment does not appear in the grading tab", () => {
+	const OWNER_AUTH = "auth:assess-grading-owner";
+	let ownerToken: string;
+
+	const asOwner = async (path: string) => {
+		if (!ownerToken) {
+			const instructor = await one(
+				`SELECT id, email FROM users WHERE lower(email) = '${INSTRUCTOR_EMAIL}'`,
+			);
+			ownerToken = JwtService.getInstance().generateToken(OWNER_AUTH);
+			await CacheService.getInstance().set(OWNER_AUTH, {
+				id: instructor.id,
+				email: instructor.email,
+				firstName: "Inst",
+				roles: ["instructor"],
+				isAuthenticated: true,
+			});
+		}
+		return app.request(`/api/v1${path}`, {
+			headers: { Authorization: `Bearer ${ownerToken}` },
+		});
+	};
+
+	/** @info - Rows for the assessment lesson, as the instructor sees them. */
+	const assessmentRows = async () => {
+		const res = await asOwner(`/quiz/attempts/course/${courseId}`);
+		expect(res.status).toBe(200);
+		const rows = (await bodyOf(res)).data.data as any[];
+		return rows.filter((row) => Number(row.lessonId) === assessmentLessonId);
+	};
+
+	afterAll(async () => {
+		await CacheService.getInstance().delete(OWNER_AUTH);
+	});
+
+	it("hides it while the session is open, and shows it once closed", async () => {
+		await sql(
+			`DELETE FROM quiz_attempts WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		await sql(
+			`DELETE FROM assessment_sessions WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		await sql(
+			`INSERT INTO assessment_sessions (user_id, lesson_id, started_at) VALUES (${studentId}, ${assessmentLessonId}, now())`,
+		);
+		await sql(
+			`INSERT INTO quiz_attempts (user_id, lesson_id, question_id, selected_answer, is_correct) VALUES (${studentId}, ${assessmentLessonId}, ${questionId}, 'B', true)`,
+		);
+
+		expect(await assessmentRows()).toHaveLength(0);
+
+		/* @info - Expired rather than submitted, so this also pins that a deadline
+		 * that passes with no submission brings the row in (graded on autosave, D9). */
+		await sql(
+			`UPDATE assessment_sessions SET started_at = now() - interval '90 minutes' WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		const shown = await assessmentRows();
+		expect(shown).toHaveLength(1);
+		expect(Number(shown[0].totalAttempted)).toBe(1);
+		expect(Number(shown[0].correctCount)).toBe(1);
+	});
+
+	it("still shows a quiz lesson's attempts", async () => {
+		await sql(
+			`INSERT INTO quiz_attempts (user_id, lesson_id, question_id, selected_answer, is_correct) VALUES (${studentId}, ${quizLessonId}, ${otherQuestionId}, 'A', false)`,
+		);
+		const res = await asOwner(`/quiz/attempts/course/${courseId}`);
+		const rows = ((await bodyOf(res)).data.data as any[]).filter(
+			(row) => Number(row.lessonId) === quizLessonId,
+		);
+		expect(rows.length).toBeGreaterThan(0);
+	});
+});

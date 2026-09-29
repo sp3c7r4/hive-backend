@@ -1,4 +1,4 @@
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, eq, ne, sql } from "drizzle-orm";
 import {
 	throwBadRequestError,
 	throwForbiddenError,
@@ -20,7 +20,11 @@ import { courses, lessons, modules } from "@/modules/courses/course.model";
 import { enrollments as enrollmentsModel } from "./enrollment.model";
 import { communities } from "@/modules/communities/community.model";
 import { payments } from "@/modules/payment/payment.model";
-import { quizAttempts, quizQuestions } from "@/modules/assessments/assessment.model";
+import {
+	assessmentSessions,
+	quizAttempts,
+	quizQuestions,
+} from "@/modules/assessments/assessment.model";
 import { CertificateQueueService } from "@/services/queues/certificate.queue.service";
 import {
 	type CertificateEligibilityResult,
@@ -355,9 +359,65 @@ export class EnrollmentService {
         .map((row: any) => row.lessonId),
       quizLessons: await this._quizInputs(
         userId,
-        lessonRows.filter((lesson) => lesson.type === "quiz"),
+        await this._gradedLessons(userId, resolved.courseId, lessonRows),
       ),
     });
+  };
+
+  /**
+   * @info - Which lessons the certificate gate grades (D25).
+   *
+   *         Every quiz lesson, unchanged, PLUS every assessment lesson whose
+   *         session for this student is `submitted` or `expired`.
+   *
+   *         The session condition is the whole point: autosave writes real
+   *         `quiz_attempts` rows while a student is still typing, so counting the
+   *         rows would score a half-finished attempt — the certificate would refuse
+   *         a student whose assessment is still open, or award one for a run they
+   *         never finished. An open assessment is therefore not "attempted" at all
+   *         until its session closes, which is also exactly when D9 grades it.
+   */
+  private _gradedLessons = async (
+    userId: number,
+    courseId: number,
+    lessonRows: Array<{ id: number; type: string | null; title: string | null }>,
+  ) => {
+    const quizzes = lessonRows.filter((lesson) => lesson.type === "quiz");
+    const assessments = lessonRows.filter(
+      (lesson) => lesson.type === "assessment",
+    );
+    if (assessments.length === 0) return quizzes;
+
+    const db = getDb();
+    const closed = await db
+      .select({ lessonId: assessmentSessions.lessonId })
+      .from(assessmentSessions)
+      .innerJoin(lessons, eq(lessons.id, assessmentSessions.lessonId))
+      .innerJoin(modules, eq(modules.id, lessons.moduleId))
+      .where(
+        and(
+          eq(assessmentSessions.userId, userId),
+          eq(modules.courseId, courseId),
+          /* @info - Closed means submitted OR past the deadline, which is the same
+           * `assessmentState` rule the student endpoints use, expressed in SQL so
+           * the whole course is resolved in one query. An untimed assessment with
+           * no submission never closes. */
+          sql`(
+							${assessmentSessions.submittedAt} IS NOT NULL
+							OR (
+								${lessons.timeLimitMinutes} IS NOT NULL
+								AND now() > ${assessmentSessions.startedAt}
+									+ (${lessons.timeLimitMinutes} * interval '1 minute')
+							)
+						)`,
+        ),
+      );
+    const closedIds = new Set(closed.map((row) => row.lessonId));
+
+    return [
+      ...quizzes,
+      ...assessments.filter((lesson) => closedIds.has(lesson.id)),
+    ];
   };
 
   /** @info - The course's certificate settings, resolved from an enrollment. */
