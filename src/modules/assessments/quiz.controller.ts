@@ -57,8 +57,12 @@ export class QuizController {
 	/* Instructor: quiz results per course */
 
 	listByCourse = async (c: Context) => {
+		const authData = c.get("authData");
 		const courseId = c.req.param("courseId");
-		const data = await this.service.listByCourse(courseId as unknown as number);
+		const data = await this.service.listByCourse(
+			authData,
+			courseId as unknown as number,
+		);
 		return sendSuccessResponse(c, {
 			message: "Quiz results fetched successfully",
 			data,
@@ -68,8 +72,10 @@ export class QuizController {
 	/* Instructor: Quiz Builder */
 
 	listQuestions = async (c: Context) => {
+		const authData = c.get("authData");
 		const lessonId = c.req.param("lessonId");
 		const data = await this.service.listQuestions(
+			authData,
 			lessonId as unknown as number,
 		);
 		return sendSuccessResponse(c, {
@@ -79,20 +85,27 @@ export class QuizController {
 	};
 
 	createQuestion = async (c: Context) => {
+		const authData = c.get("authData");
 		const lessonId = c.req.param("lessonId");
-		const data = await this.service.createQuestion({
+		const data = await this.service.createQuestion(authData, {
 			...((await c.req.json()) as any),
 			lessonId: lessonId as unknown as number,
 		});
-		return sendSuccessResponse(c, {
-			message: "Quiz question created successfully",
-			data,
-		}, StatusCodes.CREATED);
+		return sendSuccessResponse(
+			c,
+			{
+				message: "Quiz question created successfully",
+				data,
+			},
+			StatusCodes.CREATED,
+		);
 	};
 
 	getQuestion = async (c: Context) => {
+		const authData = c.get("authData");
 		const questionId = c.req.param("questionId");
 		const data = await this.service.getQuestion(
+			authData,
 			questionId as unknown as number,
 		);
 		return sendSuccessResponse(c, {
@@ -102,8 +115,10 @@ export class QuizController {
 	};
 
 	updateQuestion = async (c: Context) => {
+		const authData = c.get("authData");
 		const questionId = c.req.param("questionId");
 		const data = await this.service.updateQuestion(
+			authData,
 			questionId as unknown as number,
 			await c.req.json(),
 		);
@@ -114,8 +129,12 @@ export class QuizController {
 	};
 
 	deleteQuestion = async (c: Context) => {
+		const authData = c.get("authData");
 		const questionId = c.req.param("questionId");
-		await this.service.deleteQuestion(questionId as unknown as number);
+		await this.service.deleteQuestion(
+			authData,
+			questionId as unknown as number,
+		);
 		return sendSuccessResponse(c, {
 			message: "Quiz question deleted successfully",
 		});
