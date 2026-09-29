@@ -144,6 +144,66 @@ export class CourseService {
 		return this.assertOwnedCourse(courseId as number, authData);
 	};
 
+	/**
+	 * @info - The columns a PATCH may write. Deliberately a whitelist rather than
+	 * a spread.
+	 *
+	 * `updateModuleSchema` and `updateLessonSchema` are `.partial()` copies of the
+	 * create schemas, which is the contract that says a module cannot change course
+	 * and a lesson cannot change module. They are not enough on their own: the
+	 * controllers read `await c.req.json()` (the raw body), not
+	 * `c.req.valid("json")`, so the schemas never see the smuggled key. The
+	 * ownership assert only covers the parent the row is LEAVING, so without this
+	 * list `{"courseId": X}` moved a module into another instructor's course and
+	 * `{"moduleId": X}` did the same for a lesson.
+	 *
+	 * LESSON_EDITABLE is wider than `createLessonSchema` on purpose: the frontend's
+	 * `UpdateLessonInput` sends `status` (the draft/live toggle), `attachmentUrl`
+	 * and `settings`, and today they survive only because of the same raw-body
+	 * read. Whitelisting to the schema would break all three.
+	 */
+	private static readonly MODULE_EDITABLE = [
+		"title",
+		"description",
+		"sortOrder",
+	] as const;
+
+	private static readonly LESSON_EDITABLE = [
+		"title",
+		"description",
+		"type",
+		"duration",
+		"sortOrder",
+		"freePreview",
+		"randomizeQuestions",
+		"status",
+		"videoUrl",
+		"pdfUrl",
+		"pptxUrl",
+		"meetingType",
+		"meetingUrl",
+		"scheduledAt",
+		"durationMinutes",
+		"attachmentUrl",
+		"driveUrl",
+		"settings",
+	] as const;
+
+	/** @info - Copies only the named keys that were actually sent, so a PATCH stays
+	 * a patch: absent keys are never written back as undefined. */
+	private pickEditable = <T extends object>(
+		data: T,
+		fields: readonly string[],
+	): Partial<T> => {
+		const picked: Record<string, unknown> = {};
+		for (const field of fields) {
+			if ((data as any)[field] !== undefined) {
+				picked[field] = (data as any)[field];
+			}
+		}
+		return picked as Partial<T>;
+	};
+
 	/** @info - Is the requester enrolled in this course? */
 	private _isEnrolled = async (courseId: number, userId: number) => {
 		const db = getDb();
@@ -691,7 +751,10 @@ export class CourseService {
 		const mod = await this.modulesRepo.findById(id);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
-		const updated = await this.modulesRepo.update(id, data as any);
+		const updated = await this.modulesRepo.update(
+			id,
+			this.pickEditable(data, CourseService.MODULE_EDITABLE) as any,
+		);
 		return updated ?? throwNotFoundError(ModuleMessages.NOT_FOUND);
 	};
 
@@ -806,7 +869,9 @@ export class CourseService {
 		const mod = await this.modulesRepo.findById(Number(existing!.moduleId));
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
-		const { lessonData, meeting } = splitLessonMeeting(data);
+		const { lessonData, meeting } = splitLessonMeeting(
+			this.pickEditable(data, CourseService.LESSON_EDITABLE) as any,
+		);
 		/* @info - validate the merged state so clearing a link is impossible without changing type */
 		this.assertDriveLink(
 			lessonData.type ?? existing!.type,
