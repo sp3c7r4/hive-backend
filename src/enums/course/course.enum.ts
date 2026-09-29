@@ -24,6 +24,9 @@ export enum LessonType {
 	TEXT = "text",
 	GOOGLE_DRIVE = "google_drive",
 	PPTX = "pptx",
+	/* @info - A quiz-shaped lesson that can be taken exactly once. The attempt
+	 * policy lives in assessment_sessions, not in the lesson type itself. */
+	ASSESSMENT = "assessment",
 }
 
 export enum LessonStatus {

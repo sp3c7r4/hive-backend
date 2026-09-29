@@ -25,6 +25,7 @@ export enum TableNames {
 	ASSIGNMENT_SUBMISSIONS = "assignment_submissions",
 	ENROLLMENTS = "enrollments",
 	LESSON_PROGRESS = "lesson_progress",
+	ASSESSMENT_SESSIONS = "assessment_sessions",
 	PAYMENTS = "payments",
 	WITHDRAWALS = "withdrawals",
 	INSTRUCTOR_BALANCES = "instructor_balances",

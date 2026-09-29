@@ -108,10 +108,51 @@ export const assignmentSubmissions = pgTable(
 	],
 );
 
+/**
+ * @info - One attempt at an assessment lesson, and the rule that it is its only one.
+ *
+ * The policy lives here rather than on `quiz_attempts` because the two have
+ * different lifetimes: an attempt is a fact about a student and a lesson, and a
+ * student who started and walked away has one even with zero answers recorded.
+ *
+ * `uq_assessment_session` is the once-only rule, not a check in application code:
+ * two concurrent Start presses must not be able to open two sessions, and only
+ * the database can promise that.
+ *
+ * Timestamps are `withTimezone` like live_sessions: the deadline is derived from
+ * the server's clock and compared against it on every read, so an offset that
+ * drops the zone would move the deadline by hours.
+ */
+export const assessmentSessions = pgTable(
+	TableNames.ASSESSMENT_SESSIONS,
+	{
+		id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+		userId: integer("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		lessonId: integer("lesson_id")
+			.notNull()
+			.references(() => lessons.id, { onDelete: "cascade" }),
+		startedAt: timestamp("started_at", { withTimezone: true })
+			.defaultNow()
+			.notNull(),
+		/* @info - Null means in progress. There is no expired column: the deadline
+		 * is derived from started_at and the lesson's time limit on every read, so
+		 * a state that depends on the clock is never stored and cannot go stale. */
+		submittedAt: timestamp("submitted_at", { withTimezone: true }),
+	},
+	(table) => [
+		uniqueIndex("uq_assessment_session").on(table.userId, table.lessonId),
+		index("idx_assessment_sessions_lesson").on(table.lessonId),
+	],
+);
+
 export type QuizQuestion = typeof quizQuestions.$inferSelect;
 export type NewQuizQuestion = typeof quizQuestions.$inferInsert;
 export type QuizAttempt = typeof quizAttempts.$inferSelect;
 export type NewQuizAttempt = typeof quizAttempts.$inferInsert;
+export type AssessmentSession = typeof assessmentSessions.$inferSelect;
+export type NewAssessmentSession = typeof assessmentSessions.$inferInsert;
 export type AssignmentSubmission = typeof assignmentSubmissions.$inferSelect;
 export type NewAssignmentSubmission = typeof assignmentSubmissions.$inferInsert;
 
@@ -149,3 +190,17 @@ export const assignmentSubmissionsRelations = relations(assignmentSubmissions, (
 		references: [lessons.id],
 	}),
 }));
+
+export const assessmentSessionsRelations = relations(
+	assessmentSessions,
+	({ one }) => ({
+		user: one(users, {
+			fields: [assessmentSessions.userId],
+			references: [users.id],
+		}),
+		lesson: one(lessons, {
+			fields: [assessmentSessions.lessonId],
+			references: [lessons.id],
+		}),
+	}),
+);

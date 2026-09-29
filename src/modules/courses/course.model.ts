@@ -154,6 +154,11 @@ export const lessons = pgTable(
 		pptxUrl: varchar("pptx_url", { length: 1000 }),
 		attachmentUrl: varchar("attachment_url", { length: 1000 }),
 		driveUrl: varchar("drive_url", { length: 1000 }),
+		/* @info - Assessment attempt window. Nullable on every lesson type and read
+		 * only for assessments, where an absent value means untimed, so no existing
+		 * lesson changes behaviour. The CHECK that keeps it positive lives in
+		 * migration 0032, next to the copy of this shape. */
+		timeLimitMinutes: integer("time_limit_minutes"),
 		settings: jsonb("settings"),
 		...timestamps,
 	},
