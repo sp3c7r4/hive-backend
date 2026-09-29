@@ -36,8 +36,9 @@ export class EnrollmentController {
 	};
 
 	get = async (c: Context) => {
-		const id = c.req.param("id");
-		const data = await this.service.get(id as unknown as number);
+		const authData = c.get("authData");
+		const id = Number(c.req.param("id"));
+		const data = await this.service.get(authData, id);
 		return sendSuccessResponse(c, {
 			message: "Enrollment fetched successfully",
 			data,

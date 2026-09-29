@@ -1,5 +1,9 @@
 import { and, count, eq, ne } from "drizzle-orm";
-import { throwBadRequestError, throwNotFoundError } from "@/helpers/errors/throw-errors";
+import {
+	throwBadRequestError,
+	throwForbiddenError,
+	throwNotFoundError,
+} from "@/helpers/errors/throw-errors";
 import { serviceLogger } from "@/utils";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
@@ -164,8 +168,49 @@ export class EnrollmentService {
 		);
 	};
 
-	get = async (id: number) => {
-		return this.enrollments.findById(id);
+	get = async (authData: IAuthData, id: number) => {
+		return this.assertOwnedEnrollment(authData, id);
+	};
+
+	/**
+	 * @info - An enrollment belongs to the student it enrolls, to whoever paid for
+	 *         it (`enrolledById` is the parent on a parent-bought enrollment) and to
+	 *         an admin. Deliberately not to the course's instructor: every instructor
+	 *         view of a cohort is course-scoped (`/courses/:courseId/...`), so no
+	 *         screen needs to name an enrollment it does not belong to.
+	 */
+	private isOwnerOrAdmin = (
+		enrollment: { userId?: number | null; enrolledById?: number | null },
+		authData: IAuthData,
+	) => {
+		const caller = Number(authData?.id);
+		const isCaller = (id?: number | null) =>
+			id !== null && id !== undefined && Number(id) === caller;
+
+		return (
+			isCaller(enrollment.userId) ||
+			isCaller(enrollment.enrolledById) ||
+			(authData?.roles ?? []).includes("admin")
+		);
+	};
+
+	/**
+	 * @info - Loads the enrollment and asserts the caller may act on it, returning
+	 *         the row so callers use the one they were checked against instead of
+	 *         re-reading it. A missing enrollment throws NOT_FOUND rather than
+	 *         resolving to undefined, which used to answer these routes with a 200
+	 *         and an empty body.
+	 */
+	private assertOwnedEnrollment = async (
+		authData: IAuthData,
+		enrollmentId: number,
+	) => {
+		const enrollment = await this.enrollments.findById(enrollmentId);
+		if (!enrollment) return throwNotFoundError(EnrollmentMessages.NOT_FOUND);
+		if (!this.isOwnerOrAdmin(enrollment, authData)) {
+			return throwForbiddenError(EnrollmentMessages.FORBIDDEN);
+		}
+		return enrollment;
 	};
 
   markLessonComplete = async (
@@ -173,7 +218,15 @@ export class EnrollmentService {
     enrollmentId: number,
     lessonId: number,
   ) => {
-    const row = await this.progress.upsertProgress(enrollmentId, lessonId, authData.id);
+    /* @info - Authorize before writing. `upsertProgress` ignores the user it is
+     * handed, so nothing downstream would have stopped a student from marking
+     * lessons complete inside someone else's enrollment. */
+    const enrollment = await this.assertOwnedEnrollment(authData, enrollmentId);
+    /* @info - The student the enrollment enrolls, which is not the caller when a
+     * parent or an admin acts: a certificate belongs to the student. */
+    const studentId = Number(enrollment.userId);
+
+    const row = await this.progress.upsertProgress(enrollmentId, lessonId, studentId);
 
     /* @info - After marking, re-evaluate eligibility: enqueue generation when
      * the student now qualifies (idempotent per user+course, so repeated
@@ -182,7 +235,7 @@ export class EnrollmentService {
      * guess. */
     let eligibility: CertificateEligibilityResult | null = null;
     try {
-      eligibility = await this._maybeQueueCertificate(authData.id, enrollmentId);
+      eligibility = await this._maybeQueueCertificate(studentId, enrollmentId);
     } catch (e) {
       this.log.error("Could not evaluate certificate eligibility", {
         error: e,
@@ -383,14 +436,14 @@ export class EnrollmentService {
    *         checklist costs no extra round trip.
    */
   getLessonProgress = async (authData: IAuthData, enrollmentId: number) => {
+    const enrollment = await this.assertOwnedEnrollment(authData, enrollmentId);
+    const studentId = Number(enrollment.userId);
+
     const data = await this.progress.findByEnrollment(enrollmentId);
 
     let eligibility: CertificateEligibilityResult | null = null;
     try {
-      eligibility = await this.evaluateEligibility(
-        Number(authData.id),
-        enrollmentId,
-      );
+      eligibility = await this.evaluateEligibility(studentId, enrollmentId);
     } catch (e) {
       this.log.error("Could not evaluate certificate eligibility", {
         error: e,
