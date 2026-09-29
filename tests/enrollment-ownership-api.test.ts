@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { connectPostgresDB, getDb } from "@/db/postgres.db";
+import { EnrollmentMessages } from "@/modules/enrollments/enrollment.message";
 import { CacheService } from "@/services/cache.service";
 import { JwtService } from "@/services/jwt.service";
 
@@ -20,7 +21,9 @@ import { JwtService } from "@/services/jwt.service";
  *
  * The PATCH is the sharp one: `upsertProgress(enrollmentId, lessonId, _userId)`
  * ignores the user it is handed, so the write landed inside the victim's
- * enrollment, feeding their `progressPercent` and their certificate.
+ * enrollment, forging progress inside it and moving that student's certificate
+ * eligibility. (`enrollments.progress_percent` is not what moves — nothing writes
+ * that column; the forged `lesson_progress` row is the damage.)
  *
  * Who may read one: the enrolled student, the parent who paid (`enrolledById`) and
  * an admin. The course's instructor deliberately may not — instructor views of a
@@ -237,20 +240,26 @@ describe("GET /enrollments/:id", () => {
 		const res = await get(`/enrollments/${enrollmentId}`, STRANGER_AUTH);
 		expect(res.status).toBe(403);
 
-		const body = JSON.stringify(await bodyOf(res));
-		expect(body).not.toContain(STUDENT_EMAIL);
-		expect(body).not.toContain('"progressPercent"');
+		const body = await bodyOf(res);
+		/* @info - Pin the code AND the message. The message is what the student
+		 * reads, and nothing else in either suite asserts it; `not.toContain` alone
+		 * would pass on a blank or wrong error. */
+		expect(body.error.message).toBe(EnrollmentMessages.FORBIDDEN);
+		expect(body.data).toBeFalsy();
+		expect(JSON.stringify(body)).not.toContain(STUDENT_EMAIL);
 	});
 
 	it("the course's instructor is refused: cohort views are course-scoped", async () => {
 		const res = await get(`/enrollments/${enrollmentId}`, INSTRUCTOR_AUTH);
 		expect(res.status).toBe(403);
+		expect((await bodyOf(res)).error.message).toBe(EnrollmentMessages.FORBIDDEN);
 	});
 
 	it("404s for an enrollment that does not exist, not 200 with an empty body", async () => {
 		const res = await get(`/enrollments/999999999`, STUDENT_AUTH);
 		expect(res.status).toBe(404);
 		const body = await bodyOf(res);
+		expect(body.error.message).toBe(EnrollmentMessages.NOT_FOUND);
 		expect(body.data).toBeFalsy();
 	});
 });
@@ -270,11 +279,19 @@ describe("GET /enrollments/:enrollmentId/progress", () => {
 			STRANGER_AUTH,
 		);
 		expect(res.status).toBe(403);
+		expect((await bodyOf(res)).error.message).toBe(EnrollmentMessages.FORBIDDEN);
 	});
 });
 
 describe("PATCH /enrollments/:enrollmentId/progress/:lessonId", () => {
 	it("a stranger student cannot write, and no progress row appears", async () => {
+		/* @info - Snapshot rather than assume zero: counting rows for the whole
+		 * enrollment only read as "no row appeared" while the writing test happened
+		 * to be declared later. */
+		const before = await one(
+			`SELECT count(*)::int n FROM lesson_progress WHERE enrollment_id = ${enrollmentId}`,
+		);
+
 		const res = await patch(
 			`/enrollments/${enrollmentId}/progress/${lessonId}`,
 			STRANGER_AUTH,
@@ -284,7 +301,7 @@ describe("PATCH /enrollments/:enrollmentId/progress/:lessonId", () => {
 		const rows = await one(
 			`SELECT count(*)::int n FROM lesson_progress WHERE enrollment_id = ${enrollmentId}`,
 		);
-		expect(rows.n).toBe(0);
+		expect(rows.n).toBe(before.n);
 
 		const enrollment = await one(
 			`SELECT progress_percent FROM enrollments WHERE id = ${enrollmentId}`,
