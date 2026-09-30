@@ -555,29 +555,52 @@ export class QuizService {
 		return rows.map(({ isCorrect: _isCorrect, ...row }) => row);
 	};
 
-	/** @info - Student-facing quiz questions: answers & explanations stripped.
+	/** @info - Student-facing questions: the answer key is stripped, and the
+	 *  explanation is withheld only while it would be an oracle.
 	 *
 	 *  For an ASSESSMENT the paper is also unreadable before Start: `not_started`
 	 *  is refused, so the questions cannot be read in advance of the attempt they
 	 *  exist to measure (spec D23). Quizzes are untouched — no enrollment check is
-	 *  retrofitted onto them (spec §10), so they stay readable exactly as today. */
+	 *  retrofitted onto them (spec §10), so they stay readable exactly as today.
+	 *
+	 *  `explanation` is a different matter from the answer key. While an assessment
+	 *  attempt is open it says why the right answer is right, which is the thing
+	 *  being measured, so it stays hidden; once the attempt has closed it is the
+	 *  most valuable sentence in the review, and withholding it forever meant a
+	 *  student was told they were wrong with no way to learn why. A quiz reveals it
+	 *  once the student has any attempt on record, which is when they have already
+	 *  seen it in the submit response. */
 	getLessonQuestions = async (authData: IAuthData, lessonId: number) => {
 		/* @info - A draft lesson is the instructor's. Every student-facing entry
 		 * point here names a lesson by id, so hiding unpublished rows from the
 		 * module's lesson list would be a curtain with a door behind it. */
 		await this.assertLessonVisible(authData, lessonId);
+		const userId = Number(authData.id);
 		const lesson = await this.assertLessonIfAssessment(lessonId);
+		let revealExplanations = false;
 		if (lesson) {
-			const userId = Number(authData.id);
 			await this.assertEnrolledInLesson(userId, lessonId);
 			const session = await this.sessions.findByUserAndLesson(userId, lessonId);
 			if (!session) {
 				return throwForbiddenError(QuizMessages.ATTEMPT_NOT_STARTED);
 			}
+			const deadline = assessmentDeadline({
+				startedAt: session.startedAt,
+				timeLimitMinutes: lesson.timeLimitMinutes ?? null,
+			});
+			revealExplanations =
+				session.submittedAt !== null ||
+				(deadline !== null && new Date() > deadline);
+		} else {
+			const attempts = await this.attempts.findByUserAndLesson(userId, lessonId);
+			revealExplanations = attempts.length > 0;
 		}
 
 		const questions = await this.questions.findByLesson(lessonId);
-		return questions.map(({ correctAnswer: _, explanation: __, ...q }) => q);
+		return questions.map(({ correctAnswer: _, explanation, ...q }) => ({
+			...q,
+			explanation: revealExplanations ? explanation : null,
+		}));
 	};
 
 	/* Instructor: aggregated quiz results per course */

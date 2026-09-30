@@ -428,7 +428,7 @@ describe("AC19 - the paper is unreadable before Start", () => {
 			method: "POST",
 		});
 
-	it("403 with no session, 200 with one, and correctAnswer never returned", async () => {
+	it("403 with no session, 200 with one, and no answer key while it runs", async () => {
 		await sql(
 			`DELETE FROM assessment_sessions WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
 		);
@@ -448,8 +448,16 @@ describe("AC19 - the paper is unreadable before Start", () => {
 
 		const body = await bodyOf(after);
 		expect(body.data.data.length).toBeGreaterThan(0);
+		/* @info - The answer key never travels. The explanation is a different
+		 * question: while the attempt is OPEN it says why the right answer is right,
+		 * which is what is being measured, so it is withheld — as `null`, not by
+		 * omission, because the field's presence is part of the student's payload.
+		 * Once the attempt closes it is the point of the review, and is asserted in
+		 * the review test below. */
 		expect(JSON.stringify(body)).not.toContain("correctAnswer");
-		expect(JSON.stringify(body)).not.toContain('"explanation"');
+		for (const question of body.data.data as { explanation: unknown }[]) {
+			expect(question.explanation).toBeNull();
+		}
 	});
 
 	it("200 for review once the attempt is submitted", async () => {
@@ -461,6 +469,30 @@ describe("AC19 - the paper is unreadable before Start", () => {
 			STUDENT_AUTH,
 		);
 		expect(res.status).toBe(200);
+	});
+
+	it("the explanation arrives once the attempt has closed, and only then", async () => {
+		await sql(
+			`UPDATE assessment_sessions SET submitted_at = now() WHERE user_id = ${studentId} AND lesson_id = ${assessmentLessonId}`,
+		);
+		await sql(
+			`UPDATE quiz_questions SET explanation = 'Because the lockfile pins what the install resolves.' WHERE lesson_id = ${assessmentLessonId}`,
+		);
+
+		const res = await call(
+			`/quiz/lessons/${assessmentLessonId}/take`,
+			STUDENT_AUTH,
+		);
+		const body = await bodyOf(res);
+		const explanations = (body.data.data as { explanation: string | null }[]).map(
+			(question) => question.explanation,
+		);
+		expect(explanations).toContain(
+			"Because the lockfile pins what the install resolves.",
+		);
+		/* The key stays home even now: the review carries the verdicts, not the
+		 * answer column. */
+		expect(JSON.stringify(body)).not.toContain("correctAnswer");
 	});
 
 	it("403 for a non-enrolled caller", async () => {
