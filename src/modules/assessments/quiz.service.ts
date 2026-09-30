@@ -17,8 +17,9 @@ import {
 	LessonRepository,
 	ModuleRepository,
 } from "@/modules/courses/course.repository";
-import { users } from "@/modules/user/user.model";
+import { isLessonVisibleTo } from "@/modules/courses/lesson-visibility";
 import { EnrollmentRepository } from "@/modules/enrollments/enrollment.repository";
+import { users } from "@/modules/user/user.model";
 import { serviceLogger } from "@/utils";
 import type { NewQuizQuestion } from "./assessment.model";
 import { assessmentSessions, quizAttempts } from "./assessment.model";
@@ -81,14 +82,12 @@ export class QuizService {
 		authData: IAuthData,
 		input: { lessonId: number; questionId: number; selectedAnswer: string },
 	) => {
+		await this.assertLessonVisible(authData, input.lessonId);
 		const lesson = await this.assertAssessmentLesson(input.lessonId);
 		const userId = Number(authData.id);
 		await this.assertEnrolledInLesson(userId, input.lessonId);
 
-		const session = await this.sessions.findByUserAndLesson(
-			userId,
-			lesson.id,
-		);
+		const session = await this.sessions.findByUserAndLesson(userId, lesson.id);
 		const status = assessmentState({
 			session: session ?? null,
 			timeLimitMinutes: lesson.timeLimitMinutes ?? null,
@@ -180,6 +179,17 @@ export class QuizService {
 	 *         GRACE_SECONDS after the deadline — the case the grace window exists
 	 *         for is a round trip that started before the bell and landed after it.
 	 */
+	/** @info - The module's lesson list hides unpublished rows; this refuses them one
+	 * at a time. Same rule, one implementation: `isLessonVisibleTo`. */
+	private assertLessonVisible = async (
+		authData: IAuthData,
+		lessonId: number,
+	): Promise<void> => {
+		if (!(await isLessonVisibleTo(authData, lessonId))) {
+			throwForbiddenError(LessonMessages.NOT_PUBLISHED);
+		}
+	};
+
 	private assertAttemptOpen = async (
 		authData: IAuthData,
 		lessonId: number,
@@ -252,6 +262,10 @@ export class QuizService {
 	 * while the student was away.
 	 */
 	startAssessment = async (authData: IAuthData, lessonId: number) => {
+		/* @info - A draft lesson is the instructor's. Every student-facing entry
+		 * point here names a lesson by id, so hiding unpublished rows from the
+		 * module's lesson list would be a curtain with a door behind it. */
+		await this.assertLessonVisible(authData, lessonId);
 		const lesson = await this.assertAssessmentLesson(lessonId);
 		const userId = Number(authData.id);
 		await this.assertEnrolledInLesson(userId, lessonId);
@@ -275,6 +289,10 @@ export class QuizService {
 	/** @info - The read side: same body, never writes. The learn page calls this on
 	 *  mount to choose between Start, Resume and a terminal state. */
 	getAssessmentSession = async (authData: IAuthData, lessonId: number) => {
+		/* @info - A draft lesson is the instructor's. Every student-facing entry
+		 * point here names a lesson by id, so hiding unpublished rows from the
+		 * module's lesson list would be a curtain with a door behind it. */
+		await this.assertLessonVisible(authData, lessonId);
 		const lesson = await this.assertAssessmentLesson(lessonId);
 		const userId = Number(authData.id);
 		await this.assertEnrolledInLesson(userId, lessonId);
@@ -425,6 +443,7 @@ export class QuizService {
 		lessonId: number,
 		submissions: QuizSubmission[],
 	) => {
+		await this.assertLessonVisible(authData, lessonId);
 		/* @info - The attempt policy, checked before anything is written. */
 		await this.assertAttemptOpen(authData, lessonId);
 
@@ -508,10 +527,7 @@ export class QuizService {
 	/* Student: view attempts */
 
 	getAttempts = async (authData: IAuthData, lessonId: number) => {
-		const rows = await this.attempts.findByUserAndLesson(
-			authData.id,
-			lessonId,
-		);
+		const rows = await this.attempts.findByUserAndLesson(authData.id, lessonId);
 		const lesson = await this.assertLessonIfAssessment(lessonId);
 		if (!lesson) return rows;
 
@@ -546,14 +562,15 @@ export class QuizService {
 	 *  exist to measure (spec D23). Quizzes are untouched — no enrollment check is
 	 *  retrofitted onto them (spec §10), so they stay readable exactly as today. */
 	getLessonQuestions = async (authData: IAuthData, lessonId: number) => {
+		/* @info - A draft lesson is the instructor's. Every student-facing entry
+		 * point here names a lesson by id, so hiding unpublished rows from the
+		 * module's lesson list would be a curtain with a door behind it. */
+		await this.assertLessonVisible(authData, lessonId);
 		const lesson = await this.assertLessonIfAssessment(lessonId);
 		if (lesson) {
 			const userId = Number(authData.id);
 			await this.assertEnrolledInLesson(userId, lessonId);
-			const session = await this.sessions.findByUserAndLesson(
-				userId,
-				lessonId,
-			);
+			const session = await this.sessions.findByUserAndLesson(userId, lessonId);
 			if (!session) {
 				return throwForbiddenError(QuizMessages.ATTEMPT_NOT_STARTED);
 			}
@@ -728,7 +745,10 @@ export class QuizService {
 
 		const session = await this.sessions.findByUserAndLesson(userId, lessonId);
 		if (session) await this.sessions.delete(session.id);
-		for (const row of await this.attempts.findByUserAndLesson(userId, lessonId)) {
+		for (const row of await this.attempts.findByUserAndLesson(
+			userId,
+			lessonId,
+		)) {
 			await this.attempts.delete(row.id);
 		}
 

@@ -12,6 +12,8 @@ export const ModuleMessages = {
 };
 
 export const LessonMessages = {
+	NOT_PUBLISHED:
+		"This lesson is not published yet",
 	NOT_FOUND: "Lesson not found",
 	DELETED: "Lesson deleted",
 	CREATED: "Lesson created",

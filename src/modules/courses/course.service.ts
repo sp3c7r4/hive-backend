@@ -995,10 +995,25 @@ export class CourseService {
 		const canRead = await this._canReadCourse(course as any, authData);
 		if (!canRead) return [];
 
+		/* @info - A draft lesson is the instructor's work in progress, so only the
+		 * course owner and admins get the whole tree: the curriculum builder and the
+		 * preview need the unpublished rows, and nobody else has any business seeing
+		 * them. Filtering the list is the rule for the collection; a lesson's own
+		 * endpoints answer for themselves (see `getLessonQuestions`, which refuses an
+		 * assessment whose attempt has not started). */
+		const canSeeDrafts = this.isOwnerOrAdmin(course as any, authData);
+
 		const rows = await db
 			.select()
 			.from(lessons)
-			.where(eq(lessons.moduleId, moduleId))
+			.where(
+				canSeeDrafts
+					? eq(lessons.moduleId, moduleId)
+					: and(
+							eq(lessons.moduleId, moduleId),
+							eq(lessons.status, "published"),
+						),
+			)
 			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
 
 		/* @info - Meeting fields on a lesson payload come from its session now */
