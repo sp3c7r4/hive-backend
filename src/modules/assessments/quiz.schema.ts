@@ -18,7 +18,10 @@ export const createQuizQuestionSchema = z.object({
 	text: z.string().min(1),
 	options: z.array(z.string()).optional(),
 	correctAnswer: z.string().min(1),
-	explanation: z.string().optional(),
+	/* @info - Nullable on purpose: PATCH omits absent keys, so `undefined` means
+	 * "leave it alone" and there would otherwise be no way to REMOVE an explanation
+	 * once a question has one. The form sends null when the field is emptied. */
+	explanation: z.string().nullable().optional(),
 	points: z.number().int().default(1),
 	sortOrder: z.number().int().default(0),
 });
