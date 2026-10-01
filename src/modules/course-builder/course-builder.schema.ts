@@ -12,7 +12,7 @@ import { z } from "zod";
 const strictHtml = z
 	.string()
 	.describe(
-		"STRICT HTML using only <p>, <br>, <b>, <i>, <ul>, <ol>, <li>. No attributes, headings, links, images, scripts, markdown, or raw newlines.",
+		"STRICT HTML using only <p>, <br>, <b>, <i>, <u>, <s>, <h2>, <ul>, <ol>, <li>, <blockquote>, <code>, <pre>. No attributes, links, images, scripts, markdown, or raw newlines.",
 	);
 
 const quizQuestionSchema = z.object({

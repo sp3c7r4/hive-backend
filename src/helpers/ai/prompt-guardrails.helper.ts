@@ -17,7 +17,14 @@ const INJECTION_PHRASES = [
 	"ignore your developer message",
 	"act as an unrestricted",
 	"forget everything",
-	"jailbreak",
+	/* @info - "jailbreak" as a topic is legitimate (AI-safety curricula
+	 * teach prompt injection & red teaming). Only imperative/attack forms
+	 * are flagged, never the bare word or descriptive bullets. */
+	"jailbreak your",
+	"jailbreak the system",
+	"jailbreak the model",
+	"jailbreak yourself",
+	"please jailbreak",
 ];
 
 /** @info - Plain mentions of "system prompt" / "developer message" / "you are
