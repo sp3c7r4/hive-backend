@@ -50,6 +50,11 @@ export class QuizService {
 	private modules: ModuleRepository;
 	private lessons: LessonRepository;
 	private enrollments: EnrollmentRepository;
+	/** @info - Injected rather than called directly so the stub-based suites can say
+	 *  whether a lesson is visible, exactly as they stub the repositories: the real
+	 *  implementation reads the database, which those tests deliberately do not
+	 *  build. */
+	private lessonVisibility = isLessonVisibleTo;
 
 	/** @info - Utilities */
 	private readonly log = serviceLogger("Quiz");
@@ -185,7 +190,7 @@ export class QuizService {
 		authData: IAuthData,
 		lessonId: number,
 	): Promise<void> => {
-		if (!(await isLessonVisibleTo(authData, lessonId))) {
+		if (!(await this.lessonVisibility(authData, lessonId))) {
 			throwForbiddenError(LessonMessages.NOT_PUBLISHED);
 		}
 	};

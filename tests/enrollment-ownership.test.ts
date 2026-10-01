@@ -55,6 +55,10 @@ function buildService() {
 		upsertProgress: vi.fn(),
 	};
 	(service as any).enrollments = enrollments;
+	/* @info - The visibility guard reads the database in production, which this
+	 * stub suite deliberately does not build. The rule has its own route-level
+	 * coverage in tests/lesson-visibility-api.test.ts. */
+	(service as any).lessonVisibility = async () => true;
 	(service as any).progress = progress;
 	return { service, enrollments, progress };
 }

@@ -38,6 +38,9 @@ export class EnrollmentService {
 	private static instance: EnrollmentService;
 	private enrollments: EnrollmentRepository;
 	private progress: LessonProgressRepository;
+	/** @info - Injected for the same reason as in QuizService: the stub suite has no
+	 * database to answer with. See `isLessonVisibleTo`. */
+	private lessonVisibility = isLessonVisibleTo;
 	private readonly emailQueue = EmailQueueService.getInstance();
 
 	/** @info - Utilities */
@@ -243,7 +246,7 @@ export class EnrollmentService {
     /* @info - An unpublished lesson is the instructor's draft, so completing one
      * would put a lesson the student cannot even open into their progress and, via
      * the certificate gate, into their finish line. */
-    if (!(await isLessonVisibleTo(authData, lessonId))) {
+    if (!(await this.lessonVisibility(authData, lessonId))) {
       throwForbiddenError(LessonMessages.NOT_PUBLISHED);
     }
     /* @info - The student the enrollment enrolls, which is not the caller when a

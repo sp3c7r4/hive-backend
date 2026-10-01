@@ -52,6 +52,10 @@ function buildService() {
 	 * enrolled student by default, so the tests here stay about the session. */
 	modules.findById.mockResolvedValue({ id: 200, courseId: 10 });
 	enrollments.findByUserAndCourse.mockResolvedValue({ id: 1 });
+	/* @info - The visibility guard reads the database in production, which this
+	 * stub suite deliberately does not build. The rule has its own route-level
+	 * coverage in tests/lesson-visibility-api.test.ts. */
+	(service as any).lessonVisibility = async () => true;
 	(service as any).enrollments = enrollments;
 	vi.spyOn(service as any, "reindexLesson").mockResolvedValue(undefined);
 	/* @info - The resume payload reads attempt rows; stubbed empty so these tests
