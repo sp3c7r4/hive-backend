@@ -145,20 +145,33 @@ export class AiTutorService {
 		 * failed on a course that never mentioned analogies. */
 		let chunkIds: number[] = [];
 		let materials = "";
-		if (searchable.length > 0) {
-			const vector = await EmbeddingService.getInstance().embedQuery(question);
-			const hits = await this.repo.searchChunks(
-				courseId,
-				searchable,
-				EmbeddingService.toVectorLiteral(vector),
+		/* @info - Retrieval is an enhancement, never a gate. The embedding model is a local
+		 * ONNX download, and when it is unavailable the old code threw here, before
+		 * streamText, so a student asking a plain question about their course got "Failed to
+		 * download fast-bge-small-en-v1.5: HTTP 403" and no answer at all. Now the answer
+		 * goes out from general knowledge, exactly as it does when the course simply does
+		 * not cover the question, and the failure is logged for us instead of shown to them. */
+		try {
+			if (searchable.length > 0) {
+				const vector = await EmbeddingService.getInstance().embedQuery(question);
+				const hits = await this.repo.searchChunks(
+					courseId,
+					searchable,
+					EmbeddingService.toVectorLiteral(vector),
+				);
+				const grounded = hits.filter(
+					(h) => (h.similarity ?? 0) >= config.ai.simThreshold,
+				);
+				chunkIds = grounded.map((h) => h.id);
+				materials = grounded
+					.map((h, i) => `[${i + 1}] ${h.content}`)
+					.join("\n\n");
+			}
+		} catch (error) {
+			this.log.error(
+				"[Tutor] Retrieval unavailable, answering from general knowledge",
+				error,
 			);
-			const grounded = hits.filter(
-				(h) => (h.similarity ?? 0) >= config.ai.simThreshold,
-			);
-			chunkIds = grounded.map((h) => h.id);
-			materials = grounded
-				.map((h, i) => `[${i + 1}] ${h.content}`)
-				.join("\n\n");
 		}
 
 		const result = streamText({

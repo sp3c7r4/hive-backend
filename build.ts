@@ -161,6 +161,10 @@ const __dirname = __hivePath.dirname(__filename);`,
 	await mkdir("./dist/templates", { recursive: true });
 	await cp("./src/templates", "./dist/templates", { recursive: true });
 
+	/* @info - The embedding model travels with the artifact: the app box cannot download it. */
+	const { warmEmbeddingModel } = await import("./scripts/warm-embedding-model");
+	await warmEmbeddingModel();
+
 	const shim =
 		`import{createRequire as __cr}from"node:module";const require=__cr(import.meta.url);\n`;
 	for (const file of [
