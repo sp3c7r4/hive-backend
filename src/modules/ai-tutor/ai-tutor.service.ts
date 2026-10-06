@@ -9,7 +9,7 @@
  * completed). Similarity never decides whether the tutor may answer.
  */
 import { createDeepSeek } from "@ai-sdk/deepseek";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, lte, or } from "drizzle-orm";
 import { streamText } from "ai";
 import { getDb } from "@/db/postgres.db";
 import { config } from "@/config";
@@ -100,11 +100,12 @@ export class AiTutorService {
 		if (!enrollment) throwNotFoundError("You are not enrolled in this course.");
 		const enrollmentId = enrollment!.id;
 
-		/* @info - Scope = every published lesson in the course (ask about
-		 * anything, taken or not; the content is already visible to enrolled
-		 * students). Sole carve-out: quiz chunks stay hidden until that quiz
-		 * is completed, so the tutor can never hand out answers to a quiz the
-		 * student has not taken. */
+		/* @info - Scope = every published lesson in the course that the student may
+		 * actually read (ask about anything, taken or not). A module whose date has not
+		 * arrived is not readable, so it is not material either: indexing it would let a
+		 * student ask the tutor about a closed module and get that module's own text,
+		 * PDF or slides back, which is exactly what the lock withholds. Sole carve-out
+		 * stays: quiz chunks are hidden until that quiz is completed. */
 		const allRows = await db
 			.select({ lessonId: lessons.id, type: lessons.type })
 			.from(lessons)
@@ -113,6 +114,9 @@ export class AiTutorService {
 				and(
 					eq(modules.courseId, courseId),
 					eq(lessons.status, "published"),
+					/* @info - Open means the module has no date, or its date has arrived.
+					 * Mirrors isModuleLocked: an instant still in the future is closed. */
+					or(isNull(modules.unlockAt), lte(modules.unlockAt, new Date())),
 				),
 			);
 		const progressRows = await db

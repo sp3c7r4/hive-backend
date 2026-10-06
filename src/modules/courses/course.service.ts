@@ -907,7 +907,17 @@ export class CourseService {
 		data: NewModule,
 	) => {
 		await this.assertOwnedCourse(courseId, authData);
-		return this.modulesRepo.create({ ...data, courseId } as any);
+		/* @info - unlockAt arrives as a date string and the column is a timestamp, so it
+		 * needs the same Lagos resolution the update path does. Left raw, Drizzle's
+		 * timestamp encoder calls toISOString on a string, throws, and the caller is told
+		 * the database failed when the request was really just malformed. */
+		return this.modulesRepo.create({
+			...data,
+			courseId,
+			...(data.unlockAt !== undefined
+				? { unlockAt: unlockAtFrom(data.unlockAt as any) }
+				: {}),
+		} as any);
 	};
 
 	listModules = async (courseId: number, authData?: IAuthData) => {

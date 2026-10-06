@@ -206,6 +206,15 @@ beforeAll(async () => {
 		)
 	).id as number;
 
+	/* @info - The past-dated module needs a lesson, or the control below cannot fail:
+	 * an assertion that a module returns [] is satisfied by any response, including an
+	 * error envelope, so it proves nothing about a date that has passed. */
+	await one(
+		`INSERT INTO lessons (module_id, title, type, status, sort_order, description)
+		 VALUES (${pastModuleId}, 'Past lesson', 'text', 'published', 0, 'readable body')
+		 RETURNING id`,
+	);
+
 	lockedTextLessonId = (
 		await one(
 			`INSERT INTO lessons (module_id, title, description, type, status, sort_order) VALUES (${lockedModuleId}, 'Locked text lesson', 'secret body', 'text', 'published', 0) RETURNING id`,
@@ -306,10 +315,14 @@ describe("what a student receives", () => {
 		expect(open[0].status).toBe("published");
 		expect(open[0].description).toBe("readable body");
 
-		const past = await lessonsOf(
-			await get(`/modules/${pastModuleId}/lessons`, tokens[STUDENT_AUTH] as string),
+		const pastRes = await get(
+			`/modules/${pastModuleId}/lessons`,
+			tokens[STUDENT_AUTH] as string,
 		);
-		expect(past).toEqual([]);
+		expect(pastRes.status).toBe(200);
+		const past = await lessonsOf(pastRes);
+		expect(past[0].status).toBe("published");
+		expect(past[0].description).toBe("readable body");
 	});
 
 	it("is told which modules are locked, and when they open", async () => {
@@ -366,12 +379,14 @@ describe("every path that names a lesson by id", () => {
 			tokens[STUDENT_AUTH] as string,
 		);
 		expect(take.status).toBe(403);
+		expect(JSON.stringify(await take.json())).toMatch(/module is not open/i);
 
 		const submit = await post(`/quiz/attempts`, tokens[STUDENT_AUTH] as string, {
 			lessonId: lockedQuizLessonId,
 			answers: [{ questionId: quizQuestionId, selectedAnswer: "a" }],
 		});
 		expect(submit.status).toBe(403);
+		expect(JSON.stringify(await submit.json())).toMatch(/module is not open/i);
 
 		const autosave = await post(
 			`/quiz/attempts/autosave`,
@@ -383,18 +398,21 @@ describe("every path that names a lesson by id", () => {
 			},
 		);
 		expect(autosave.status).toBe(403);
+		expect(JSON.stringify(await autosave.json())).toMatch(/module is not open/i);
 
 		const start = await post(
 			`/quiz/lessons/${lockedAssessmentLessonId}/assessment/start`,
 			tokens[STUDENT_AUTH] as string,
 		);
 		expect(start.status).toBe(403);
+		expect(JSON.stringify(await start.json())).toMatch(/module is not open/i);
 
 		const session = await get(
 			`/quiz/lessons/${lockedAssessmentLessonId}/assessment/session`,
 			tokens[STUDENT_AUTH] as string,
 		);
 		expect(session.status).toBe(403);
+		expect(JSON.stringify(await session.json())).toMatch(/module is not open/i);
 	});
 
 	it("changes nothing at all when it refuses", async () => {
@@ -489,6 +507,10 @@ describe("setting the date", () => {
 		);
 		expect(before.status).toBe(200);
 
+		const progressBefore = (await one(
+			`SELECT progress_percent FROM enrollments WHERE id = ${enrollmentId}`,
+		))?.progress_percent;
+
 		await patch(`/modules/${openModuleId}`, tokens[OWNER_AUTH] as string, {
 			unlockAt: "2026-10-19",
 		});
@@ -507,5 +529,12 @@ describe("setting the date", () => {
 		);
 		const rows = await lessonsOf(reads);
 		expect(Object.keys(rows[0]).sort()).toEqual(STUB_KEYS);
+
+		/* @info - Locking a module revokes access but must not quietly move a student's
+		 * own progress: what they finished, they keep. */
+		const progressAfter = (await one(
+			`SELECT progress_percent FROM enrollments WHERE id = ${enrollmentId}`,
+		))?.progress_percent;
+		expect(String(progressAfter)).toBe(String(progressBefore));
 	});
 });

@@ -10,6 +10,7 @@ import { withPresignedUrl } from "@/helpers/storage.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { LessonMessages } from "@/modules/courses/course.message";
 import { lessons, modules } from "@/modules/courses/course.model";
+import { assertLessonVisibleTo } from "@/modules/courses/lesson-visibility";
 import {
 	CourseRepository,
 	LessonRepository,
@@ -132,6 +133,10 @@ export class AssignmentService {
 		text: string | undefined,
 		fileUrls: string[],
 	) => {
+		/* @info - A module that has not opened refuses writes, not just reads. Without
+		 * this the submission and its uploaded files landed in the database while the
+		 * lesson itself still answered 403, so the student was told no and got a row. */
+		await assertLessonVisibleTo(authData, lessonId);
 		// Upsert: replace existing submission
 		const existing = await this.submissions.findByUserAndLesson(
 			authData.id,
