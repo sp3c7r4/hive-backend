@@ -11,3 +11,10 @@ export const updateMemberSchema = z.object({
 export const inviteMemberSchema = z.object({
 	email: z.string().email().max(255),
 });
+
+export const bulkInviteSchema = z.object({
+	emails: z
+		.array(z.string().max(255))
+		.min(1, "Add at least one email address")
+		.max(200, "Send at most 200 invitations at a time"),
+});

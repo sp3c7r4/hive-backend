@@ -10,7 +10,7 @@ import { CommunityMemberController } from "./community-member.controller";
 import { CommunityFeedController } from "./community-feed.controller";
 import { CommunityRatingController } from "./community-rating.controller";
 import { createCommunitySchema, createCommunityFormSchema, updateCommunitySchema } from "./community.schema";
-import { updateMemberSchema, inviteMemberSchema } from "./community-member.schema";
+import { updateMemberSchema, inviteMemberSchema, bulkInviteSchema } from "./community-member.schema";
 import { createPostSchema, updatePostSchema, createCommentSchema, updateCommentSchema } from "./community-feed.schema";
 import { requireCommunityMember, requireCommunityMemberOrAdmin, requireCommunityAdmin } from "@/middlewares/auth/community-guards";
 
@@ -70,6 +70,12 @@ communityRouter.post("/:slug/members/:userId/reject", requireCommunityAdmin, mem
 
 communityRouter.get("/:slug/invites", requireCommunityAdmin, memberController.listInvites);
 communityRouter.post("/:slug/invites", requireCommunityAdmin, zod.validate.body(inviteMemberSchema), memberController.createInvite);
+communityRouter.post(
+	"/:slug/invites/bulk",
+	requireCommunityAdmin,
+	zod.validate.body(bulkInviteSchema),
+	memberController.createBulkInvites,
+);
 communityRouter.delete("/:slug/invites/:inviteId", requireCommunityAdmin, memberController.cancelInvite);
 
 /* ── Join / Leave ──────────────────────────────────────────── */

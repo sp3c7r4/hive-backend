@@ -46,6 +46,18 @@ export class CacheService {
 		await this.redis.set(key, JSON.stringify(value), "EX", ttl);
 	};
 
+	/* @info - A counter the request itself moves, for limits (the bulk invite cap). Reading
+	 * and writing separately would let two requests spend the same last invitation. */
+	incrBy = async (
+		key: string,
+		amount: number,
+		ttl: number = TTL.IN_30_MINUTES,
+	): Promise<number> => {
+		const value = await this.redis.incrby(key, amount);
+		if (value === amount) await this.redis.expire(key, ttl);
+		return value;
+	};
+
 	get = async <T>(key: string): Promise<T | null> => {
 		const value = await this.redis.get(key);
 		return value ? (JSON.parse(value) as T) : null;

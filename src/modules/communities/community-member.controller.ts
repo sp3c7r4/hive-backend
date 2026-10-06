@@ -141,6 +141,20 @@ export class CommunityMemberController {
 		);
 	};
 
+	createBulkInvites = async (c: Context) => {
+		const authData = c.get("authData");
+		const slug = c.req.param("slug") as string;
+		const body = await c.req.json();
+
+		const data = await this.service.createBulkInvites(authData, slug, body);
+		/* @info - 200, not 201: a batch is answered per address and a partially valid one is a
+		 * success, so there is no single created resource to point at. */
+		return sendSuccessResponse(c, {
+			message: "Invitations sent",
+			data,
+		});
+	};
+
 	cancelInvite = async (c: Context) => {
 		const authData = c.get("authData");
 		const slug = c.req.param("slug") as string;

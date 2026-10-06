@@ -1,11 +1,24 @@
-import { and, count, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	ilike,
+	inArray,
+	isNull,
+	ne,
+	or,
+} from "drizzle-orm";
+import { TTL } from "@/constants";
 import { config } from "@/config";
 import { getDb } from "@/db/postgres.db";
 import { EmailJobNames } from "@/enums";
+import { CacheService } from "@/services/cache.service";
 import {
 	throwBadRequestError,
 	throwForbiddenError,
 	throwNotFoundError,
+	throwRateLimitError,
 } from "@/helpers/errors/throw-errors";
 import { withPresignedUrl } from "@/helpers/storage.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
@@ -19,12 +32,26 @@ import {
 	communityInvites,
 	communityMembers,
 } from "./community.model";
+import { CommunityMessages } from "./community.message";
 import { CommunityRepository } from "./community.repository";
+
+/* @info - How many invitations one community may send in a day, and the shape an address
+ * has to have to be invited at all. Kept beside each other so the message an instructor
+ * reads and the limit that refused them cannot drift apart. */
+export const BULK_INVITE_DAILY_LIMIT = 200;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+export type BulkInviteOutcome =
+	| "invited"
+	| "already_invited"
+	| "already_member"
+	| "invalid";
 
 export class CommunityMemberService {
 	private static instance: CommunityMemberService;
 	private readonly communityRepo = CommunityRepository.getInstance();
 	private readonly emailQueue = EmailQueueService.getInstance();
+	private readonly cache = CacheService.getInstance();
 
 	static getInstance(): CommunityMemberService {
 		if (!this.instance) this.instance = new CommunityMemberService();
@@ -493,6 +520,126 @@ export class CommunityMemberService {
 		});
 
 		return invite;
+	};
+
+
+	/* @info - Bulk invites are the single invite, many at a time: the same `community_invites`
+	 * row and the same queued email. What is new is that one bad address cannot lose the
+	 * batch, so the answer is per address, and that a community's day is capped (D11). */
+	createBulkInvites = async (
+		authData: IAuthData,
+		slug: string,
+		data: { emails: string[] },
+	) => {
+		const community = await this._resolveCommunity(slug);
+		const db = getDb();
+
+		/* @info - One address typed twice is one invitation, reported once. The order the
+		 * instructor pasted survives, so the answer reads like their list. */
+		const seen = new Set<string>();
+		const candidates = data.emails
+			.map((raw) => raw.trim().toLowerCase())
+			.filter((email) => {
+				if (seen.has(email)) return false;
+				seen.add(email);
+				return true;
+			})
+			.map((email) => ({
+				email,
+				outcome: (EMAIL_SHAPE.test(email)
+					? "invited"
+					: "invalid") as BulkInviteOutcome,
+			}));
+
+		const valid = candidates
+			.filter((candidate) => candidate.outcome === "invited")
+			.map((candidate) => candidate.email);
+
+		if (valid.length > 0) {
+			const memberRows = await db
+				.select({ email: users.email })
+				.from(communityMembers)
+				.innerJoin(users, eq(communityMembers.userId, users.id))
+				.where(
+					and(
+						eq(communityMembers.communityId, community.id),
+						inArray(users.email, valid),
+					),
+				);
+			const members = new Set(memberRows.map((row) => row.email.toLowerCase()));
+
+			const pendingRows = await db
+				.select({ email: communityInvites.email })
+				.from(communityInvites)
+				.where(
+					and(
+						eq(communityInvites.communityId, community.id),
+						eq(communityInvites.status, "pending"),
+						inArray(communityInvites.email, valid),
+					),
+				);
+			const pending = new Set(
+				pendingRows.map((row) => (row.email ?? "").toLowerCase()),
+			);
+
+			for (const candidate of candidates) {
+				if (candidate.outcome !== "invited") continue;
+				if (members.has(candidate.email)) candidate.outcome = "already_member";
+				else if (pending.has(candidate.email)) candidate.outcome = "already_invited";
+			}
+		}
+
+		const invited = candidates.filter((candidate) => candidate.outcome === "invited");
+
+		if (invited.length > 0) {
+			/* @info - Counted before the writes, so two requests racing cannot both spend the
+			 * last invitation, and counted in the instructor's own day (Africa/Lagos), which
+			 * is the day the allowance resets. A refused batch keeps what it reserved: a
+			 * script hammering this endpoint spends its own budget, which is the point. */
+			const day = new Intl.DateTimeFormat("en-CA", {
+				timeZone: "Africa/Lagos",
+			}).format(new Date());
+			const used = await this.cache.incrBy(
+				`community:bulk-invites:${community.id}:${day}`,
+				invited.length,
+				TTL.IN_24_HOURS,
+			);
+			if (used > BULK_INVITE_DAILY_LIMIT) {
+				throwRateLimitError(CommunityMessages.INVITE_CAP_REACHED);
+			}
+
+			await db.insert(communityInvites).values(
+				invited.map((candidate) => ({
+					communityId: community.id,
+					invitedBy: Number(authData.id),
+					email: candidate.email,
+					status: "pending",
+				})) as any,
+			);
+
+			/* @info - One job per address through the queue, never inline: 200 sends inside a
+			 * request would hold it open and lose the lot if the process restarted. */
+			for (const candidate of invited) {
+				this.emailQueue.add(EmailJobNames.COMMUNITY_INVITE as any, {
+					message: {
+						to: candidate.email,
+						subject: `You've been invited to join ${(community as any).name}`,
+					},
+					template: "community-invite" as any,
+					locals: {
+						inviteeName: "",
+						communityName: (community as any).name,
+						inviterName: authData.firstName ?? "Someone",
+						inviteLink: `${config.frontendUrl}/join?community=${(community as any).slug}`,
+					},
+				});
+			}
+		}
+
+		return {
+			invited: invited.length,
+			results: candidates.map(({ email, outcome }) => ({ email, outcome })),
+		};
 	};
 
 	cancelInvite = async (
