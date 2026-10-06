@@ -19,6 +19,8 @@ export const config = {
 
 	mail: {
 		domain: env.MAIL_DOMAIN,
+		/* @info - Flipping the provider is configuration, never a code change. */
+		provider: (env.MAIL_PROVIDER ?? "resend") as "ses" | "resend",
 	},
 
 	redis: {

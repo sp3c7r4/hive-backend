@@ -29,6 +29,9 @@ const EnvSchema = z.object({
 	NODE_ENV: z.enum(["development", "production", "staging"]),
 	SERVER_DOMAIN: z.string(),
 	MAIL_DOMAIN: z.string(),
+	/* @info - Which provider sends the mail. Optional so an environment written before this
+	 *         existed still boots; absent means resend, what production uses today. */
+	MAIL_PROVIDER: z.enum(["ses", "resend"]).optional(),
 	ROOT_DOMAIN: z.string(),
 	ORIGINS: z.string().transform((d) => {
 		const parsed = JSON.parse(d);
