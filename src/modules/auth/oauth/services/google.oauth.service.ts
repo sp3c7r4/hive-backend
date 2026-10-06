@@ -286,7 +286,7 @@ export class GoogleOAuthService {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {
 				message: {
 					to: sessionUser.email,
-					subject: "Welcome to Hive Community! 🌸",
+					subject: "Welcome to Hive! 🐝",
 				},
 				locals: {
 					name: sessionUser.firstName,

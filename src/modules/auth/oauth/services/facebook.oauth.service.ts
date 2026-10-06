@@ -324,7 +324,7 @@ export class FacebookOAuthService {
 			this.emailQueueService.add(EmailJobNames.WELCOME, {
 				message: {
 					to: sessionUser.email,
-					subject: "Welcome to Bloom Community! 🌸",
+					subject: "Welcome to Hive! 🐝",
 				},
 				locals: {
 					name: sessionUser.firstName,
@@ -335,7 +335,7 @@ export class FacebookOAuthService {
 		}
 
 		return oauthResponsePage({
-			title: isNewUser ? "Welcome to Bloom 😊" : "Welcome Back",
+			title: isNewUser ? "Welcome to Hive 😊" : "Welcome Back",
 			message: `Signed in as ${sessionUser.email}`,
 			status: "success",
 			autoClose: true,
