@@ -7,6 +7,7 @@ import {
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
 	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
@@ -31,8 +32,8 @@ import {
 	enrollments,
 	lessonProgress,
 } from "@/modules/enrollments/enrollment.model";
-import { reviews } from "@/modules/reviews/review.model";
 import { liveSessions } from "@/modules/live/live-session.model";
+import { reviews } from "@/modules/reviews/review.model";
 import { users } from "@/modules/user/user.model";
 
 export const courseDifficultyEnum = pgEnum(
@@ -115,6 +116,9 @@ export const modules = pgTable(
 		title: varchar("title", { length: 255 }).notNull(),
 		description: text("description"),
 		sortOrder: integer("sort_order").default(0).notNull(),
+		/* @info - Drip: the instant this module opens for students. NULL means open, which is
+		 *         what every module was before this column existed. */
+		unlockAt: timestamp("unlock_at", { withTimezone: true }),
 		...timestamps,
 	},
 	(table) => [index("idx_modules_course").on(table.courseId)],

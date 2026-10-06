@@ -17,8 +17,10 @@ import {
 } from "./enrollment.repository";
 import type { NewEnrollment } from "./enrollment.model";
 import { courses, lessons, modules } from "@/modules/courses/course.model";
-import { LessonMessages } from "@/modules/courses/course.message";
-import { isLessonVisibleTo } from "@/modules/courses/lesson-visibility";
+import {
+  assertLessonVisibleTo,
+  isLessonVisibleTo,
+} from "@/modules/courses/lesson-visibility";
 import { enrollments as enrollmentsModel } from "./enrollment.model";
 import { communities } from "@/modules/communities/community.model";
 import { payments } from "@/modules/payment/payment.model";
@@ -246,9 +248,7 @@ export class EnrollmentService {
     /* @info - An unpublished lesson is the instructor's draft, so completing one
      * would put a lesson the student cannot even open into their progress and, via
      * the certificate gate, into their finish line. */
-    if (!(await this.lessonVisibility(authData, lessonId))) {
-      throwForbiddenError(LessonMessages.NOT_PUBLISHED);
-    }
+    await assertLessonVisibleTo(authData, lessonId, this.lessonVisibility);
     /* @info - The student the enrollment enrolls, which is not the caller when a
      * parent or an admin acts: a certificate belongs to the student. */
     const studentId = Number(enrollment.userId);

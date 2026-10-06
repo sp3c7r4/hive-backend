@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
+import { throwForbiddenError } from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces";
+import { LessonMessages } from "./course.message";
+import { isModuleLocked } from "./module-unlock";
 
 /**
  * @info - Whether this caller may read this lesson's content.
@@ -15,6 +18,8 @@ import type { IAuthData } from "@/interfaces";
  *
  *   - the course's owner and admins see everything, including drafts, because the
  *     curriculum builder and the viewer's own preview need them;
+ *   - a module whose `unlock_at` is still in the future is closed to everyone else,
+ *     whether the lesson inside it is published or not (drip);
  *   - everyone else sees a published lesson of a published course, and nothing of a
  *     draft or archived course.
  *
@@ -37,6 +42,7 @@ export const isLessonVisibleTo = async (
 			l.status AS lesson_status,
 			c.status AS course_status,
 			c.instructor_id,
+			m.unlock_at AS module_unlock_at,
 			EXISTS (
 				SELECT 1 FROM user_roles ur
 				WHERE ur.user_id = ${userId} AND ur.role = 'admin'
@@ -53,6 +59,7 @@ export const isLessonVisibleTo = async (
 				lesson_status: string;
 				course_status: string;
 				instructor_id: number;
+				module_unlock_at: string | Date | null;
 				is_admin: boolean;
 		  }
 		| undefined;
@@ -64,6 +71,51 @@ export const isLessonVisibleTo = async (
 	if (userId !== null && Number(row.instructor_id) === userId) return true;
 	if (row.is_admin === true) return true;
 
+	/* @info - Drip: a module that has not opened hides its lessons, quizzes and
+	 * assessments from students. The owner and the admin answered above, so the
+	 * curriculum builder and a preview are never locked out of their own course. */
+	if (isModuleLocked(row.module_unlock_at)) return false;
+
 	if (row.course_status !== "published") return false;
 	return row.lesson_status === "published";
+};
+
+/**
+ * @info - The same rule, but it says which one refused.
+ *
+ * Callers that refuse a lesson used to answer "not published yet" for every refusal,
+ * which is wrong and confusing once a module can also be closed on a date. The
+ * boolean check runs first (so a test double can keep replacing it), and the reason
+ * is only looked up on the refusal path, where one extra query costs nothing.
+ */
+export const assertLessonVisibleTo = async (
+	authData: IAuthData | undefined,
+	lessonId: number,
+	check: (
+		authData: IAuthData | undefined,
+		lessonId: number,
+	) => Promise<boolean> = isLessonVisibleTo,
+): Promise<void> => {
+	if (await check(authData, lessonId)) return;
+
+	throwForbiddenError(
+		(await isModuleLockedFor(lessonId))
+			? LessonMessages.MODULE_NOT_OPEN
+			: LessonMessages.NOT_PUBLISHED,
+	);
+};
+
+/** @info - Just the module's date, for the refusal message. No rows means no lock. */
+const isModuleLockedFor = async (lessonId: number): Promise<boolean> => {
+	const result = await getDb().execute(sql`
+		SELECT m.unlock_at AS module_unlock_at
+		FROM lessons l
+		JOIN modules m ON m.id = l.module_id
+		WHERE l.id = ${lessonId}
+		LIMIT 1
+	`);
+	const row = result.rows[0] as
+		| { module_unlock_at: string | Date | null }
+		| undefined;
+	return isModuleLocked(row?.module_unlock_at);
 };

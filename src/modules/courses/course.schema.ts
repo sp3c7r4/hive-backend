@@ -94,6 +94,16 @@ export const createModuleSchema = z.object({
 	title: z.string().min(1).max(255),
 	description: z.string().optional(),
 	sortOrder: z.number().int().default(0),
+	/* @info - Drip. A bare date is first thing that morning in Lagos; a full ISO instant is
+	 *         taken as given; null clears the lock; absent leaves it alone. */
+	unlockAt: z
+		.string()
+		.refine(
+			(value) => !Number.isNaN(new Date(value).getTime()),
+			"unlockAt must be a date",
+		)
+		.nullable()
+		.optional(),
 });
 
 export const createLessonSchema = z.object({

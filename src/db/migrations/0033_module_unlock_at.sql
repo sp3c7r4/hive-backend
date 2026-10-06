@@ -1,0 +1,12 @@
+-- Drip modules: the instant a module opens for students.
+--
+-- NULL means open, which is what every module that exists today is, so this is additive
+-- and safe to run on a live database: no backfill, no default, no lock. A future value
+-- closes the module (and its lessons, quizzes and assessments) to students only: the
+-- course owner, the community owner and a platform admin always see it.
+--
+-- One instant, stored in UTC. The instructor's picker reads and writes Africa/Lagos, and
+-- a student is shown the moment in their own zone, so "opens on the 19th" cannot mean two
+-- different things to two people.
+ALTER TABLE modules ADD COLUMN IF NOT EXISTS unlock_at timestamp with time zone;
+--> statement-breakpoint

@@ -17,6 +17,27 @@ import {
 } from "@/modules/assessments/leaderboard";
 import { communities } from "@/modules/communities/community.model";
 import { assertPublishTarget } from "@/modules/communities/community-publish-target";
+import { isModuleLocked, unlockAtFrom } from "./module-unlock";
+
+/**
+ * @info - What a student may know about a lesson whose module has not opened yet.
+ *
+ * Built as an object literal rather than by deleting keys from a full row: a lesson carries
+ * video, PDF, PPTX and Drive URLs, a description, settings and, for a quiz, answers. A
+ * subtraction can be wrong in one place and leak the whole paper; seven named keys cannot.
+ * The status is the literal `locked`, never `published`, so no client can mistake a stub for
+ * a lesson it is allowed to open, and the reason travels with it for the dialog.
+ */
+const toLockedLessonStub = (lesson: any) => ({
+	id: lesson.id,
+	title: lesson.title,
+	type: lesson.type,
+	duration: lesson.duration,
+	sortOrder: lesson.sortOrder,
+	status: "locked" as const,
+	lockReason: "module_not_open" as const,
+});
+
 import { enrollments } from "@/modules/enrollments/enrollment.model";
 import {
 	decorateLessonsWithSessions,
@@ -312,6 +333,7 @@ export class CourseService {
 		"title",
 		"description",
 		"sortOrder",
+		"unlockAt",
 	] as const;
 
 	private static readonly LESSON_EDITABLE = [
@@ -905,11 +927,20 @@ export class CourseService {
 		const canRead = await this._canReadCourse(course as any, authData);
 		if (!canRead) return [];
 
-		return db
+		/* @info - Drip: each module reports when it opens and whether it is closed for this
+		 * caller, so the sidebar can show the lock and its date. The owner and an admin are
+		 * never locked out of their own course. */
+		const canSeeDrafts = this.isOwnerOrAdmin(course as any, authData);
+		const rows = await db
 			.select()
 			.from(modules)
 			.where(eq(modules.courseId, courseId))
 			.orderBy(asc(modules.sortOrder));
+
+		return rows.map((mod: any) => ({
+			...mod,
+			locked: !canSeeDrafts && isModuleLocked(mod.unlockAt),
+		}));
 	};
 
 	updateModule = async (
@@ -920,9 +951,14 @@ export class CourseService {
 		const mod = await this.modulesRepo.findById(id);
 		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
 		await this.assertOwnedModuleCourse(mod as any, authData);
+		/* @info - The date is converted before the whitelist runs, so a bare date becomes the
+		 *         instant first thing that morning in Lagos rather than in UTC. */
 		const updated = await this.modulesRepo.update(
 			id,
-			this.pickEditable(data, CourseService.MODULE_EDITABLE) as any,
+			this.pickEditable(
+				{ ...data, unlockAt: unlockAtFrom(data.unlockAt as any) },
+				CourseService.MODULE_EDITABLE,
+			) as any,
 		);
 		return updated ?? throwNotFoundError(ModuleMessages.NOT_FOUND);
 	};
@@ -990,7 +1026,7 @@ export class CourseService {
 	listLessons = async (moduleId: number, authData?: IAuthData) => {
 		const db = getDb();
 		const [mod] = await db
-			.select({ courseId: modules.courseId })
+			.select({ courseId: modules.courseId, unlockAt: modules.unlockAt })
 			.from(modules)
 			.where(eq(modules.id, moduleId))
 			.limit(1);
@@ -1035,6 +1071,13 @@ export class CourseService {
 			.orderBy(asc(lessons.sortOrder), asc(lessons.id));
 
 		/* @info - Meeting fields on a lesson payload come from its session now */
+		/* @info - Drip: a module that has not opened still lists its lessons, because the
+		 * sidebar has to show what is coming and progress has to count it, but as stubs.
+		 * The instructor and an admin answered `canSeeDrafts` above, so they get the
+		 * lessons themselves. */
+		if (!canSeeDrafts && isModuleLocked(mod!.unlockAt))
+			return rows.map(toLockedLessonStub);
+
 		return decorateLessonsWithSessions(rows);
 	};
 

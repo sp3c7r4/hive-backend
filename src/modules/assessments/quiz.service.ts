@@ -17,7 +17,10 @@ import {
 	LessonRepository,
 	ModuleRepository,
 } from "@/modules/courses/course.repository";
-import { isLessonVisibleTo } from "@/modules/courses/lesson-visibility";
+import {
+	assertLessonVisibleTo,
+	isLessonVisibleTo,
+} from "@/modules/courses/lesson-visibility";
 import { EnrollmentRepository } from "@/modules/enrollments/enrollment.repository";
 import { users } from "@/modules/user/user.model";
 import { serviceLogger } from "@/utils";
@@ -190,9 +193,10 @@ export class QuizService {
 		authData: IAuthData,
 		lessonId: number,
 	): Promise<void> => {
-		if (!(await this.lessonVisibility(authData, lessonId))) {
-			throwForbiddenError(LessonMessages.NOT_PUBLISHED);
-		}
+		/* @info - The refusal says which rule refused: a module that has not opened yet says
+		 * so, instead of claiming the lesson is unpublished. The injectable check stays, so a
+		 * suite with no lesson rows still replaces it. */
+		await assertLessonVisibleTo(authData, lessonId, this.lessonVisibility);
 	};
 
 	private assertAttemptOpen = async (
