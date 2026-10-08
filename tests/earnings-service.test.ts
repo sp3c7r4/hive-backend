@@ -44,6 +44,7 @@ describe("EarningsService", () => {
 		const service = await loadService();
 		const s = await service.summary(auth, "30d");
 		expect(s).toEqual({
+		thisMonth: 0,
 			totalEarned: 90000,
 			available: 45000,
 			pendingWithdrawal: 20000,
@@ -126,8 +127,8 @@ describe("EarningsService", () => {
 		expect(d.recentActivity[0]!).toMatchObject({ type: "enrollment" });
 		expect(d.recentActivity[1]!.type).toBe("payment");
 		expect(d.recentActivity[1]!.text).toContain("paid ₦1,000");
-		expect(d.enrollmentSeries.daily).toHaveLength(7);
-		expect(d.enrollmentSeries.weekly).toHaveLength(4);
+		expect(d.enrollmentSeries.daily).toHaveLength(14);
+		expect(d.enrollmentSeries.weekly).toHaveLength(8);
 		/* zero-filling: only the matching bucket is non-zero */
 		const dailyCounts = d.enrollmentSeries.daily.map((p) => p.count);
 		expect(dailyCounts.filter((c) => c > 0).length).toBeGreaterThanOrEqual(1);
@@ -141,8 +142,8 @@ describe("EarningsService", () => {
 		const d = await service.dashboard(auth);
 		expect(d.summary.totalEarned).toBe(0);
 		expect(d.activeStudents7d).toBe(0);
-		expect(d.enrollmentSeries.daily).toHaveLength(7);
-		expect(d.enrollmentSeries.weekly).toHaveLength(4);
+		expect(d.enrollmentSeries.daily).toHaveLength(14);
+		expect(d.enrollmentSeries.weekly).toHaveLength(8);
 		expect(d.enrollmentSeries.daily.every((p) => p.count === 0)).toBe(true);
 	});
 
