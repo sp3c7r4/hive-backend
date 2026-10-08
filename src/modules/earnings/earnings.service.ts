@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, lt, sql, sum } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, gte, inArray, isNull, lt, sql, sum } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import { instructorBalance, instructorTransaction } from "@/modules/payment/ledger.model";
 import { payments, withdrawals } from "@/modules/payment/payment.model";
@@ -8,10 +8,20 @@ import { users } from "@/modules/user/user.model";
 import { lessons, modules } from "@/modules/courses/course.model";
 import { assignmentSubmissions } from "@/modules/assessments/assessment.model";
 import { reviews } from "@/modules/reviews/review.model";
+import { communities, communityMembers } from "@/modules/communities/community.model";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 
 const EARNING_CATEGORIES = ["enrollment", "community"] as const;
 const OPEN_WITHDRAWAL_STATUSES = ["pending", "processing"] as const;
+
+/** @info - One definition of "this calendar month", used by both the dashboard summary and
+ * the earnings summary, so the two figures can never drift apart (spec D8, AC13). */
+const calendarMonthStart = (): Date => {
+	const d = new Date();
+	d.setDate(1);
+	d.setHours(0, 0, 0, 0);
+	return d;
+};
 
 /** @info - Resolve ?period= to a start timestamp (null = all time). */
 const periodStart = (period?: string): Date | null => {
@@ -36,14 +46,18 @@ export class EarningsService {
 		const userId = Number(authData.id);
 		const start = periodStart(period);
 
-		const base = [
+		/* @info - Two bases: the ledger for this instructor, and the same ledger inside the
+		 * period. This month is measured on the unfiltered one, or a 7d request would
+		 * silently shrink a calendar-month figure. */
+		const ledgerBase = [
 			eq(instructorTransaction.instructorId, userId),
 			eq(instructorTransaction.type, "credit"),
 			inArray(instructorTransaction.category, [...EARNING_CATEGORIES] as any),
 		];
+		const base = [...ledgerBase];
 		if (start) base.push(gte(instructorTransaction.createdAt, start));
 
-		const [totalRow, salesRow, balanceRow, pendingRow] = await Promise.all([
+		const [totalRow, salesRow, balanceRow, pendingRow, monthRow] = await Promise.all([
 			db
 				.select({ value: sum(instructorTransaction.amount) })
 				.from(instructorTransaction)
@@ -66,15 +80,21 @@ export class EarningsService {
 						inArray(withdrawals.status, [...OPEN_WITHDRAWAL_STATUSES] as any),
 					),
 				) as any,
+			db
+				.select({ value: sum(instructorTransaction.amount) })
+				.from(instructorTransaction)
+				.where(and(...ledgerBase, gte(instructorTransaction.createdAt, calendarMonthStart()))) as any,
 		]);
 
 		const [balance] = balanceRow as any[];
 		const [pending] = pendingRow as any[];
 		const [total] = totalRow as any[];
 		const [sales] = salesRow as any[];
+		const [month] = monthRow as any[];
 
 		return {
 			totalEarned: Number(total?.value ?? 0),
+			thisMonth: Number(month?.value ?? 0),
 			available: Number(balance?.available ?? 0),
 			pendingWithdrawal: Number(pending?.value ?? 0),
 			withdrawn: Number(balance?.withdrawn ?? 0),
@@ -89,9 +109,7 @@ export class EarningsService {
 		const db = getDb();
 		const userId = Number(authData.id);
 
-		const monthStart = new Date();
-		monthStart.setDate(1);
-		monthStart.setHours(0, 0, 0, 0);
+		const monthStart = calendarMonthStart();
 
 		const creditBase = [
 			eq(instructorTransaction.instructorId, userId),
@@ -226,7 +244,7 @@ export class EarningsService {
 				.innerJoin(courses, eq(courses.id, enrollments.courseId))
 				.where(and(
 					eq(courses.instructorId, userId),
-					gte(enrollments.createdAt, new Date(now.getTime() - 7 * 86_400_000)),
+					gte(enrollments.createdAt, new Date(now.getTime() - 14 * 86_400_000)),
 				))
 				.groupBy(daySql) as any,
 			db
@@ -235,11 +253,13 @@ export class EarningsService {
 				.innerJoin(courses, eq(courses.id, enrollments.courseId))
 				.where(and(
 					eq(courses.instructorId, userId),
-					gte(enrollments.createdAt, new Date(now.getTime() - 4 * 7 * 86_400_000)),
+					gte(enrollments.createdAt, new Date(now.getTime() - 8 * 7 * 86_400_000)),
 				))
 				.groupBy(weekSql) as any,
+			/* @info - People, not lesson rows: one student opening ten lessons is one active
+			 * student, which is what the card has always claimed (spec D2, AC1). */
 			db
-				.select({ total: count() })
+				.select({ total: countDistinct(enrollments.userId) })
 				.from(lessonProgress)
 				.innerJoin(enrollments, eq(enrollments.id, lessonProgress.enrollmentId))
 				.innerJoin(courses, eq(courses.id, enrollments.courseId))
@@ -249,20 +269,78 @@ export class EarningsService {
 				)) as any,
 		]);
 
-		/* Zero-fill: build the full 7-day / 4-week windows */
+		/* @info - The four metric cards plus the per-community split the donut draws.
+		 * Memberships, not people: one person in two of this instructor's communities counts
+		 * twice, which is the rule the Members card states (spec D4). */
+		const [courseCount, studentRows, communityCount, memberRows, topRows] = await Promise.all([
+			db
+				.select({ value: count() })
+				.from(courses)
+				.where(and(eq(courses.instructorId, userId), isNull(courses.deletedAt))) as any,
+			db
+				.select({ value: countDistinct(enrollments.userId) })
+				.from(enrollments)
+				.innerJoin(courses, eq(courses.id, enrollments.courseId))
+				.where(and(eq(courses.instructorId, userId), isNull(enrollments.deletedAt))) as any,
+			db
+				.select({ value: count() })
+				.from(communities)
+				.where(and(eq(communities.ownerId, userId), isNull(communities.deletedAt))) as any,
+			db
+				.select({ value: count() })
+				.from(communityMembers)
+				.innerJoin(communities, eq(communities.id, communityMembers.communityId))
+				.where(
+					and(
+						eq(communities.ownerId, userId),
+						isNull(communities.deletedAt),
+						eq(communityMembers.status, "active"),
+					),
+				) as any,
+			/* Up to 7 communities that have members, biggest first. A community nobody has
+			 * joined is not a 0% slice, so it is left out here; the card still counts it. */
+			db
+				.select({
+					id: communities.id,
+					name: communities.name,
+					memberships: count(communityMembers.userId),
+				})
+				.from(communities)
+				.innerJoin(communityMembers, eq(communityMembers.communityId, communities.id))
+				.where(
+					and(
+						eq(communities.ownerId, userId),
+						isNull(communities.deletedAt),
+						eq(communityMembers.status, "active"),
+					),
+				)
+				.groupBy(communities.id, communities.name)
+				.orderBy(desc(count(communityMembers.userId)))
+				.limit(7) as any,
+		]);
+
+		const memberships = Number((memberRows as any[])[0]?.value ?? 0);
+		const topCommunities = ((topRows as any[]) ?? []).map((r) => ({
+			id: Number(r.id),
+			name: String(r.name),
+			memberships: Number(r.memberships ?? 0),
+		}));
+		const topMemberships = topCommunities.reduce((a, r) => a + r.memberships, 0);
+
+		/* Zero-fill: build the full 14-day / 8-week windows */
 		const fmt = (d: Date) => d.toISOString().slice(0, 10);
 		const dailyMap = new Map((dailyRows as any[]).map((r) => [r.period, Number(r.total)]));
 		const weeklyMap = new Map((weeklyRows as any[]).map((r) => [r.period, Number(r.total)]));
 
 		const daily: { period: string; count: number }[] = [];
-		for (let i = 6; i >= 0; i--) {
+		for (let i = 13; i >= 0; i--) {
 			const d = new Date(now.getTime() - i * 86_400_000);
 			const key = fmt(d);
 			daily.push({ period: key, count: dailyMap.get(key) ?? 0 });
 		}
 
 		const weekly: { period: string; count: number }[] = [];
-		for (let i = 3; i >= 0; i--) {
+		for (let i = 7; i >= 0; i--) {
 			const d = new Date(now.getTime() - i * 7 * 86_400_000);
 			const start = new Date(d);
 			/* @info - Match Postgres date_trunc('week'): weeks start on MONDAY */
@@ -282,6 +360,16 @@ export class EarningsService {
 			enrollmentSeries: { daily, weekly },
 			activeStudents7d: Number(activeRow?.[0]?.total ?? 0),
 			recentActivity: raw,
+			metrics: {
+				courses: Number((courseCount as any[])[0]?.value ?? 0),
+				students: Number((studentRows as any[])[0]?.value ?? 0),
+				memberships,
+				communities: Number((communityCount as any[])[0]?.value ?? 0),
+			},
+			topCommunities,
+			/* @info - Derived from the total and the slices, so the donut centre and the
+			 * Members card cannot disagree (spec D6, AC5). */
+			otherMemberships: Math.max(0, memberships - topMemberships),
 		};
 	};
 

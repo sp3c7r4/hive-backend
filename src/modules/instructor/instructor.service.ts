@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, count, countDistinct, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import { courses, lessons } from "@/modules/courses/course.model";
@@ -41,9 +41,11 @@ export class InstructorService {
 			.where(eq(courses.instructorId, instructorId));
 		const totalCourses = Number(courseResult[0]?.value ?? 0);
 
-		/* Total students (unique enrollments across instructor's courses) */
+		/* @info - People, not enrolments: a student taking two of this instructor's courses is
+		 * one student, which is what the key name and every screen reading it claim
+		 * (spec D3, AC2). */
 		const enrollResult = await db
-			.select({ value: count() })
+			.select({ value: countDistinct(enrollments.userId) })
 			.from(enrollments)
 			.innerJoin(courses, eq(enrollments.courseId, courses.id))
 			.where(eq(courses.instructorId, instructorId));
