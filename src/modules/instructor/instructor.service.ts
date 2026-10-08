@@ -1,13 +1,13 @@
-import { eq, count, sql, desc, and, gte, lte, isNull } from "drizzle-orm";
-import { serviceLogger } from "@/utils";
-import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { InstructorMessages } from "./instructor.message";
-import { courses } from "@/modules/courses/course.model";
-import { lessons } from "@/modules/courses/course.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
-import { CourseRepository } from "@/modules/courses/course.repository";
+import { and, count, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/postgres.db";
+import type { IAuthData } from "@/interfaces/auth/auth.interface";
+import { courses, lessons } from "@/modules/courses/course.model";
+import { CourseRepository } from "@/modules/courses/course.repository";
+import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { courseEnrollmentCount } from "@/modules/enrollments/enrollment-count";
 import { liveSessions } from "@/modules/live/live-session.model";
+import { serviceLogger } from "@/utils";
+import { InstructorMessages } from "./instructor.message";
 
 export class InstructorService {
 	private static instance: InstructorService;
@@ -27,7 +27,10 @@ export class InstructorService {
 
 	/* Dashboard stats */
 
-	getStats = async (authData: IAuthData, params?: { from?: string; to?: string }) => {
+	getStats = async (
+		authData: IAuthData,
+		params?: { from?: string; to?: string },
+	) => {
 		const db = getDb();
 		const instructorId = authData.id;
 
@@ -56,11 +59,13 @@ export class InstructorService {
 					eq(courses.deletedAt, null as any),
 				),
 			);
-		const avgRating = Math.round((ratingResult[0]?.avg ?? 0) / 10 * 10) / 10;
+		const avgRating = Math.round(((ratingResult[0]?.avg ?? 0) / 10) * 10) / 10;
 
-		/* Total revenue (sum of course prices × enrollment count) */
+		/* Total revenue: the real paid enrolment count per course, not the dead counter column. */
 		const revResult = await db
-			.select({ rev: sql<number>`COALESCE(SUM(${courses.price} * ${courses.enrollmentCount}), 0)` })
+			.select({
+				rev: sql<number>`COALESCE(SUM(${courses.price} * ${courseEnrollmentCount()}), 0)`,
+			})
 			.from(courses)
 			.where(eq(courses.instructorId, instructorId));
 		const totalRevenue = Number(revResult[0]?.rev ?? 0);

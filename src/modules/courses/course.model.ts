@@ -90,6 +90,10 @@ export const courses = pgTable(
 		minQuizScorePercent: integer("min_quiz_score_percent").default(70),
 		minAttendancePercent: integer("min_attendance_percent").default(60),
 		status: courseStatusEnum("status").default("draft").notNull(),
+		/* @info - Not maintained. This column is created at 0 and nothing has ever
+		 * written to it, so reading it reports zero students on a course full of them.
+		 * Do not read it for a count, a sort or a revenue sum: derive from enrollments
+		 * (2026-10-08-counts-locked-curriculum-bulk-invite-design.md, D1 and D2). */
 		enrollmentCount: integer("enrollment_count").default(0),
 		averageRating: integer("average_rating").default(0),
 		reviewCount: integer("review_count").default(0),

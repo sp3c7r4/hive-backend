@@ -31,6 +31,8 @@ const ADMIN_EMAIL = "module.drip.admin@hive.test";
 const SLUG = "module-drip-course";
 const COMMUNITY_SLUG = "module-drip-community";
 
+/* @info - The allowlist a locked module answers with, and nothing else. `unlockAt` is the
+ * module's own instant, so the sidebar can say when it opens without a second request. */
 const STUB_KEYS = [
 	"duration",
 	"id",
@@ -39,6 +41,7 @@ const STUB_KEYS = [
 	"status",
 	"title",
 	"type",
+	"unlockAt",
 ];
 
 let db: ReturnType<typeof getDb>;
@@ -287,6 +290,8 @@ describe("what a student receives", () => {
 			expect(row.status).toBe("locked");
 			expect(row.lockReason).toBe("module_not_open");
 			expect(row.title).toBeTruthy();
+			/* The date the module opens rides along, so the UI needs no second call. */
+			expect(new Date(row.unlockAt as string).getTime()).toBeGreaterThan(Date.now());
 			/* The keys a stub must never carry, named so a future filter cannot "help". */
 			for (const leaked of [
 				"description",

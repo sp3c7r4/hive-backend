@@ -28,7 +28,12 @@ import { isModuleLocked, unlockAtFrom } from "./module-unlock";
  * The status is the literal `locked`, never `published`, so no client can mistake a stub for
  * a lesson it is allowed to open, and the reason travels with it for the dialog.
  */
-const toLockedLessonStub = (lesson: any) => ({
+/* @info - A locked module's lesson payload is an ALLOWLIST: these eight keys, no content,
+ * and nothing a future column adds by accident. It cannot be a blocklist of hidden fields,
+ * because a blocklist leaks the next field someone adds; a key belongs here only when it is
+ * added deliberately, and the test asserts this exact set.
+ * See 2026-10-08-counts-locked-curriculum-bulk-invite-design.md. */
+const toLockedLessonStub = (lesson: any, unlockAt: Date | string | null) => ({
 	id: lesson.id,
 	title: lesson.title,
 	type: lesson.type,
@@ -36,9 +41,11 @@ const toLockedLessonStub = (lesson: any) => ({
 	sortOrder: lesson.sortOrder,
 	status: "locked" as const,
 	lockReason: "module_not_open" as const,
+	unlockAt,
 });
 
 import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { courseEnrollmentCount } from "@/modules/enrollments/enrollment-count";
 import {
 	decorateLessonsWithSessions,
 	type LessonMeetingInput,
@@ -616,7 +623,8 @@ export class CourseService {
 			minCompletionPercent: courses.minCompletionPercent,
 			minQuizScorePercent: courses.minQuizScorePercent,
 			status: courses.status,
-			enrollmentCount: courses.enrollmentCount,
+			/* @info - Derived, never read from the dead courses.enrollment_count column. */
+			enrollmentCount: courseEnrollmentCount(),
 			deletedAt: courses.deletedAt,
 			createdAt: courses.createdAt,
 			updatedAt: courses.updatedAt,
@@ -1086,7 +1094,7 @@ export class CourseService {
 		 * The instructor and an admin answered `canSeeDrafts` above, so they get the
 		 * lessons themselves. */
 		if (!canSeeDrafts && isModuleLocked(mod!.unlockAt))
-			return rows.map(toLockedLessonStub);
+			return rows.map((lesson) => toLockedLessonStub(lesson, mod!.unlockAt));
 
 		return decorateLessonsWithSessions(rows);
 	};

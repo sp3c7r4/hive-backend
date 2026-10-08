@@ -1,22 +1,31 @@
-import { eq, and, or, isNull, inArray, count, sql } from "drizzle-orm";
-import { throwNotFoundError, throwBadRequestError, throwForbiddenError } from "@/helpers/errors/throw-errors";
-import { PaginationService } from "@/services/pagination.service";
-import { serviceLogger } from "@/utils";
+import { and, count, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { RelationalRepository } from "@/bases";
+import { getDb } from "@/db/postgres.db";
+import { withPresignedUrl, withTransaction } from "@/helpers";
+import {
+	throwBadRequestError,
+	throwForbiddenError,
+	throwNotFoundError,
+} from "@/helpers/errors/throw-errors";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
-import { CommunityMessages } from "./community.message";
-import { communities, communityMembers } from "./community.model";
-import { users } from "@/modules/user/user.model";
-import { CommunityRepository } from "./community.repository";
-import { publishableCommunitiesWhere } from "./community-publish-target";
-import type { NewCommunity } from "./community.model";
-import { enrollments } from "@/modules/enrollments/enrollment.model";
 import { courses } from "@/modules/courses/course.model";
+import { enrollments } from "@/modules/enrollments/enrollment.model";
+import { courseEnrollmentCount } from "@/modules/enrollments/enrollment-count";
 import { conversations } from "@/modules/messaging/message.model";
 import { MessagingRepository } from "@/modules/messaging/messaging.repository";
 import { payments } from "@/modules/payment/payment.model";
-import { getDb } from "@/db/postgres.db";
-import { withPresignedUrl, withTransaction } from "@/helpers";
-import { RelationalRepository } from "@/bases";
+import { users } from "@/modules/user/user.model";
+import { PaginationService } from "@/services/pagination.service";
+import { serviceLogger } from "@/utils";
+import { CommunityMessages } from "./community.message";
+import type { NewCommunity } from "./community.model";
+import { communities, communityMembers } from "./community.model";
+import { CommunityRepository } from "./community.repository";
+import {
+	countActiveMembers,
+	withActiveMemberCount,
+} from "./community-member-count";
+import { publishableCommunitiesWhere } from "./community-publish-target";
 
 /** @info - Map drizzle's camelCase timestamps to the API contract (handles both raw
  *          rows with camelCase `createdAt` and legacy snake_case rows) */
@@ -53,37 +62,44 @@ export class CommunityService {
 		const db = getDb();
 		const slug = await this._uniqueSlug(data.name, authData.id);
 
-    const createdCommunity = await withTransaction(async (tx) => {
-      const communityRepo = new RelationalRepository(communities, tx);
-      const communityMembersRepo = new RelationalRepository(communityMembers, tx);
+		const createdCommunity = await withTransaction(async (tx) => {
+			const communityRepo = new RelationalRepository(communities, tx);
+			const communityMembersRepo = new RelationalRepository(
+				communityMembers,
+				tx,
+			);
 
-      const community = await communityRepo.create({ ...data, slug, ownerId: authData.id, memberCount: 1 } as any);
+			const community = await communityRepo.create({
+				...data,
+				slug,
+				ownerId: authData.id,
+				memberCount: 1,
+			} as any);
 
-  		/* Auto-add the creator as the owner member */
-  		const existing = await db
-  			.select({ id: communityMembers.id })
-  			.from(communityMembers)
-  			.where(
-  				and(
-  					eq(communityMembers.communityId, community!.id),
-  					eq(communityMembers.userId, authData.id),
-  				),
-  			)
-  			.limit(1);
+			/* Auto-add the creator as the owner member */
+			const existing = await db
+				.select({ id: communityMembers.id })
+				.from(communityMembers)
+				.where(
+					and(
+						eq(communityMembers.communityId, community!.id),
+						eq(communityMembers.userId, authData.id),
+					),
+				)
+				.limit(1);
 
-  		if (existing.length === 0) {
-  			await communityMembersRepo.create({
-  				communityId: community!.id,
-  				userId: authData.id,
-  				role: "instructor" as any,
-  				memberRole: "owner" as any,
-  				status: "active" as any,
-  			});
-      }
+			if (existing.length === 0) {
+				await communityMembersRepo.create({
+					communityId: community!.id,
+					userId: authData.id,
+					role: "instructor" as any,
+					memberRole: "owner" as any,
+					status: "active" as any,
+				});
+			}
 
-      return community;
-    })
-
+			return community;
+		});
 
 		return toCommunityDto(withPresignedUrl(createdCommunity, "coverImageUrl"));
 	};
@@ -91,14 +107,20 @@ export class CommunityService {
 	/** @info - Any community mutation requires the owner or a platform admin. */
 	private assertOwnerOrAdmin = (community: any, authData?: IAuthData) => {
 		const isOwner = Number(community.ownerId) === Number(authData?.id);
-		const isAdmin = Array.isArray(authData?.roles) && (authData as any).roles.includes("admin");
+		const isAdmin =
+			Array.isArray(authData?.roles) &&
+			(authData as any).roles.includes("admin");
 		if (!isOwner && !isAdmin) {
-			throwForbiddenError("You don't have permission to modify this community.");
+			throwForbiddenError(
+				"You don't have permission to modify this community.",
+			);
 		}
 	};
 
 	getById = async (id: number) => {
-		return this.repo.findById(id);
+		const row = await this.repo.findById(id);
+		/* @info - Counted from community_members, not from the dead member_count column. */
+		return row ? await withActiveMemberCount(row as any) : row;
 	};
 
 	getBySlug = async (slug: string, authData?: IAuthData) => {
@@ -110,13 +132,20 @@ export class CommunityService {
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
 
 		/* Archived communities are only visible to their owner */
-		if ((community as any).deletedAt && (community as any).ownerId !== authData?.id) {
+		if (
+			(community as any).deletedAt &&
+			(community as any).ownerId !== authData?.id
+		) {
 			throwNotFoundError(CommunityMessages.NOT_FOUND);
 		}
 
 		const db = getDb();
 		const [owner] = await db
-			.select({ firstName: users.firstName, lastName: users.lastName, avatarUrl: users.avatarUrl })
+			.select({
+				firstName: users.firstName,
+				lastName: users.lastName,
+				avatarUrl: users.avatarUrl,
+			})
 			.from(users)
 			.where(eq(users.id, community!.ownerId))
 			.limit(1);
@@ -126,7 +155,10 @@ export class CommunityService {
 		let memberRole: string | null = null;
 		if (authData?.id) {
 			const [member] = await db
-				.select({ status: communityMembers.status, memberRole: communityMembers.memberRole })
+				.select({
+					status: communityMembers.status,
+					memberRole: communityMembers.memberRole,
+				})
 				.from(communityMembers)
 				.where(
 					and(
@@ -135,16 +167,25 @@ export class CommunityService {
 					),
 				)
 				.limit(1);
-			membership = member ? (member.status === "pending" ? "pending" : "active") : "none";
+			membership = member
+				? member.status === "pending"
+					? "pending"
+					: "active"
+				: "none";
 			memberRole = member?.memberRole ?? null;
 		}
 
+		/* @info - Counted from community_members, not from the dead member_count column. */
+		const counted = await withActiveMemberCount(community as any);
+
 		return {
-			...toCommunityDto(withPresignedUrl(community!, "coverImageUrl")),
+			...toCommunityDto(withPresignedUrl(counted as any, "coverImageUrl")),
 			owner: owner
 				? {
 						name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim(),
-						avatarUrl: owner.avatarUrl ? withPresignedUrl(owner, "avatarUrl").avatarUrl : null,
+						avatarUrl: owner.avatarUrl
+							? withPresignedUrl(owner, "avatarUrl").avatarUrl
+							: null,
 					}
 				: null,
 			membership,
@@ -152,13 +193,21 @@ export class CommunityService {
 		};
 	};
 
-	list = async (params?: { page?: number; limit?: number; userId?: number; scope?: "mine" | "owned" }) => {
+	list = async (params?: {
+		page?: number;
+		limit?: number;
+		userId?: number;
+		scope?: "mine" | "owned";
+	}) => {
 		const db = getDb();
 
 		let where: any;
 		if (params?.scope === "owned" && params.userId) {
 			/* Owned only — used by the instructor Members filter dropdown (excludes joined-only) */
-			where = and(eq(communities.ownerId, params.userId), isNull(communities.deletedAt));
+			where = and(
+				eq(communities.ownerId, params.userId),
+				isNull(communities.deletedAt),
+			);
 		} else if (params?.scope === "mine" && params.userId) {
 			/* My Communities: owned OR actively a member of. Owner's archived ones included.
 			 * The rule itself lives in community-publish-target so the course create and
@@ -178,7 +227,22 @@ export class CommunityService {
 			where,
 		});
 
-		return { ...result, data: result.data.map((c) => toCommunityDto(withPresignedUrl(c, "coverImageUrl"))) };
+		/* @info - One query for the whole page, counted from community_members. */
+		const counts = await countActiveMembers(
+			result.data.map((c: any) => Number(c.id)),
+		);
+
+		return {
+			...result,
+			data: result.data.map((c: any) =>
+				toCommunityDto(
+					withPresignedUrl(
+						{ ...c, memberCount: counts.get(Number(c.id)) ?? 0 },
+						"coverImageUrl",
+					),
+				),
+			),
+		};
 	};
 
 	update = async (
@@ -284,7 +348,9 @@ export class CommunityService {
 		const community = await this.repo.findById(id, { includeDeleted: true });
 		if (!community) throwNotFoundError(CommunityMessages.NOT_FOUND);
 		this.assertOwnerOrAdmin(community as any, authData);
-		const updated = await this.repo.update(id, { deletedAt: null } as any, { includeDeleted: true });
+		const updated = await this.repo.update(id, { deletedAt: null } as any, {
+			includeDeleted: true,
+		});
 		if (!updated) throwNotFoundError(CommunityMessages.NOT_FOUND);
 		this.log.info(`Community ${id} unarchived`);
 		return toCommunityDto(withPresignedUrl(community!, "coverImageUrl"));
@@ -321,17 +387,21 @@ export class CommunityService {
 			.where(eq(courses.communityId, community!.id));
 		const activeMembers = Number(activeResult[0]?.value ?? 0);
 
-		/* Revenue (sum of course prices × enrollment counts) */
+		/* Revenue: the real paid enrolment count per course, not the dead counter column. */
 		const revResult = await db
 			.select({
-				rev: sql<number>`COALESCE(SUM(${courses.price} * ${courses.enrollmentCount}), 0)`,
+				rev: sql<number>`COALESCE(SUM(${courses.price} * ${courseEnrollmentCount()}), 0)`,
 			})
 			.from(courses)
 			.where(eq(courses.communityId, community!.id));
 		const revenue = Number(revResult[0]?.rev ?? 0);
 
 		return {
-			community: { id: community!.id, name: community!.name, slug: community!.slug },
+			community: {
+				id: community!.id,
+				name: community!.name,
+				slug: community!.slug,
+			},
 			courseEnrollments,
 			activeMembers,
 			revenue,

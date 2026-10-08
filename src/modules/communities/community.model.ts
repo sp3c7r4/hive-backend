@@ -46,6 +46,11 @@ export const communities = pgTable(
 		isPaid: boolean("is_paid").default(false),
 		price: integer("price"),
 		coverImageUrl: varchar("cover_image_url", { length: 500 }),
+		/* @info - Not maintained. Written once as 1 when the community is created and
+		 * never updated, so it reports "1 members" on a community of 72. Do not read it
+		 * for a count, a sort or a filter: derive from community_members where
+		 * status = 'active' (2026-10-08-counts-locked-curriculum-bulk-invite-design.md,
+		 * D1 and D2). */
 		memberCount: integer("member_count").default(0),
 		courseCount: integer("course_count").default(0),
 		averageRating: integer("average_rating").default(0),
