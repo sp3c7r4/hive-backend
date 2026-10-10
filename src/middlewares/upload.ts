@@ -1,14 +1,26 @@
 import type { Context, Next } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { generateImageKey } from "@/helpers/id-generators";
+import { generateMediaKey } from "@/helpers/id-generators";
+import type { ImageProfile } from "@/helpers/image.helper";
 import { sendErrorResponse } from "@/helpers/response/send-response";
-import { StorageService } from "@/services/storage.service";
+import { UPLOAD_MESSAGES } from "@/modules/upload/upload.message";
+import {
+	StorageService,
+	UnreadableImageError,
+} from "@/services/storage.service";
 
 interface UploadOptions {
 	fieldName: string;
 	sizeLimit?: number;
 	allowedTypes?: string[];
 	optional?: boolean;
+	/** @info - Name a profile and the stored object is a WebP derivative of the
+	 *  upload. Absent stores the bytes as given (submissions, signatures). */
+	imageProfile?: ImageProfile;
+	/** @info - The key's prefix, e.g. `images/covers` or `documents/submissions`.
+	 *  Defaults to `images/<field name>`, so a caller that names nothing keeps the
+	 *  layout it had. */
+	keyFolder?: string;
 }
 
 type SingleUploadOptions = UploadOptions &
@@ -80,25 +92,32 @@ export class FileUploadMiddleware {
 	/**
 	 * @description Resolves file extension and uploads to storage
 	 * @param {File} file - The validated file
-	 * @param {string} fieldName - Form field name used for key generation
+	 * @param {UploadOptions} options - Upload constraints (folder and image profile)
 	 * @param {string} userId - Authenticated user's ID
 	 * @returns {Promise<UploadedFile | null>} Uploaded file metadata, or null if MIME type unrecognized
 	 */
 	private async processUpload(
 		file: File,
-		fieldName: string,
+		options: UploadOptions,
 		userId: string,
 	): Promise<UploadedFile | null> {
 		const ext = file.type.split("/")[1] ?? "bin";
-		const key = generateImageKey(fieldName, ext, userId);
-		await this.storageService.upload({
+		const key = generateMediaKey(
+			options.keyFolder ?? `images/${options.fieldName}`,
+			ext,
+			userId,
+		);
+		/* @info - StorageService answers with the key it wrote: a derivative lands
+		 * with a .webp extension, and the database stores keys. */
+		const written = await this.storageService.upload({
 			key,
 			body: file,
 			contentType: file.type,
+			imageProfile: options.imageProfile,
 		});
 
 		return {
-			key,
+			key: written.key,
 			originalName: file.name,
 			size: file.size,
 			mimeType: file.type,
@@ -130,12 +149,12 @@ export class FileUploadMiddleware {
 							Math.floor(Math.random() * options.fallback.length)
 						];
 					console.log({
-           	key,
-           	originalName: "default",
-           	size: 0,
-           	mimeType: "",
-          })
-          c.set("uploadedFile", {
+						key,
+						originalName: "default",
+						size: 0,
+						mimeType: "",
+					});
+					c.set("uploadedFile", {
 						key,
 						originalName: "default",
 						size: 0,
@@ -168,12 +187,23 @@ export class FileUploadMiddleware {
 				);
 			}
 
-			const userId = c.get("authData")?._id;
-			const uploaded = await this.processUpload(
-				file,
-				options.fieldName,
-				userId,
-			);
+			/* @info - The session carries the numeric user id as `id`; `_id` is not set
+			 * anywhere in the login flow, which is why every key written before this
+			 * landed in a `/general/` folder. Prefer `_id` if a future session sets it,
+			 * fall back to the id that exists. */
+			const authData = c.get("authData");
+			const userId = authData?._id ?? authData?.id;
+			let uploaded: UploadedFile | null = null;
+			try {
+				uploaded = await this.processUpload(file, options, userId);
+			} catch (err) {
+				if (!(err instanceof UnreadableImageError)) throw err;
+				return sendErrorResponse(
+					c,
+					{ message: UPLOAD_MESSAGES.UNREADABLE_IMAGE },
+					StatusCodes.BAD_REQUEST,
+				);
+			}
 
 			if (!uploaded) {
 				return sendErrorResponse(
@@ -230,15 +260,26 @@ export class FileUploadMiddleware {
 				}
 			}
 
-			const userId = c.get("authData")?._id;
+			/* @info - The session carries the numeric user id as `id`; `_id` is not set
+			 * anywhere in the login flow, which is why every key written before this
+			 * landed in a `/general/` folder. Prefer `_id` if a future session sets it,
+			 * fall back to the id that exists. */
+			const authData = c.get("authData");
+			const userId = authData?._id ?? authData?.id;
 			const uploaded: UploadedFile[] = [];
 
 			for (const file of files as File[]) {
-				const result = await this.processUpload(
-					file,
-					options.fieldName,
-					userId,
-				);
+				let result: UploadedFile | null = null;
+				try {
+					result = await this.processUpload(file, options, userId);
+				} catch (err) {
+					if (!(err instanceof UnreadableImageError)) throw err;
+					return sendErrorResponse(
+						c,
+						{ message: UPLOAD_MESSAGES.UNREADABLE_IMAGE },
+						StatusCodes.BAD_REQUEST,
+					);
+				}
 				if (!result) {
 					return sendErrorResponse(
 						c,

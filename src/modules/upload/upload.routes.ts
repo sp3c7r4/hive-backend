@@ -1,8 +1,7 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { JwtService, ZodEngine } from "@/services";
 import { UploadController } from "./upload.controller";
-
-import { z } from "zod";
 
 export const uploadRouter = new Hono({ strict: true });
 
@@ -10,10 +9,13 @@ const controller = UploadController.getInstance();
 const zod = ZodEngine.getInstance();
 const jwt = JwtService.getInstance();
 
-
 const presignedUploadSchema = z.object({
 	contentType: z.string().min(1, "contentType is required"),
 	filename: z.string().min(1, "filename is required"),
+	/* @info - An allowlisted purpose, not a path. Deliberately a loose string
+	 * here: the controller holds the allowlist (PRESIGN_FOLDERS) and answers a
+	 * message a person can read, rather than Zod's option list. */
+	folder: z.string().optional(),
 });
 
 uploadRouter.use("*", jwt.validateToken);

@@ -12,17 +12,41 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "@/config";
 import { TTL } from "@/constants";
+import type { ImageProfile } from "@/helpers/image.helper";
+import {
+	derivativeMetadata,
+	toWebp,
+	withWebpExtension,
+} from "@/helpers/image.helper";
 
 interface UploadParams {
 	key: string;
 	body: Buffer | File;
 	contentType: string;
+	/** @info - Name a profile and the object is stored as a WebP derivative of it
+	 *  (resized, EXIF-rotated, metadata dropped, cacheable). Absent means store the
+	 *  bytes exactly as given, which is what private or already-processed content
+	 *  needs. */
+	imageProfile?: ImageProfile;
+	/** @info - Only meaningful when the bytes are stored raw; a derivative carries
+	 *  its own cache header. */
+	cacheControl?: string;
 }
 
 interface PresignedUploadParams {
 	key: string;
 	contentType: string;
 	expiresIn?: number;
+	cacheControl?: string;
+}
+
+/** @info - The upload could not be read as an image. The caller answers 400:
+ *  storing it would put something the app cannot render behind a public URL. */
+export class UnreadableImageError extends Error {
+	constructor() {
+		super("unreadable image");
+		this.name = "UnreadableImageError";
+	}
 }
 
 interface PresignedDownloadParams {
@@ -70,23 +94,42 @@ export class StorageService {
 		key,
 		body,
 		contentType,
-	}: UploadParams): Promise<PutObjectCommandOutput> => {
+		imageProfile,
+		cacheControl,
+	}: UploadParams): Promise<PutObjectCommandOutput & { key: string }> => {
 		const buffer =
 			body instanceof File ? Buffer.from(await body.arrayBuffer()) : body;
 
+		/* @info - A derivative is produced here, in the process that already holds
+		 * the bytes, rather than in a separate Lambda: one command, one object, and
+		 * the original never lands in the bucket. */
+		const derived = imageProfile ? await toWebp(buffer, imageProfile) : null;
+		if (imageProfile && !derived) throw new UnreadableImageError();
+		const metadata = imageProfile ? derivativeMetadata(imageProfile) : null;
+
+		/* @info - The key that was actually written. A derivative lands under a new
+		 * extension, and the database stores keys rather than URLs, so the caller
+		 * has to be told which one exists. */
+		const writtenKey = derived ? withWebpExtension(key) : key;
+
 		const command = new PutObjectCommand({
 			Bucket: this.bucket,
-			Key: key,
-			Body: buffer,
-			ContentType: contentType,
+			Key: writtenKey,
+			Body: derived ?? buffer,
+			ContentType: metadata?.contentType ?? contentType,
+			...(metadata?.cacheControl || cacheControl
+				? { CacheControl: metadata?.cacheControl ?? cacheControl }
+				: {}),
 		});
-		return await this.client.send(command);
+		const output = await this.client.send(command);
+		return { ...output, key: writtenKey };
 	};
 
 	generatePresignedUploadUrl = async ({
 		key,
 		contentType,
 		expiresIn = TTL.IN_AN_HOUR,
+		cacheControl,
 	}: PresignedUploadParams): Promise<{
 		url: string;
 		key: string;
@@ -96,6 +139,7 @@ export class StorageService {
 			Bucket: this.bucket,
 			Key: key,
 			ContentType: contentType,
+			...(cacheControl ? { CacheControl: cacheControl } : {}),
 		});
 		const url = await getSignedUrl(this.client, command, { expiresIn });
 		return { url, key, bucket: this.bucket };

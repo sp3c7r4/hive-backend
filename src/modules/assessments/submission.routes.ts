@@ -1,9 +1,13 @@
 import { Hono } from "hono";
-import { JwtService, ZodEngine } from "@/services";
 import { requireInstructor } from "@/middlewares/auth";
 import { FileUploadMiddleware } from "@/middlewares/upload";
+import { JwtService, ZodEngine } from "@/services";
 import { AssignmentController } from "./submission.controller";
-import { gradeSubmissionSchema, assignmentSettingsSchema, submitAssignmentSchema } from "./submission.schema";
+import {
+	assignmentSettingsSchema,
+	gradeSubmissionSchema,
+	submitAssignmentSchema,
+} from "./submission.schema";
 
 export const submissionRouter = new Hono({ strict: true });
 
@@ -18,6 +22,7 @@ submissionRouter.post(
 	jwt.validateToken,
 	upload.multiple({
 		fieldName: "files",
+		keyFolder: "documents/submissions",
 		optional: true,
 		sizeLimit: 10 * 1024 * 1024, // 10MB per file
 		allowedTypes: [
@@ -51,11 +56,7 @@ submissionRouter.get(
 );
 
 /* Instructor/Student: Get single submission */
-submissionRouter.get(
-	"/:submissionId",
-	jwt.validateToken,
-	controller.get,
-);
+submissionRouter.get("/:submissionId", jwt.validateToken, controller.get);
 
 /* Instructor: Grade a submission */
 submissionRouter.patch(

@@ -32,6 +32,8 @@ courseRouter.post(
 	zod.validate.formData(createCourseFormSchema),
 	upload.single({
 		fieldName: "coverImage",
+		keyFolder: "images/covers",
+		imageProfile: "cover",
 		sizeLimit: FILE_SIZES["5MB"],
 		allowedTypes: [ImageMimeType.JPEG, ImageMimeType.PNG, ImageMimeType.WEBP],
 		optional: true,
@@ -46,6 +48,8 @@ courseRouter.patch(
 	requireInstructor,
 	upload.single({
 		fieldName: "coverImage",
+		keyFolder: "images/covers",
+		imageProfile: "cover",
 		sizeLimit: FILE_SIZES["5MB"],
 		allowedTypes: [ImageMimeType.JPEG, ImageMimeType.PNG, ImageMimeType.WEBP],
 		optional: true,
