@@ -1,11 +1,29 @@
 import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
-import { config } from "@/config";
-import { sendErrorResponse, sendSuccessResponse } from "@/helpers/response/send-response";
-import { StorageService } from "@/services/storage.service";
 import { nanoid } from "nanoid";
-import { generateImageKey } from "@/helpers/id-generators";
+import { config } from "@/config";
 import { DocumentMimeType } from "@/enums";
+import { generateMediaKey } from "@/helpers/id-generators";
+import type { ImageProfile } from "@/helpers/image.helper";
+import {
+	sendErrorResponse,
+	sendSuccessResponse,
+} from "@/helpers/response/send-response";
+import {
+	StorageService,
+	UnreadableImageError,
+} from "@/services/storage.service";
+import { UPLOAD_MESSAGES } from "./upload.message";
+
+/* @info - The presign route is the only place a client names a folder. It names
+ * an allowlisted value, not a path: an unlisted value would let an authenticated
+ * caller write into `assets/` or `certificates/`, which the app reads as its
+ * own. */
+const PRESIGN_FOLDERS: Record<string, { prefix: string }> = {
+	videos: { prefix: "videos/lessons" },
+	pptx: { prefix: "documents/decks" },
+};
+const PRESIGN_DEFAULT_PREFIX = "documents/uploads";
 
 const MIME_BY_EXT: Record<string, string> = {
 	mp4: "video/mp4",
@@ -55,6 +73,14 @@ export class UploadController {
 		const { contentType, filename, folder } = await c.req.json();
 
 		const ext = filename.split(".").pop() ?? "bin";
+		const folderConfig = folder ? PRESIGN_FOLDERS[folder] : null;
+		if (folder && !folderConfig) {
+			return sendErrorResponse(
+				c,
+				{ message: UPLOAD_MESSAGES.FOLDER_NOT_ALLOWED },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
 		const folderName = folder ?? "uploads";
 
 		/* @info - Lesson videos are uploaded straight to S3 via this presigned
@@ -94,7 +120,11 @@ export class UploadController {
 			}
 		}
 
-		const key = generateImageKey(folderName, ext, authData.id.toString());
+		const key = generateMediaKey(
+			folderConfig?.prefix ?? PRESIGN_DEFAULT_PREFIX,
+			ext,
+			authData.id.toString(),
+		);
 
 		const result = await this.storage.generatePresignedUploadUrl({
 			key,
@@ -158,7 +188,9 @@ export class UploadController {
 		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid file type '${fileType}'. Allowed: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, JPEG, PNG, GIF, WebP, audio` },
+				{
+					message: `Invalid file type '${fileType}'. Allowed: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, JPEG, PNG, GIF, WebP, audio`,
+				},
 				StatusCodes.BAD_REQUEST,
 			);
 		}
@@ -172,7 +204,7 @@ export class UploadController {
 				.replace(/[^a-zA-Z0-9._-]+/g, "-")
 				.replace(/^-+|-+$/g, "")
 				.slice(0, 60) || "attachment";
-		const key = `images/files/general/${Date.now()}-${nanoid(6)}-${safeName}.${ext}`;
+		const key = `documents/attachments/${c.get("authData")?.id ?? "general"}/${Date.now()}-${nanoid(6)}-${safeName}.${ext}`;
 
 		await this.storage.upload({
 			key,
@@ -192,6 +224,17 @@ export class UploadController {
 		const authData = c.get("authData");
 		const formData = await c.req.formData();
 		const file = formData.get("file") as File | null;
+		/* @info - A community cover set after creation arrives here rather than
+		 * through the community's multipart route (that one takes JSON), so the
+		 * caller names its purpose and both cover paths agree. */
+		const purpose = (formData.get("purpose") as string | null) ?? "feed";
+		if (purpose !== "feed" && purpose !== "cover") {
+			return sendErrorResponse(
+				c,
+				{ message: UPLOAD_MESSAGES.FOLDER_NOT_ALLOWED },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
 
 		if (!file || !(file instanceof File)) {
 			return sendErrorResponse(
@@ -216,26 +259,47 @@ export class UploadController {
 		if (!allowed.includes(file.type)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid type '${file.type}'. Allowed: JPEG, PNG, WebP, GIF` },
+				{
+					message: `Invalid type '${file.type}'. Allowed: JPEG, PNG, WebP, GIF`,
+				},
 				StatusCodes.BAD_REQUEST,
 			);
 		}
 
 		const fileType = inferMime(file);
 		const ext = fileType.split("/")[1] ?? "bin";
-		const key = generateImageKey("feed", ext, authData.id.toString());
+		const profile: ImageProfile = purpose === "cover" ? "cover" : "feed";
+		const key = generateMediaKey(
+			purpose === "cover" ? "images/covers" : "images/feed",
+			ext,
+			authData?.id?.toString(),
+		);
 
-		await this.storage.upload({
-			key,
-			body: file,
-			contentType: fileType,
-		});
+		/* @info - The upload answers with the key it wrote: an image derivative
+		 * lands with a .webp extension. */
+		let written = key;
+		try {
+			const result = await this.storage.upload({
+				key,
+				body: file,
+				contentType: fileType,
+				imageProfile: profile,
+			});
+			written = result.key;
+		} catch (err) {
+			if (!(err instanceof UnreadableImageError)) throw err;
+			return sendErrorResponse(
+				c,
+				{ message: UPLOAD_MESSAGES.UNREADABLE_IMAGE },
+				StatusCodes.BAD_REQUEST,
+			);
+		}
 
-		const publicUrl = `${config.cdn.url}${key}`;
+		const publicUrl = `${config.cdn.url}${written}`;
 
 		return sendSuccessResponse(
 			c,
-			{ url: publicUrl, key },
+			{ url: publicUrl, key: written },
 			StatusCodes.CREATED,
 		);
 	};
@@ -266,7 +330,9 @@ export class UploadController {
 		if (!allowed.includes(fileType)) {
 			return sendErrorResponse(
 				c,
-				{ message: `Invalid file type '${fileType}'. Allowed: MP4, MOV, WebM, M4V, MPEG` },
+				{
+					message: `Invalid file type '${fileType}'. Allowed: MP4, MOV, WebM, M4V, MPEG`,
+				},
 				StatusCodes.BAD_REQUEST,
 			);
 		}
@@ -278,7 +344,7 @@ export class UploadController {
 				.replace(/[^a-zA-Z0-9._-]+/g, "-")
 				.replace(/^-+|-+$/g, "")
 				.slice(0, 60) || "lesson";
-		const key = `images/files/general/${Date.now()}-${nanoid(6)}-${safeName}.${ext}`;
+		const key = `videos/lessons/${c.get("authData")?.id ?? "general"}/${Date.now()}-${nanoid(6)}-${safeName}.${ext}`;
 
 		await this.storage.upload({
 			key,

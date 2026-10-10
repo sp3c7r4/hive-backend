@@ -1,15 +1,15 @@
 import { Hono } from "hono";
-import { JwtService, ZodEngine } from "@/services";
-import { requireInstructor } from "@/middlewares/auth";
-import { FileUploadMiddleware } from "@/middlewares/upload";
 import { FILE_SIZES } from "@/constants/file-size";
 import { ImageMimeType } from "@/enums";
+import { requireInstructor } from "@/middlewares/auth";
+import { FileUploadMiddleware } from "@/middlewares/upload";
+import { JwtService, ZodEngine } from "@/services";
+import { UserController } from "./user.controller";
 import {
+	changePasswordSchema,
 	onboardUserSchema,
 	updateUserSchema,
-	changePasswordSchema,
 } from "./user.schema";
-import { UserController } from "./user.controller";
 
 export const userRouter = new Hono({ strict: true });
 const userController = UserController.getInstance();
@@ -34,6 +34,7 @@ userRouter.put(
 	requireInstructor,
 	upload.single({
 		fieldName: "signature",
+		keyFolder: "images/signatures",
 		sizeLimit: FILE_SIZES["2MB"],
 		allowedTypes: [
 			ImageMimeType.JPEG,
@@ -49,6 +50,8 @@ userRouter.put(
 	"/avatar",
 	upload.single({
 		fieldName: "avatar",
+		keyFolder: "images/avatars",
+		imageProfile: "avatar",
 		sizeLimit: FILE_SIZES["5MB"],
 		allowedTypes: [ImageMimeType.JPEG, ImageMimeType.PNG],
 	}),
@@ -66,6 +69,8 @@ userRouter.post(
 	zodEngine.validate.formData(onboardUserSchema),
 	upload.single({
 		fieldName: "avatar",
+		keyFolder: "images/avatars",
+		imageProfile: "avatar",
 		sizeLimit: FILE_SIZES["5MB"],
 		allowedTypes: [ImageMimeType.JPEG, ImageMimeType.PNG],
 		optional: true,
