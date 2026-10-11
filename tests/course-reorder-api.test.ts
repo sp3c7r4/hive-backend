@@ -127,14 +127,14 @@ const rowsOf = (res: { body: any }): any[] =>
 	(res.body?.data?.data ?? []) as any[];
 
 /** Ids of a course's modules, in the order the API returns them. */
-const storedModuleIds = async (courseId: number) => {
-	const res = await get(`/courses/${courseId}/modules`, ownerToken);
+const storedModuleIds = async (courseId: number, token = ownerToken) => {
+	const res = await get(`/courses/${courseId}/modules`, token);
 	return rowsOf(res).map((m: any) => m.id as number);
 };
 
 /** Ids of a module's lessons, in the order the API returns them. */
-const storedLessonIds = async (moduleId: number) => {
-	const res = await get(`/modules/${moduleId}/lessons`, ownerToken);
+const storedLessonIds = async (moduleId: number, token = ownerToken) => {
+	const res = await get(`/modules/${moduleId}/lessons`, token);
 	return rowsOf(res).map((l: any) => l.id as number);
 };
 
@@ -348,10 +348,13 @@ describe("PATCH /courses/:courseId/modules/order", () => {
 		expect(res.status).toBe(400);
 		expect(res.body.error.message).toBe(MODULES_MISMATCH);
 		expect(await storedModuleIds(ownerCourseId)).toEqual(before);
-		const strangerModule = await one(
-			`SELECT course_id FROM modules WHERE id = ${strangerModuleId}`,
-		);
-		expect(Number(strangerModule.course_id)).toBe(strangerCourseId);
+		/* @info - Asserted on sort_order, the only column the endpoint writes: a
+		 * course_id assertion passes even if the refused request had rewritten the other
+		 * parent's children. */
+		expect(await sortOrdersOf("modules", strangerCourseId)).toEqual([0]);
+		expect(await storedModuleIds(strangerCourseId, strangerToken)).toEqual([
+			strangerModuleId,
+		]);
 	});
 
 	it("400 for a duplicated id", async () => {
@@ -366,6 +369,48 @@ describe("PATCH /courses/:courseId/modules/order", () => {
 
 		expect(res.status).toBe(400);
 		expect(res.body.error.message).toBe(MODULES_MISMATCH);
+		expect(await storedModuleIds(ownerCourseId)).toEqual(before);
+	});
+
+	it("400 for an id appended twice, and not one of them is written", async () => {
+		const before = await storedModuleIds(ownerCourseId);
+		const orders = await sortOrdersOf("modules", ownerCourseId);
+		const res = await patch(
+			`/courses/${ownerCourseId}/modules/order`,
+			ownerToken,
+			{ ids: [...before, before[0]] },
+		);
+
+		expect(res.status).toBe(400);
+		expect(res.body.error.message).toBe(MODULES_MISMATCH);
+		expect(await storedModuleIds(ownerCourseId)).toEqual(before);
+		expect(await sortOrdersOf("modules", ownerCourseId)).toEqual(orders);
+	});
+
+	it("400 with a field error for a malformed body as an instructor, and for ids that are not positive integers", async () => {
+		const before = await storedModuleIds(ownerCourseId);
+
+		const notAnArray = await patch(
+			`/courses/${ownerCourseId}/modules/order`,
+			ownerToken,
+			{ ids: "not-an-array" },
+		);
+		expect(notAnArray.status).toBe(400);
+		expect(notAnArray.body.error.ids).toBeTruthy();
+
+		for (const ids of [[1.5], [-1], [0], ["3"], [before[0], null]]) {
+			const res = await patch(
+				`/courses/${ownerCourseId}/modules/order`,
+				ownerToken,
+				{ ids },
+			);
+			expect(res.status, `ids: ${JSON.stringify(ids)}`).toBe(400);
+			expect(
+				Object.keys(res.body.error ?? {}).some((k) => k.startsWith("ids")),
+				`ids: ${JSON.stringify(ids)}`,
+			).toBe(true);
+		}
+
 		expect(await storedModuleIds(ownerCourseId)).toEqual(before);
 	});
 
@@ -569,11 +614,49 @@ describe("PATCH /modules/:moduleId/lessons/order", () => {
 		expect(duplicated.status).toBe(400);
 		expect(duplicated.body.error.message).toBe(LESSONS_MISMATCH);
 
-		expect(await storedLessonIds(moduleAId)).toEqual(before);
-		const untouched = await one(
-			`SELECT module_id FROM lessons WHERE id = ${otherModuleLessonId}`,
+		const appended = await patch(
+			`/modules/${moduleAId}/lessons/order`,
+			ownerToken,
+			{ ids: [...before, before[0]] },
 		);
-		expect(Number(untouched.module_id)).toBe(moduleBId);
+		expect(appended.status).toBe(400);
+		expect(appended.body.error.message).toBe(LESSONS_MISMATCH);
+
+		expect(await storedLessonIds(moduleAId)).toEqual(before);
+		/* @info - sort_order is the only column the endpoint writes. */
+		expect(await sortOrdersOf("lessons", moduleBId)).toEqual([0]);
+		expect(await storedLessonIds(moduleBId)).toEqual([otherModuleLessonId]);
+	});
+
+	it("reorders a draft lesson too, because the set is every row and not only the published ones", async () => {
+		const draftId = (
+			await one(
+				`INSERT INTO lessons (module_id, title, type, status, sort_order) VALUES (${moduleAId}, 'Draft lesson', 'text', 'draft', 3) RETURNING id`,
+			)
+		).id as number;
+		try {
+			const all = await storedLessonIds(moduleAId);
+			expect(all).toContain(draftId);
+
+			const omitted = await patch(
+				`/modules/${moduleAId}/lessons/order`,
+				ownerToken,
+				{ ids: all.filter((id: number) => id !== draftId) },
+			);
+			expect(omitted.status).toBe(400);
+			expect(omitted.body.error.message).toBe(LESSONS_MISMATCH);
+
+			const moved = rotated(all);
+			const res = await patch(
+				`/modules/${moduleAId}/lessons/order`,
+				ownerToken,
+				{ ids: moved },
+			);
+			expect(res.status).toBe(200);
+			expect(rowsOf(res).map((l: any) => l.id as number)).toEqual(moved);
+		} finally {
+			await sql(`DELETE FROM lessons WHERE id = ${draftId}`);
+		}
 	});
 
 	it("404 'Module not found' for an unknown module", async () => {

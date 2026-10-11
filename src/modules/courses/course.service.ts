@@ -111,14 +111,17 @@ const parseMeetingDate = (value?: string): Date | undefined => {
 
 /**
  * @info - The reorder list must be exactly the parent's children: no missing id, no
- * extra id, no duplicate. Sizes are compared first, because a duplicate leaves the
- * requested array the same length as the current one while its set shrinks.
+ * extra id, no duplicate. Lengths are compared first, because a duplicate appended to the
+ * end leaves both the length and the set size equal to the current ones, and a duplicate
+ * replacing an id shrinks the set. Equal lengths plus a set size equal to the current
+ * length plus containment means the two are the same multiset.
  */
 function assertSameIdSet(
 	current: number[],
 	requested: number[],
 	message: string,
 ): void {
+	if (requested.length !== current.length) throwBadRequestError(message);
 	const currentSet = new Set(current);
 	const requestedSet = new Set(requested);
 	if (currentSet.size !== requestedSet.size) throwBadRequestError(message);
