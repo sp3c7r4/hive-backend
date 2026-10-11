@@ -109,6 +109,26 @@ const parseMeetingDate = (value?: string): Date | undefined => {
 	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+/**
+ * @info - The reorder list must be exactly the parent's children: no missing id, no
+ * extra id, no duplicate. Lengths are compared first, because a duplicate appended to the
+ * end leaves both the length and the set size equal to the current ones. Equal lengths plus
+ * containment of every current id means the two are the same multiset: a duplicate in the
+ * requested list would leave no slot for one of the current ids.
+ */
+function assertSameIdSet(
+	current: number[],
+	requested: number[],
+	message: string,
+): void {
+	if (requested.length !== current.length) throwBadRequestError(message);
+	const currentSet = new Set(current);
+	const requestedSet = new Set(requested);
+	for (const id of currentSet) {
+		if (!requestedSet.has(id)) throwBadRequestError(message);
+	}
+}
+
 export class CourseService {
 	private static instance: CourseService;
 	private coursesRepo: CourseRepository;
@@ -1212,5 +1232,103 @@ export class CourseService {
 		});
 
 		return result;
+	};
+
+	/* ---------------------------------------------------------------- */
+	/*  Bulk reorder                                                    */
+	/* ---------------------------------------------------------------- */
+
+	/**
+	 * @info - Writes 0..n-1 for a course's modules, in the order given.
+	 *
+	 * The parent row is locked BEFORE anything is read, and that single lock is
+	 * what makes two reorders of the same list safe: they cannot take their locks
+	 * in opposite orders, so the second blocks until the first commits instead of
+	 * deadlocking (Postgres 40P01, which `_guard` would surface as a 500). The
+	 * children are then read in id order under the same transaction, belt and
+	 * braces on top of that. The write itself is literal, so nothing from the
+	 * request can reach a column.
+	 */
+	reorderModules = async (
+		authData: IAuthData,
+		courseId: number,
+		ids: number[],
+	) => {
+		await this.assertOwnedCourse(courseId, authData);
+
+		await withTransaction(async (tx) => {
+			const [parent] = await tx
+				.select({ id: courses.id })
+				.from(courses)
+				.where(eq(courses.id, Number(courseId)))
+				.for("update")
+				.limit(1);
+			if (!parent) throwNotFoundError(CourseMessages.NOT_FOUND);
+
+			const current = await tx
+				.select({ id: modules.id })
+				.from(modules)
+				.where(eq(modules.courseId, Number(courseId)))
+				.orderBy(asc(modules.id))
+				.for("update");
+
+			assertSameIdSet(
+				current.map((row) => Number(row.id)),
+				ids,
+				ModuleMessages.ORDER_MISMATCH,
+			);
+
+			const repo = new RelationalRepository(modules, tx);
+			for (const [index, id] of ids.entries()) {
+				const updated = await repo.update(id, { sortOrder: index });
+				if (!updated) throwNotFoundError(ModuleMessages.NOT_FOUND);
+			}
+		});
+
+		/* @info - Read back through the list method, so the response cannot drift from
+		 * the shape GET /courses/:courseId/modules already promises. */
+		return this.listModules(courseId, authData);
+	};
+
+	/** The same contract for a module's lessons. See `reorderModules` for the locks. */
+	reorderLessons = async (
+		authData: IAuthData,
+		moduleId: number,
+		ids: number[],
+	) => {
+		const mod = await this.modulesRepo.findById(Number(moduleId));
+		if (!mod) throwNotFoundError(ModuleMessages.NOT_FOUND);
+		await this.assertOwnedModuleCourse(mod as any, authData);
+
+		await withTransaction(async (tx) => {
+			const [parent] = await tx
+				.select({ id: modules.id })
+				.from(modules)
+				.where(eq(modules.id, Number(moduleId)))
+				.for("update")
+				.limit(1);
+			if (!parent) throwNotFoundError(ModuleMessages.NOT_FOUND);
+
+			const current = await tx
+				.select({ id: lessons.id })
+				.from(lessons)
+				.where(eq(lessons.moduleId, Number(moduleId)))
+				.orderBy(asc(lessons.id))
+				.for("update");
+
+			assertSameIdSet(
+				current.map((row) => Number(row.id)),
+				ids,
+				LessonMessages.ORDER_MISMATCH,
+			);
+
+			const repo = new RelationalRepository(lessons, tx);
+			for (const [index, id] of ids.entries()) {
+				const updated = await repo.update(id, { sortOrder: index });
+				if (!updated) throwNotFoundError(LessonMessages.NOT_FOUND);
+			}
+		});
+
+		return this.listLessons(moduleId, authData);
 	};
 }

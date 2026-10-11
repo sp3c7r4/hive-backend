@@ -11,6 +11,7 @@ import {
 	createModuleSchema,
 	generateMeetingSchema,
 	moveCourseCommunitySchema,
+	reorderSchema,
 	updateLessonSchema,
 	updateModuleSchema,
 } from "./course.schema";
@@ -87,6 +88,16 @@ courseRouter.post(
 	controller.createModule,
 );
 
+/** @info - Bulk reorder for the course's modules. Registered next to the
+ * collection it reorders; the service asserts ownership and the schema carries
+ * the full id list, so the route adds no permission of its own. */
+courseRouter.patch(
+	"/:courseId/modules/order",
+	requireInstructor,
+	zod.validate.body(reorderSchema),
+	controller.reorderModules,
+);
+
 /** @info - Live class meeting generation — instructor only */
 courseRouter.post(
 	"/:courseId/modules/:moduleId/lessons/:lessonId/generate-meeting",
@@ -107,6 +118,16 @@ moduleRouter.patch(
 moduleRouter.delete("/:id", requireInstructor, controller.deleteModule);
 
 /** @info - Lesson routes nested under modules */
+/* @info - `/order` is registered BEFORE the `:lessonId` param routes on purpose:
+ * otherwise PATCH /:moduleId/lessons/order matches `/:lessonId` with
+ * lessonId = "order". Specific paths first, as in quiz.routes.ts. */
+moduleRouter.patch(
+	"/:moduleId/lessons/order",
+	requireInstructor,
+	zod.validate.body(reorderSchema),
+	controller.reorderLessons,
+);
+
 moduleRouter.get("/:moduleId/lessons", controller.listLessons);
 moduleRouter.post(
 	"/:moduleId/lessons",
