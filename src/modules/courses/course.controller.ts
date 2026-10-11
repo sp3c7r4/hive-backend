@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { StatusCodes } from "http-status-codes";
 import { sendSuccessResponse } from "@/helpers";
 import { formDataToObject } from "@/helpers/middleware";
-import { CourseMessages } from "./course.message";
+import { CourseMessages, LessonMessages, ModuleMessages } from "./course.message";
 import { CourseService } from "./course.service";
 
 /** @info - zValidator stores the parsed form under the request's validation
@@ -13,6 +13,15 @@ const validatedForm = (c: Context): Record<string, unknown> => {
 		valid: (target: "form") => Record<string, unknown> | undefined;
 	};
 	return req.valid("form") ?? {};
+};
+
+/** @info - Same accessor for a validated JSON body. The service is handed only what
+ * the schema accepted, which is why the reorder schemas are strict. */
+const validatedIds = (c: Context): number[] => {
+	const req = c.req as unknown as {
+		valid: (target: "json") => { ids?: number[] } | undefined;
+	};
+	return req.valid("json")?.ids ?? [];
 };
 
 export class CourseController {
@@ -197,6 +206,20 @@ export class CourseController {
 		});
 	};
 
+	reorderModules = async (c: Context) => {
+		const authData = c.get("authData");
+		const courseId = Number(c.req.param("courseId"));
+		const data = await this.service.reorderModules(
+			authData,
+			courseId,
+			validatedIds(c),
+		);
+		return sendSuccessResponse(c, {
+			message: ModuleMessages.REORDERED,
+			data,
+		});
+	};
+
 	updateModule = async (c: Context) => {
 		const authData = c.get("authData");
 		const id = c.req.param("id");
@@ -260,6 +283,20 @@ export class CourseController {
 		);
 		return sendSuccessResponse(c, {
 			message: "Lessons fetched successfully",
+			data,
+		});
+	};
+
+	reorderLessons = async (c: Context) => {
+		const authData = c.get("authData");
+		const moduleId = Number(c.req.param("moduleId"));
+		const data = await this.service.reorderLessons(
+			authData,
+			moduleId,
+			validatedIds(c),
+		);
+		return sendSuccessResponse(c, {
+			message: LessonMessages.REORDERED,
 			data,
 		});
 	};

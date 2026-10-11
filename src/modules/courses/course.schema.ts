@@ -160,6 +160,21 @@ export const updateCourseSchema = z.object({
 export const updateModuleSchema = createModuleSchema.partial();
 export const updateLessonSchema = createLessonSchema.partial();
 
+/**
+ * @info - A bulk reorder carries the parent's full child list in the wanted order.
+ *
+ * Strict, because the controller hands the service `validated("json")` and an
+ * unknown key would otherwise be dropped silently; `.max(500)` bounds both the
+ * transaction's lock set and the response. The service compares the list against
+ * the parent's rows and refuses anything that is not exactly that set, so a stale
+ * client cannot reorder a subset.
+ */
+export const reorderSchema = z
+	.object({
+		ids: z.array(z.number().int().positive()).min(1).max(500),
+	})
+	.strict();
+
 export const generateMeetingSchema = z.object({
 	provider: z.enum(["google", "zoom"]),
 	summary: z.string().min(1),
