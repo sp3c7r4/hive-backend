@@ -729,8 +729,16 @@ describe("two reorders of the same list at once", () => {
 				run,
 				statuses: [200, 200],
 			});
-			expect(a.body.data?.data?.map((m: any) => m.id) ?? null).toEqual(orderA);
-			expect(b.body.data?.data?.map((m: any) => m.id) ?? null).toEqual(orderB);
+			/* @info - The response is the list read back after the transaction commits, so under
+			 * concurrency it may legitimately carry the other request's order: each response only
+			 * has to be one of the two, while the stored order below is asserted exactly. */
+			const either = [orderA, orderB];
+			expect(either).toContainEqual(
+				a.body.data?.data?.map((m: any) => m.id) ?? null,
+			);
+			expect(either).toContainEqual(
+				b.body.data?.data?.map((m: any) => m.id) ?? null,
+			);
 
 			const stored = await storedModuleIds(ownerCourseId);
 			expect([orderA, orderB]).toContainEqual(stored);

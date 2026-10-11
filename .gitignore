@@ -48,3 +48,9 @@ mint_tokens.tmp.js
 # any env file, anywhere
 .env
 local_cache/
+
+# local CodeGraph index (not part of the app)
+.codegraph/
+
+# a local seed script that holds dev credentials: never commit it
+seed-dev-communities.cjs
