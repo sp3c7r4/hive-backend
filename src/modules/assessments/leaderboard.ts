@@ -66,6 +66,20 @@ export interface LeaderboardUnranked {
 	reason: "partial" | "not_started";
 }
 
+/**
+ * @info - One module's board for the module view (D1): the same three lists the course
+ * level carries, narrowed to that module's assessments. A module appears here when it
+ * holds at least one assessment lesson of any status, so a module whose only assessment
+ * is a draft comes back with empty lists rather than being missing (D3).
+ */
+export interface LeaderboardModule {
+	moduleId: number;
+	title: string;
+	assessments: LeaderboardAssessment[];
+	rows: LeaderboardRow[];
+	unranked: LeaderboardUnranked[];
+}
+
 export interface LeaderboardResult {
 	rows: LeaderboardRow[];
 	unranked: LeaderboardUnranked[];
