@@ -303,8 +303,11 @@ beforeAll(async () => {
 		)
 	).lesson;
 	/* @info - A lesson in Resources, so the module exists and still holds no assessment
-	 * lesson: D3 gives it no card. */
+	 * lesson: D3 gives it no card. The quiz beside it is the sharper half: it is published
+	 * and it has questions, so a query that joined every lesson type would give Resources
+	 * a card and pull the quiz into the course scope. */
 	await mkLesson("Welcome video", "video", "published", 0, resourcesModule);
+	await mkLesson("Practice quiz", "quiz", "published", 2, resourcesModule);
 
 	/* @info - The all-draft course: one module, one assessment, and it is a draft, so the
 	 * scope is empty while a card still has to come back (D11). */
