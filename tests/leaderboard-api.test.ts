@@ -30,6 +30,8 @@ const STUDENT_EMAIL = "leaderboard.student@hive.test";
 const STUDENT2_EMAIL = "leaderboard.student2@hive.test";
 const SLUG = "leaderboard-test-course";
 const EMPTY_SLUG = "leaderboard-empty-course";
+const MODULES_SLUG = "leaderboard-modules-course";
+const DRAFTS_SLUG = "leaderboard-drafts-course";
 const ALL_EMAILS = `'${OWNER_EMAIL}', '${OTHER_EMAIL}', '${STUDENT_EMAIL}', '${STUDENT2_EMAIL}'`;
 
 let db: ReturnType<typeof getDb>;
@@ -40,6 +42,18 @@ let studentId: number;
 let student2Id: number;
 let courseId: number;
 let emptyCourseId: number;
+/* @info - The module-grouping fixture: a four-module course whose module sort orders
+ * deliberately disagree with their creation order, plus a course whose only assessment
+ * is a draft (D11). */
+let modulesCourseId: number;
+let draftsCourseId: number;
+let weekOneModule: number;
+let weekTwoModule: number;
+let weekThreeModule: number;
+let resourcesModule: number;
+let weekOneAssessment: number;
+let weekTwoAssessments: number[] = [];
+let weekThreeDraftAssessment: number;
 let assessmentA: number;
 let assessmentB: number;
 let draftAssessment: number;
@@ -57,7 +71,7 @@ const one = async (statement: string) => (await sql(statement))[0];
 /** @info - Children before parents, markers not ids, and the community (RESTRICT)
  *  before the users who own it, so this is safe at the start of a run and at the end. */
 const cleanup = async () => {
-	const courseIds = `(SELECT id FROM courses WHERE slug IN ('${SLUG}', '${EMPTY_SLUG}'))`;
+	const courseIds = `(SELECT id FROM courses WHERE slug IN ('${SLUG}', '${EMPTY_SLUG}', '${MODULES_SLUG}', '${DRAFTS_SLUG}'))`;
 	const moduleIds = `(SELECT id FROM modules WHERE course_id IN ${courseIds})`;
 	const lessonIds = `(SELECT id FROM lessons WHERE module_id IN ${moduleIds})`;
 
@@ -72,7 +86,9 @@ const cleanup = async () => {
 	await sql(`DELETE FROM enrollments WHERE course_id IN ${courseIds}`);
 	await sql(`DELETE FROM lessons WHERE module_id IN ${moduleIds}`);
 	await sql(`DELETE FROM modules WHERE course_id IN ${courseIds}`);
-	await sql(`DELETE FROM courses WHERE slug IN ('${SLUG}', '${EMPTY_SLUG}')`);
+	await sql(
+		`DELETE FROM courses WHERE slug IN ('${SLUG}', '${EMPTY_SLUG}', '${MODULES_SLUG}', '${DRAFTS_SLUG}')`,
+	);
 	await sql(`DELETE FROM communities WHERE slug = 'leaderboard-community'`);
 	await sql(`DELETE FROM users WHERE lower(email) IN (${ALL_EMAILS})`);
 };
@@ -173,10 +189,11 @@ beforeAll(async () => {
 		type: string,
 		status: string,
 		questions: number,
+		moduleId: number = main.module_,
 	) => {
 		const lesson = (
 			await one(
-				`INSERT INTO lessons (module_id, title, type, status, time_limit_minutes) VALUES (${main.module_}, '${title}', '${type}', '${status}', 30) RETURNING id`,
+				`INSERT INTO lessons (module_id, title, type, status, time_limit_minutes) VALUES (${moduleId}, '${title}', '${type}', '${status}', 30) RETURNING id`,
 			)
 		).id as number;
 		const ids: number[] = [];
@@ -233,6 +250,99 @@ beforeAll(async () => {
 		minutes: 5,
 	});
 
+	/* @info - The module-grouping fixture. The sort orders disagree with the creation
+	 * order on purpose (Week 1 is created first and sorts last, Resources sorts first and
+	 * holds no assessment lesson at all), so a board that ordered cards by id, by title or
+	 * by the order they were created would fail. Week 2 and Week 3 share a sort order,
+	 * which is legal (0 is the column default), so the tie falls to module id and two
+	 * reads must not disagree. */
+	const mods = await mkCourse(MODULES_SLUG, true);
+	modulesCourseId = mods.course;
+	const mkModule = async (course: number, title: string, sortOrder: number) =>
+		(
+			await one(
+				`INSERT INTO modules (course_id, title, sort_order) VALUES (${course}, '${title}', ${sortOrder}) RETURNING id`,
+			)
+		).id as number;
+
+	weekOneModule = await mkModule(modulesCourseId, "Week 1", 3);
+	weekTwoModule = await mkModule(modulesCourseId, "Week 2", 1);
+	weekThreeModule = await mkModule(modulesCourseId, "Week 3", 1);
+	resourcesModule = await mkModule(modulesCourseId, "Resources", 0);
+
+	const w1 = await mkLesson(
+		"Week 1 assessment",
+		"assessment",
+		"published",
+		4,
+		weekOneModule,
+	);
+	weekOneAssessment = w1.lesson;
+	const w2a = await mkLesson(
+		"Week 2 assessment 1",
+		"assessment",
+		"published",
+		2,
+		weekTwoModule,
+	);
+	const w2b = await mkLesson(
+		"Week 2 assessment 2",
+		"assessment",
+		"published",
+		2,
+		weekTwoModule,
+	);
+	weekTwoAssessments = [w2a.lesson, w2b.lesson];
+	weekThreeDraftAssessment = (
+		await mkLesson(
+			"Week 3 draft assessment",
+			"assessment",
+			"draft",
+			3,
+			weekThreeModule,
+		)
+	).lesson;
+	/* @info - A lesson in Resources, so the module exists and still holds no assessment
+	 * lesson: D3 gives it no card. The quiz beside it is the sharper half: it is published
+	 * and it has questions, so a query that joined every lesson type would give Resources
+	 * a card and pull the quiz into the course scope. */
+	await mkLesson("Welcome video", "video", "published", 0, resourcesModule);
+	await mkLesson("Practice quiz", "quiz", "published", 2, resourcesModule);
+
+	/* @info - The all-draft course: one module, one assessment, and it is a draft, so the
+	 * scope is empty while a card still has to come back (D11). */
+	const drafts = await mkCourse(DRAFTS_SLUG, true);
+	draftsCourseId = drafts.course;
+	await mkLesson(
+		"Draft only assessment",
+		"assessment",
+		"draft",
+		3,
+		drafts.module_,
+	);
+
+	await sql(
+		`INSERT INTO enrollments (user_id, course_id, progress_percent) VALUES (${studentId}, ${modulesCourseId}, 50), (${student2Id}, ${modulesCourseId}, 50)`,
+	);
+
+	/* @info - Student 1 closes Week 1's single assessment and Week 2's first of two, so
+	 * they are ranked in Week 1 (1 of 1 at 100%), partial in Week 2 (1 of 2 at 50%) and
+	 * partial over the course (2 of 3, the mean of 100 and 50). Week 1 holding a single
+	 * assessment is the point: nobody can be partial in a module that holds one.
+	 * Student 2 closes nothing, which is the not-started path at both levels. */
+	await seedSession({
+		userId: studentId,
+		lessonId: weekOneAssessment,
+		answers: w1.ids.map((questionId) => ({ questionId, correct: true })),
+		minutes: 10,
+	});
+	await seedSession({
+		userId: studentId,
+		lessonId: w2a.lesson,
+		answers: w2a.ids.map((id, i) => ({ questionId: id, correct: i < 1 })),
+		minutes: 20,
+	});
+
 	const empty = await mkCourse(EMPTY_SLUG, false);
 	emptyCourseId = empty.course;
 
@@ -274,6 +384,11 @@ describe("GET /courses/:courseId/leaderboard — authorization", () => {
 	it("404 for a course that does not exist", async () => {
 		const res = await board(OWNER_AUTH, 999_999_999);
 		expect(res.status).toBe(404);
+	});
+
+	it("401 with no token at all", async () => {
+		const res = await app.request(`/api/v1/courses/${courseId}/leaderboard`);
+		expect(res.status).toBe(401);
 	});
 });
 
@@ -380,7 +495,9 @@ describe("GET /courses/:courseId/leaderboard — the board", () => {
 		const res = await board(OWNER_AUTH, emptyCourseId);
 		expect(res.status).toBe(200);
 		const data = (await bodyOf(res)).data.data;
-		expect(data).toEqual({ assessments: [], rows: [], unranked: [] });
+		/* @info - `modules` is empty too: this fixture course has one module and it
+		 * holds no assessment lesson at all, so D3 gives it no card. */
+		expect(data).toEqual({ assessments: [], rows: [], unranked: [], modules: [] });
 	});
 
 	it("does not count a quiz lesson", async () => {
@@ -415,5 +532,209 @@ describe("GET /courses/:courseId/leaderboard — assessments in scope", () => {
 		expect(ids.sort()).toEqual([assessmentA, assessmentB].sort());
 		expect(ids).not.toContain(draftAssessment);
 		expect(ids).not.toContain(questionlessAssessment);
+	});
+
+	it("returns exactly the assessments the old in-scope predicate returns", async () => {
+		/* @info - AC6, and the reason the widened query is trustworthy: the old predicate
+		 * is written here as the test's own SQL and run against the same data, so the two
+		 * lists are compared against the rule rather than against each other's code. */
+		const oldScope = async (course: number) =>
+			(
+				await sql(`
+					SELECT l.id AS lesson_id
+					FROM lessons l
+					JOIN modules m ON m.id = l.module_id
+					WHERE m.course_id = ${course}
+						AND l.type = 'assessment'
+						AND l.status <> 'draft'
+						AND EXISTS (SELECT 1 FROM quiz_questions q WHERE q.lesson_id = l.id)
+					ORDER BY l.sort_order, l.id
+				`)
+			).map((row) => Number(row.lesson_id));
+
+		for (const course of [
+			courseId,
+			modulesCourseId,
+			draftsCourseId,
+			emptyCourseId,
+		]) {
+			const data = (await bodyOf(await board(OWNER_AUTH, course))).data.data;
+			expect((data.assessments as any[]).map((a) => a.lessonId)).toEqual(
+				await oldScope(course),
+			);
+		}
+	});
+});
+
+/**
+ * @info - The module view (D1-D4): the same response gains `modules`, one entry per
+ * module that holds at least one assessment lesson OF ANY STATUS, ordered by the
+ * module's `sort_order` then its id, titles verbatim, each card carrying the same
+ * `assessments` / `rows` / `unranked` shape the course level does.
+ *
+ * Every test asserts the cards' length before reading one, so the red run fails on the
+ * new assertion rather than on an undefined property.
+ */
+describe("GET /courses/:courseId/leaderboard — the module view", () => {
+	const moduleView = async (course = modulesCourseId) =>
+		(await bodyOf(await board(OWNER_AUTH, course))).data.data;
+
+	it("returns one card per module holding an assessment lesson, in sort_order then id order", async () => {
+		const res = await board(OWNER_AUTH, modulesCourseId);
+		expect(res.status).toBe(200);
+		const data = await moduleView();
+
+		expect(data.modules).toHaveLength(3);
+		expect((data.modules as any[]).map((m) => m.moduleId)).toEqual([
+			weekTwoModule,
+			weekThreeModule,
+			weekOneModule,
+		]);
+		expect((data.modules as any[]).map((m) => m.title)).toEqual([
+			"Week 2",
+			"Week 3",
+			"Week 1",
+		]);
+		/* @info - Resources holds a video and no assessment lesson, and the module
+		 * `mkCourse` made on its own holds nothing: neither gets a card. */
+		expect((data.modules as any[]).map((m) => m.moduleId)).not.toContain(
+			resourcesModule,
+		);
+
+		/* @info - Two modules share a sort order, which is legal, so the tie comes down
+		 * to id and two reads must not disagree. */
+		const second = await moduleView();
+		expect(second.modules).toHaveLength(3);
+		expect((second.modules as any[]).map((m) => m.moduleId)).toEqual(
+			(data.modules as any[]).map((m) => m.moduleId),
+		);
+	});
+
+	it("counts each module's own assessments, and only that module's", async () => {
+		const data = await moduleView();
+
+		expect(data.modules).toHaveLength(3);
+		const [weekTwo, weekThree, weekOne] = data.modules as any[];
+
+		/* @info - Week 1: one assessment, so the one student who sat it is the only
+		 * ranked row on the board, and the other is not started. */
+		expect(weekOne.assessments.map((a: any) => a.lessonId)).toEqual([
+			weekOneAssessment,
+		]);
+		expect(weekOne).toMatchObject({
+			rows: [
+				{
+					rank: 1,
+					userId: studentId,
+					completed: 1,
+					total: 1,
+					averagePercent: 100,
+				},
+			],
+			unranked: [
+				{
+					userId: student2Id,
+					completed: 0,
+					total: 1,
+					averagePercent: null,
+					reason: "not_started",
+				},
+			],
+		});
+
+		/* @info - Week 2: two assessments and only one of them closed, so nobody is
+		 * ranked and the partial student's 50% is the mean of the one they sat. */
+		expect(weekTwo.assessments.map((a: any) => a.lessonId)).toEqual(
+			weekTwoAssessments,
+		);
+		expect(weekTwo).toMatchObject({
+			rows: [],
+			unranked: [
+				{
+					userId: studentId,
+					completed: 1,
+					total: 2,
+					averagePercent: 50,
+					reason: "partial",
+				},
+				{
+					userId: student2Id,
+					completed: 0,
+					total: 2,
+					averagePercent: null,
+					reason: "not_started",
+				},
+			],
+		});
+
+		/* @info - Week 3's only assessment is a draft: the card exists and is empty, and
+		 * its three questions are in nobody's total (AC4). */
+		expect(weekThree).toMatchObject({
+			assessments: [],
+			rows: [],
+			unranked: [],
+		});
+		expect(weekThree.assessments).not.toContain(weekThreeDraftAssessment);
+
+		/* @info - The course level, over the same data: three assessments in scope, the
+		 * partial student at 2 of 3 and a mean of the 100 and the 50. */
+		expect(data.assessments).toHaveLength(3);
+		expect((data.assessments as any[]).map((a) => a.lessonId)).toEqual([
+			weekOneAssessment,
+			...weekTwoAssessments,
+		]);
+		expect(data.rows).toEqual([]);
+		expect(data.unranked).toEqual([
+			expect.objectContaining({
+				userId: studentId,
+				completed: 2,
+				total: 3,
+				averagePercent: 75,
+				reason: "partial",
+			}),
+			expect.objectContaining({
+				userId: student2Id,
+				completed: 0,
+				total: 3,
+				averagePercent: null,
+				reason: "not_started",
+			}),
+		]);
+	});
+
+	it("splits the course level across the cards exactly once each", async () => {
+		const data = await moduleView();
+
+		expect(data.modules).toHaveLength(3);
+		const fromCards = (data.modules as any[]).flatMap((m) =>
+			m.assessments.map((a: any) => a.lessonId),
+		);
+		expect([...fromCards].sort((a, b) => a - b)).toEqual(
+			(data.assessments as any[])
+				.map((a) => a.lessonId)
+				.sort((a: number, b: number) => a - b),
+		);
+		expect(new Set(fromCards).size).toBe(fromCards.length);
+	});
+
+	it("answers the cards when every assessment in the course is a draft", async () => {
+		/* @info - D11: the early return is before the sessions query and still answers
+		 * `modules`, with the card present and empty rather than missing. */
+		const res = await board(OWNER_AUTH, draftsCourseId);
+		expect(res.status).toBe(200);
+		const data = await moduleView(draftsCourseId);
+
+		expect(data).toMatchObject({
+			assessments: [],
+			rows: [],
+			unranked: [],
+		});
+		expect(data.modules).toHaveLength(1);
+		expect((data.modules as any[])[0]).toMatchObject({
+			title: "Module",
+			assessments: [],
+			rows: [],
+			unranked: [],
+		});
 	});
 });

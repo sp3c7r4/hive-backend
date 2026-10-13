@@ -11,6 +11,7 @@ import {
 import { isGoogleDriveLink } from "@/helpers/google-drive.helper";
 import type { IAuthData } from "@/interfaces/auth/auth.interface";
 import {
+	type LeaderboardModule,
 	type LeaderboardSession,
 	type LeaderboardStudent,
 	rankLeaderboard,
@@ -196,47 +197,114 @@ export class CourseService {
 	 * (submitted, or past the deadline): autosave writes real `quiz_attempts` rows
 	 * while a student is still answering, so an open attempt must not be graded
 	 * into a rank.
+	 *
+	 * The module view (D1) is the same board narrowed to one module and comes back in
+	 * the same response as `modules`. One widened query reads every assessment lesson of
+	 * the course with its module and its authored-question count, so the "has questions"
+	 * flag and the number a session is scored out of are the same read, and the in-scope
+	 * rule below is exactly the old predicate computed in memory (D10). Draft lessons are
+	 * read too, because a module whose only assessment is a draft still needs a card.
 	 */
 	leaderboard = async (authData: IAuthData, courseId: number) => {
 		await this.assertOwnedCourse(courseId, authData);
 		const db = getDb();
 		const id = Number(courseId);
 
-		const assessmentRows = await db.execute(sql`
-			SELECT l.id AS lesson_id, l.title
+		const lessonRows = await db.execute(sql`
+			SELECT l.id AS lesson_id, l.title AS lesson_title, l.status AS lesson_status,
+				l.sort_order AS lesson_sort_order,
+				m.id AS module_id, m.title AS module_title, m.sort_order AS module_sort_order,
+				count(q.id)::int AS question_count
 			FROM lessons l
 			JOIN modules m ON m.id = l.module_id
+			LEFT JOIN quiz_questions q ON q.lesson_id = l.id
 			WHERE m.course_id = ${id}
 				AND l.type = 'assessment'
-				AND l.status <> 'draft'
-				AND EXISTS (SELECT 1 FROM quiz_questions q WHERE q.lesson_id = l.id)
-			ORDER BY l.sort_order, l.id
+			GROUP BY l.id, l.title, l.status, l.sort_order,
+				m.id, m.title, m.sort_order
+			ORDER BY m.sort_order, m.id, l.sort_order, l.id
 		`);
-		const assessments = (assessmentRows.rows as any[]).map((row) => ({
+		const lessons = (lessonRows.rows as any[]).map((row) => ({
 			lessonId: Number(row.lesson_id),
-			title: row.title as string | null,
+			title: row.lesson_title as string | null,
+			status: row.lesson_status as string,
+			sortOrder: Number(row.lesson_sort_order),
+			moduleId: Number(row.module_id),
+			moduleTitle: row.module_title as string,
+			moduleSortOrder: Number(row.module_sort_order),
+			questionCount: Number(row.question_count),
 		}));
+
+		/* @info - The old predicate, in memory: published and it has a question. A
+		 * question-less assessment can never be taken, so requiring one would make the
+		 * board unreachable for everyone. The course-level list keeps its long-standing
+		 * order (lesson sort order, then lesson id), which is not the module-major order
+		 * the cards use. */
+		const assessments = lessons
+			.filter(
+				(lesson) => lesson.status !== "draft" && lesson.questionCount > 0,
+			)
+			.sort((a, b) => a.sortOrder - b.sortOrder || a.lessonId - b.lessonId)
+			.map((lesson) => ({ lessonId: lesson.lessonId, title: lesson.title }));
+		const totals = new Map(lessons.map((l) => [l.lessonId, l.questionCount]));
+
+		/* @info - D3/D4: a module gets a card when it holds at least one assessment lesson
+		 * of any status, ordered by the module's sort_order then its id. Duplicate sort
+		 * orders are legal (0 is the column default), so the id decides the tie. */
+		const moduleCards: Array<{
+			moduleId: number;
+			title: string;
+			sortOrder: number;
+			lessonIds: Set<number>;
+		}> = [];
+		const cardByModule = new Map<number, (typeof moduleCards)[number]>();
+		for (const lesson of lessons) {
+			let card = cardByModule.get(lesson.moduleId);
+			if (!card) {
+				card = {
+					moduleId: lesson.moduleId,
+					title: lesson.moduleTitle,
+					sortOrder: lesson.moduleSortOrder,
+					lessonIds: new Set<number>(),
+				};
+				cardByModule.set(lesson.moduleId, card);
+				moduleCards.push(card);
+			}
+			card.lessonIds.add(lesson.lessonId);
+		}
+		moduleCards.sort(
+			(a, b) => a.sortOrder - b.sortOrder || a.moduleId - b.moduleId,
+		);
+
+		/* @info - One builder for both paths, so an empty scope and a full one cannot
+		 * disagree about a card's shape. `rankLeaderboard` already answers empty lists for
+		 * an empty assessment list, which is the draft-only module's case. */
+		const withModuleBoards = (
+			forStudents: LeaderboardStudent[],
+		): LeaderboardModule[] =>
+			moduleCards.map((card) => {
+				const cardAssessments = assessments.filter((assessment) =>
+					card.lessonIds.has(assessment.lessonId),
+				);
+				return {
+					moduleId: card.moduleId,
+					title: card.title,
+					assessments: cardAssessments,
+					...rankLeaderboard({ assessments: cardAssessments, students: forStudents }),
+				};
+			});
+
 		if (assessments.length === 0) {
 			/* @info - No assessments in scope is not an error: the tab has an empty
-			 * state and the response says so in the same shape. */
-			return { assessments: [], rows: [], unranked: [] };
+			 * state and the response says so in the same shape, cards included (D11). No
+			 * students are read here, and every card is empty by definition. */
+			return {
+				assessments: [],
+				rows: [],
+				unranked: [],
+				modules: withModuleBoards([]),
+			};
 		}
-
-		const questionRows = await db.execute(sql`
-			SELECT lesson_id, count(*)::int AS total
-			FROM quiz_questions
-			WHERE lesson_id IN (${sql.join(
-				assessments.map((a) => sql`${a.lessonId}`),
-				sql`, `,
-			)})
-			GROUP BY lesson_id
-		`);
-		const totals = new Map(
-			(questionRows.rows as any[]).map((row) => [
-				Number(row.lesson_id),
-				Number(row.total),
-			]),
-		);
 
 		const enrollmentRows = await db.execute(sql`
 			SELECT u.id AS user_id, u.first_name, u.last_name
@@ -316,6 +384,7 @@ export class CourseService {
 		return {
 			assessments,
 			...rankLeaderboard({ assessments, students }),
+			modules: withModuleBoards(students),
 		};
 	};
 

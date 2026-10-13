@@ -12,6 +12,11 @@
  * skip the hard one" would otherwise be a winning strategy. A student who took
  * every assessment and scored nothing IS ranked, last — the attempt was made.
  *
+ * A student who closed SOME of the scope still carries a number, the mean of the
+ * assessments they did close, but they stay in the unranked list and that list is
+ * ordered by coverage before score: the partial number informs, it does not compete
+ * with a student who sat everything.
+ *
  * `averagePercent` is deliberately a MEAN. The certificate gate asks a different
  * question and answers it with the worst quiz score, so the two numbers can
  * disagree for the same student; the screen must not present them as the same
@@ -55,7 +60,24 @@ export interface LeaderboardUnranked {
 	name: string;
 	completed: number;
 	total: number;
+	/** @info - The mean of the percents they closed, or null when they closed none.
+	 *  Never 0 for "no attempts": 0% is a real score, and the two must not read alike. */
+	averagePercent: number | null;
 	reason: "partial" | "not_started";
+}
+
+/**
+ * @info - One module's board for the module view (D1): the same three lists the course
+ * level carries, narrowed to that module's assessments. A module appears here when it
+ * holds at least one assessment lesson of any status, so a module whose only assessment
+ * is a draft comes back with empty lists rather than being missing (D3).
+ */
+export interface LeaderboardModule {
+	moduleId: number;
+	title: string;
+	assessments: LeaderboardAssessment[];
+	rows: LeaderboardRow[];
+	unranked: LeaderboardUnranked[];
 }
 
 export interface LeaderboardResult {
@@ -67,6 +89,31 @@ export interface LeaderboardResult {
  *  of authored questions rather than the number answered. */
 const percent = (correct: number, total: number): number =>
 	total > 0 ? Math.round((correct / total) * 100) : 0;
+
+/**
+ * @info - The mean of the per-assessment percentages, each rounded the way the screen
+ * prints it. Rounding the raw fractions first would let a row's average disagree with
+ * the mean of the numbers shown beside it (two sessions of 1 of 8 and 3 of 8 are 13%
+ * and 38%, whose mean is 26, where the raw fractions average to 25).
+ *
+ * One copy on purpose: the ranked rows and the unranked entries must not be able to
+ * drift into different maths. Callers pass at least one session, and the guard keeps
+ * the division total for the empty case rather than returning NaN.
+ */
+const meanPercent = (sessions: LeaderboardSession[]): number =>
+	sessions.length === 0
+		? 0
+		: Math.round(
+				sessions.reduce(
+					(sum, session) => sum + percent(session.correct, session.total),
+					0,
+				) / sessions.length,
+			);
+
+/** @info - End to end time over the sessions given, using the same rule the ranked
+ *  rows use, so the two lists cannot measure time differently. */
+const totalSeconds = (sessions: LeaderboardSession[]): number =>
+	sessions.reduce((sum, session) => sum + secondsTaken(session), 0);
 
 /**
  * @info - How long the attempt took, end to end. An attempt that ran out of time
@@ -95,6 +142,9 @@ export const rankLeaderboard = ({
 
 	const rows: LeaderboardRow[] = [];
 	const unranked: LeaderboardUnranked[] = [];
+	/* @info - Time is needed to order the unranked list but is deliberately not part of
+	 * its DTO, so it is kept beside the list rather than on the entries. */
+	const unrankedSeconds = new Map<number, number>();
 
 	for (const student of students) {
 		const inScope = student.sessions.filter((session) =>
@@ -112,17 +162,16 @@ export const rankLeaderboard = ({
 				name: student.name,
 				completed,
 				total: assessments.length,
+				averagePercent: completed === 0 ? null : meanPercent(inScope),
 				reason: completed === 0 ? "not_started" : "partial",
 			});
+			unrankedSeconds.set(student.userId, totalSeconds(inScope));
 			continue;
 		}
 
-		const percents = inScope.map((session) =>
-			percent(session.correct, session.total),
-		);
-		const averagePercent = Math.round(
-			percents.reduce((sum, value) => sum + value, 0) / percents.length,
-		);
+		/* @info - A ranked student has one closed session on every assessment in scope,
+		 * so `inScope` is never empty on this path. */
+		const averagePercent = meanPercent(inScope);
 
 		rows.push({
 			rank: 0,
@@ -131,10 +180,7 @@ export const rankLeaderboard = ({
 			averagePercent,
 			completed,
 			total: assessments.length,
-			totalTimeSeconds: inScope.reduce(
-				(sum, session) => sum + secondsTaken(session),
-				0,
-			),
+			totalTimeSeconds: totalSeconds(inScope),
 		});
 	}
 
@@ -151,10 +197,21 @@ export const rankLeaderboard = ({
 		row.rank = index + 1;
 	});
 
-	/* @info - The unranked list is a "who is missing what" list, so most-covered
-	 * first, then by name for a stable order. */
+	/* @info - Coverage first, because this is a "who is missing what" list and the ladder
+	 * reads better than a scoreboard nobody qualified for; then the score, then the time
+	 * they took, then the name and the id so two identical runs cannot reshuffle.
+	 *
+	 * A null average is treated as the lowest score. It only occurs when nothing was
+	 * closed, which always sits in the lowest coverage group, so within a group of equal
+	 * coverage it never competes against a real number. */
 	unranked.sort(
-		(a, b) => b.completed - a.completed || a.name.localeCompare(b.name),
+		(a, b) =>
+			b.completed - a.completed ||
+			(b.averagePercent ?? -1) - (a.averagePercent ?? -1) ||
+			(unrankedSeconds.get(a.userId) ?? 0) -
+				(unrankedSeconds.get(b.userId) ?? 0) ||
+			a.name.localeCompare(b.name) ||
+			a.userId - b.userId,
 	);
 
 	return { rows, unranked };
