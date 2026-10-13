@@ -380,7 +380,9 @@ describe("GET /courses/:courseId/leaderboard — the board", () => {
 		const res = await board(OWNER_AUTH, emptyCourseId);
 		expect(res.status).toBe(200);
 		const data = (await bodyOf(res)).data.data;
-		expect(data).toEqual({ assessments: [], rows: [], unranked: [] });
+		/* @info - `modules` is empty too: this fixture course has one module and it
+		 * holds no assessment lesson at all, so D3 gives it no card. */
+		expect(data).toEqual({ assessments: [], rows: [], unranked: [], modules: [] });
 	});
 
 	it("does not count a quiz lesson", async () => {
